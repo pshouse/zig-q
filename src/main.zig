@@ -10,10 +10,31 @@ pub fn main() !void {
     const stdout_file = std.io.getStdOut().writer();
     var bw = std.io.bufferedWriter(stdout_file);
     // const stdout = bw.writer();
-
+    var mySq = RndByteSq.init(0);
+    while (true) {
+        _ = mySq.next();
     
+    }
     try bw.flush(); // don't forget to flush!
 }
+const RndByteSq = struct {
+    seed: u12,
+    n: u12,
+
+    pub fn init(start_seed: u12) RndByteSq {
+        return .{
+            .seed = start_seed,
+            .n = 0,
+        };
+    }
+    pub fn next(self: *RndByteSq) u8 {
+        var i: u12 = self.seed +% self.n;
+        var result: u8 = byteSq[i];
+        self.n +%= 1;
+        print("next({}): {}", .{i,result});
+        return result;
+    }
+};
 pub fn print(comptime fmt: []const u8, args: anytype) void {
     std.debug.print(fmt, args);
     std.debug.print("\n", .{});
@@ -25,7 +46,7 @@ test "simple test" {
     try std.testing.expectEqual(@as(i32, 42), list.pop());
 }
 
-const byteSq = []u8{
+const byteSq = [_]u8{
     0x49, 0xab, 0x90, 0x18, 0xd6, 0xed, 0xcd, 0x42, 0x39, 0xfc, 0xe2, 0x83, 0xdf, 0xd9, 0x61, 0x41,
     0x4b, 0xb2, 0xcf, 0xda, 0x25, 0xee, 0x17, 0x86, 0xdc, 0x1c, 0x52, 0x6d, 0xd6, 0x1a, 0xaa, 0xa5,
     0x9a, 0x92, 0xe7, 0x19, 0x03, 0x6d, 0xd4, 0x4d, 0x5f, 0x9c, 0x83, 0x82, 0xa6, 0x9f, 0xc3, 0x7d,
