@@ -18,20 +18,36 @@ pub fn main() !void {
     var bw = std.io.bufferedWriter(stdout_file);
     // const stdout = bw.writer();
     var mySq = RndByteSq.init(0);
-    const myTarget = 3;
+    // const myTarget = 18;
     var d6 = D.init(6);
     var i: usize = 0;
-    var myRoll = Throw{.n_times = 3};
+    var myRoll = Throw{.n_times = 4, .drop = Drop.L};
+    
+    var buffer: [6]Throw = undefined;
+    var myRolls = List(Throw){
+        .items = &buffer,
+        .len = 0,
+    };
 
-    while (myTarget != myRoll.sum) {
+    while ( myRolls.len < 6 ) {
         // var throw = ;
         myRoll.sum = 0;
         d6.roll(&mySq, &myRoll);
         // getRnd(&mySq, 6);
         i += 1;
         print("myRoll {}: {}", .{i, myRoll.sum});
+        if (myRoll.sum > 7) {
+            myRolls.items[myRolls.len] = myRoll;
+            myRolls.len += 1;
+        }
     }
     try bw.flush(); // don't forget to flush!
+}
+fn List(comptime T: type) type {
+    return struct {
+        items: []T,
+        len: usize,
+    };
 }
 pub const D = struct {
     sides: u8,
