@@ -8,12 +8,8 @@
 const std = @import("std");
 
 pub fn main() !void {
-    // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
     print("All your {s} are belong to us.", .{"die"});
 
-    // stdout is for the actual output of your application, for example if you
-    // are implementing gzip, then only the compressed bytes should be sent to
-    // stdout, not any debugging messages.
     const stdout_file = std.io.getStdOut().writer();
     var bw = std.io.bufferedWriter(stdout_file);
     const stdout = bw.writer();
@@ -31,10 +27,8 @@ pub fn main() !void {
     };
 
     while ( myRolls.len < 6 ) {
-        // var throw = ;
         myRoll.sum = 0;
         d6.roll(&mySq, &myRoll);
-        // getRnd(&mySq, 6);
         i += 1;
         print("myRoll {}: {}", .{i, myRoll.sum});
         if (myRoll.sum > 7) {
@@ -42,13 +36,74 @@ pub fn main() !void {
             myRolls.len += 1;
         }
     }
-    try stdout.print("You rolled ", .{});
+    try stdout.print("You rolled: ", .{});
 
-    for (myRolls.items) |value| {
-        try stdout.print("{any} ", .{value.sum});
+    for (myRolls.items) |value, index| {
+        try stdout.print("({}) {any}", .{index+1, value.sum});
+        if (index < myRolls.items.len-1) {
+            try stdout.print(", ",.{});
+        }
     }
+
+    try stdout.print(".\n",.{});
+    try stdout.print("Choose a roll for STR: ", .{});
+    try bw.flush();
+    
+    const c = try choose(&myRolls);
+    try stdout.print("Your STR is now {}.", .{c.sum});
+    try bw.flush();
+    
     try bw.flush(); // don't forget to flush!
 }
+fn choose(list: *List(Throw)) !Throw {
+    const out = std.io.getStdOut();
+    var bw = std.io.bufferedWriter(out);
+    const in = std.io.getStdIn();
+    var rd = in.reader();
+
+    const max_choice = list.items.len;
+    // print("max_choice: {}", .{max_choice});
+    var buff: [10]u8 = undefined;
+    while (true) {    
+        const input = while (true) break nextLine(rd, &buff) catch continue else unreachable;
+        if (input) |value| {
+            // print("input: {s}",.{value});
+            const a = std.fmt.parseInt(u8, value, 10)
+                catch |err| switch(err) {
+                    error.Overflow => {
+                            try out.writeAll("Please enter a small positive number\n");
+                            try bw.flush();
+                            continue;
+                    },
+                    error.InvalidCharacter => {
+                            try out.writeAll("Please enter a valid number\n");
+                            try bw.flush();
+                            continue;
+                    },
+                };
+            if (a<1 or a>max_choice) {
+                try out.writer().print("Please enter a number between 1 and {}\n", .{max_choice});
+                try bw.flush();
+                continue;    
+            }
+            return list.items[a-1];
+        }
+    }
+}
+fn nextLine(reader: anytype, buffer: []u8) !?[]const u8 {
+    var line = (try reader.readUntilDelimiterOrEof(
+        buffer,
+        '\n',
+    )) orelse return null;
+    // print("line: {s}", .{line});
+    // trim annoying windows-only carriage return character
+    if (@import("builtin").os.tag == .windows) {
+        return std.mem.trimRight(u8, line, "\r");
+    } else {
+        return line;
+    }
+}
+
 fn List(comptime T: type) type {
     return struct {
         items: []T,
