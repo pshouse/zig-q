@@ -1,3 +1,10 @@
+// simple
+// unexpected
+// concrete
+// credible
+// emotion
+// story
+
 const std = @import("std");
 
 pub fn main() !void {
@@ -11,16 +18,18 @@ pub fn main() !void {
     var bw = std.io.bufferedWriter(stdout_file);
     // const stdout = bw.writer();
     var mySq = RndByteSq.init(0);
-    const myTarget = 19;
-    var myRoll: u64 = 0;
+    const myTarget = 3;
     var d6 = D.init(6);
     var i: usize = 0;
+    var myRoll = Throw{.n_times = 3};
 
-    while (myTarget != myRoll) {
-        myRoll = d6.roll(&mySq, 3);
+    while (myTarget != myRoll.sum) {
+        // var throw = ;
+        myRoll.sum = 0;
+        d6.roll(&mySq, &myRoll);
         // getRnd(&mySq, 6);
         i += 1;
-        print("myRoll {}: {}", .{i, myRoll});
+        print("myRoll {}: {}", .{i, myRoll.sum});
     }
     try bw.flush(); // don't forget to flush!
 }
@@ -34,19 +43,74 @@ pub const D = struct {
         };
     }
 
-    pub fn roll(self: *D, gen: *RndByteSq, n_times: u64) u64 {
+    pub fn roll(self: *D, gen: *RndByteSq, throw: *Throw) void {
         var i: usize = 0;
-        var result: u64 = 0;
+        //var result: u64 = 0;
+        // var throw = Throw{};
 
-        while (i<n_times) {
+        while (i<throw.n_times) {
             const r = getRnd(gen, self.sides);
             print("roll {}: {}", .{i+1,r});
-            result += r;
+            //throw.result += r;
+            throw.append(r);
             i+=1;
         }
-        return result;
+        
+        throw.sum += throw.b;
+
+        if (throw.drop) | value | {
+            switch (value) {
+                Drop.L => {
+
+                    throw.sum -= throw.min;
+                }, 
+                Drop.H => {
+                    throw.sum -= throw.max;
+                },
+            }
+        }
+        
+       // return throw;
     }
 };
+const Drop = enum {
+    L,
+    H,
+};
+pub const Throw = struct {
+    n_times: u64 = 1,
+    b: u64 = 0,
+    drop: ?Drop = null,
+    i: u12 = 0,
+    results: [4096]u64 = .{0}**4096,
+    min: u64 = 0,
+    max: u64 = 0,
+    sum: u64 = 0,
+
+    // pub fn init() *Throw {
+    //     return .{
+    //         .i,
+    //         .result,
+    //         .min,
+    //         .max,
+    //     };
+    // }
+    pub fn append(self: *Throw, result: u64) void {
+        self.results[self.i] = result;
+        self.sum += result;
+        if (self.i == 0) {
+            if (result < self.min) {
+                self.min = result;
+            }
+            if (result > self.max) {
+                self.max = result;
+            }
+        }
+         
+        self.i +%= 1; 
+    }
+};
+
 pub fn getRnd(gen: *RndByteSq, d: u8) u64 {
     // var i: usize = 0;
     // var result: u64 = 0;
