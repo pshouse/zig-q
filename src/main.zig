@@ -11,34 +11,83 @@ pub fn main() !void {
     var bw = std.io.bufferedWriter(stdout_file);
     // const stdout = bw.writer();
     var mySq = RndByteSq.init(0);
-    while (true) {
-        _ = mySq.next();
-    
+    const myTarget = 19;
+    var myRoll: u64 = 0;
+    var d6 = D.init(6);
+    var i: usize = 0;
+
+    while (myTarget != myRoll) {
+        myRoll = d6.roll(&mySq, 3);
+        // getRnd(&mySq, 6);
+        i += 1;
+        print("myRoll {}: {}", .{i, myRoll});
     }
     try bw.flush(); // don't forget to flush!
 }
+pub const D = struct {
+    sides: u8,
+
+    pub fn init(n_sides: u8) D {
+        return .{
+            .sides = n_sides,
+
+        };
+    }
+
+    pub fn roll(self: *D, gen: *RndByteSq, n_times: u64) u64 {
+        var i: usize = 0;
+        var result: u64 = 0;
+
+        while (i<n_times) {
+            const r = getRnd(gen, self.sides);
+            print("roll {}: {}", .{i+1,r});
+            result += r;
+            i+=1;
+        }
+        return result;
+    }
+};
+pub fn getRnd(gen: *RndByteSq, d: u8) u64 {
+    // var i: usize = 0;
+    // var result: u64 = 0;
+    const rndByteSize = @bitSizeOf(@TypeOf(byteSq[0]));
+    const fullByte = 1 << rndByteSize;
+    // print("fullByte: {}", .{fullByte});
+    const rndByte = gen.next();
+    const unit = @intToFloat(f64, rndByte) / fullByte;
+    // print("unit: {}", .{unit});
+    const rndNum = d - @floatToInt(u8, unit * @intToFloat(f64, d));
+    
+    return rndNum;
+}
+
 const RndByteSq = struct {
     seed: u12,
-    n: u12,
+    offset: u12,
+    n: u64,
 
     pub fn init(start_seed: u12) RndByteSq {
         return .{
             .seed = start_seed,
+            .offset = 0,
             .n = 0,
         };
     }
     pub fn next(self: *RndByteSq) u8 {
-        var i: u12 = self.seed +% self.n;
+        var i: u12 = self.seed +% self.offset;
         var result: u8 = byteSq[i];
         self.n +%= 1;
-        print("next({}): {}", .{i,result});
+        self.offset +%= 1;
+        print("n: {}, next({}): {}", .{ self.n, i, result });
         return result;
     }
 };
+
 pub fn print(comptime fmt: []const u8, args: anytype) void {
     std.debug.print(fmt, args);
     std.debug.print("\n", .{});
 }
+
 test "simple test" {
     var list = std.ArrayList(i32).init(std.testing.allocator);
     defer list.deinit(); // try commenting this out and see if zig detects the memory leak!
