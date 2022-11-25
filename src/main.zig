@@ -16,12 +16,13 @@ pub fn main() !void {
     // stdout, not any debugging messages.
     const stdout_file = std.io.getStdOut().writer();
     var bw = std.io.bufferedWriter(stdout_file);
-    // const stdout = bw.writer();
+    const stdout = bw.writer();
     var mySq = RndByteSq.init(0);
     // const myTarget = 18;
     var d6 = D.init(6);
     var i: usize = 0;
-    var myRoll = Throw{.n_times = 4, .drop = Drop.L};
+    var results_buffer: [24]u64 = undefined;
+    var myRoll = Throw{.n_times = 4, .drop = Drop.L, .results = &results_buffer};
     
     var buffer: [6]Throw = undefined;
     var myRolls = List(Throw){
@@ -40,6 +41,11 @@ pub fn main() !void {
             myRolls.items[myRolls.len] = myRoll;
             myRolls.len += 1;
         }
+    }
+    try stdout.print("You rolled ", .{});
+
+    for (myRolls.items) |value| {
+        try stdout.print("{any} ", .{value.sum});
     }
     try bw.flush(); // don't forget to flush!
 }
@@ -99,19 +105,11 @@ pub const Throw = struct {
     b: u64 = 0,
     drop: ?Drop = null,
     i: u12 = 0,
-    results: [4096]u64 = .{0}**4096,
+    results: []u64 ,
     min: u64 = 0,
     max: u64 = 0,
     sum: u64 = 0,
-
-    // pub fn init() *Throw {
-    //     return .{
-    //         .i,
-    //         .result,
-    //         .min,
-    //         .max,
-    //     };
-    // }
+    
     pub fn append(self: *Throw, result: u64) void {
         self.results[self.i] = result;
         self.sum += result;
