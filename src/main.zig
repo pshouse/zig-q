@@ -75,10 +75,11 @@ pub const D = struct {
         throw.sum += throw.b;
 
         if (throw.drop) | value | {
+            print("throw.drop: {}",.{value});
             switch (value) {
                 Drop.L => {
-
                     throw.sum -= throw.min;
+                    print("dropped: {}", .{throw.min});
                 }, 
                 Drop.H => {
                     throw.sum -= throw.max;
@@ -115,12 +116,14 @@ pub const Throw = struct {
         self.results[self.i] = result;
         self.sum += result;
         if (self.i == 0) {
-            if (result < self.min) {
-                self.min = result;
-            }
-            if (result > self.max) {
-                self.max = result;
-            }
+            self.min = result;
+            self.max = result;
+        }
+        if (result < self.min) {
+            self.min = result;    
+        }
+        if (result > self.max) {
+            self.max = result;
         }
          
         self.i +%= 1; 
