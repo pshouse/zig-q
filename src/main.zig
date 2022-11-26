@@ -6,9 +6,43 @@
 // story
 
 const std = @import("std");
+var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+const allocator = gpa.allocator();
 
 pub fn main() !void {
     print("All your {s} are belong to us.", .{"die"});
+    var myAttributes = std.ArrayList(Attribute).init(allocator);
+    defer myAttributes.deinit();
+    
+    var str = Attribute{.abbr="STR", .stat=0};
+    const strength = "strength";
+    str.name=&strength[0];
+    try myAttributes.append(str);
+    
+    var dex = Attribute{.abbr="DEX", .stat=0};
+    const dexterity = "dexterity";
+    dex.name=&dexterity[0];
+    try myAttributes.append(dex);
+    
+    var con = Attribute{.abbr="CON", .stat=0};
+    const constitution = "constitution";
+    con.name=&constitution[0];
+    try myAttributes.append(con);
+    
+    var int = Attribute{.abbr="INT", .stat=0};
+    const intelligence = "intelligence";
+    int.name=&intelligence[0];
+    try myAttributes.append(int);
+
+    var wis = Attribute{.abbr="WIS", .stat=0};
+    const wisdom = "wisdom";
+    wis.name=&wisdom[0];
+    try myAttributes.append(wis);
+    
+    var cha = Attribute{.abbr="CHA", .stat=0};
+    const charisma = "charisma";
+    cha.name=&charisma[0];
+    try myAttributes.append(cha);
 
     const stdout_file = std.io.getStdOut().writer();
     var bw = std.io.bufferedWriter(stdout_file);
@@ -46,15 +80,34 @@ pub fn main() !void {
     }
 
     try stdout.print(".\n",.{});
-    try stdout.print("Choose a roll for STR: ", .{});
     try bw.flush();
+    var j: usize = 0;
+    while (j < myAttributes.items.len) {
+        var myAttr = &myAttributes.items[j];
+        try stdout.print("Choose a roll for {s}: ", .{myAttr.abbr[0..]});   
+        try bw.flush();
+        const c = try choose(&myRolls);
+
+        myAttr.stat = c.sum;
+        j+=1;
+        try stdout.print("Your {s} is now {}.\n", .{myAttr.abbr[0..],c.sum});
+        try bw.flush();
+    }
     
-    const c = try choose(&myRolls);
-    try stdout.print("Your STR is now {}.", .{c.sum});
-    try bw.flush();
+    print("myAttributes:", .{});
+    for (myAttributes.toOwnedSlice()) |myAttr| {
+        print("{s}: {any}", .{myAttr.abbr[0..], myAttr.stat});
     
+    }
     try bw.flush(); // don't forget to flush!
 }
+
+const Attribute = struct {
+    name: *const [20]u8 = undefined,
+    abbr: *const [3]u8,
+    stat: u64,
+};
+
 fn choose(list: *List(Throw)) !Throw {
     const out = std.io.getStdOut();
     var bw = std.io.bufferedWriter(out);
@@ -86,6 +139,11 @@ fn choose(list: *List(Throw)) !Throw {
                 try bw.flush();
                 continue;    
             }
+            if (list.items[a-1].assigned) {
+                try out.writer().print("({}) {} is already assigned. Choose another.\n", .{a, list.items[a-1].sum});
+                continue;
+            }
+            list.items[a-1].assigned = true;
             return list.items[a-1];
         }
     }
@@ -164,6 +222,7 @@ pub const Throw = struct {
     min: u64 = 0,
     max: u64 = 0,
     sum: u64 = 0,
+    assigned: bool = false,
     
     pub fn append(self: *Throw, result: u64) void {
         self.results[self.i] = result;
@@ -218,10 +277,14 @@ const RndByteSq = struct {
         return result;
     }
 };
-
+// const debug = false;
+const debug = true;
 pub fn print(comptime fmt: []const u8, args: anytype) void {
-    std.debug.print(fmt, args);
-    std.debug.print("\n", .{});
+    if (debug) {
+        std.debug.print(fmt, args);
+        std.debug.print("\n", .{});
+    }
+    
 }
 
 test "simple test" {
