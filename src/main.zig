@@ -210,6 +210,12 @@ pub fn main() !void {
     barb.name = &barb_name[0];
     try classes.append(barb);
 
+    const d10 = D{.sides=10};
+    var ftr = Class{.hd=d10};
+    const ftr_name = "fighter     ";
+    ftr.name = &ftr_name[0];
+    try classes.append(ftr);
+    
     const d8 = D{.sides=8};
     var bard = Class{.hd=d8};
     const bard_name = "bard     ";
