@@ -205,10 +205,16 @@ pub fn main() !void {
 
     const d12 = D{.sides=12};
     var barb = Class{.hd=d12};
-    const barb_name = "barbarian";
+    const barb_name = "barbarian     ";
     barb.name = &barb_name[0];
     try classes.append(barb);
 
+    const d8 = D{.sides=8};
+    var bard = Class{.hd=d8};
+    const bard_name = "bard     ";
+    bard.name = &bard_name[0];
+    try classes.append(bard);
+    
     const choose_class = Choose(Class);
     
     for (classes.items) |value, index| {
