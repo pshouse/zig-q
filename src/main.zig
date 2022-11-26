@@ -78,7 +78,6 @@ pub fn main() !void {
             try stdout.print(", ",.{});
         }
     }
-
     try stdout.print(".\n",.{});
     try bw.flush();
     var j: usize = 0;
@@ -133,7 +132,7 @@ pub fn main() !void {
     try drb_bonuses.append(str_bonus_2);
     
     var dwf = Race {.speed = 25};
-    const dwf_name = "dwarf";
+    const dwf_name = "dwarf     ";
     dwf.name = &dwf_name[0];
 
     var dwf_bonuses = std.ArrayList(Attribute).init(allocator);
@@ -155,7 +154,7 @@ pub fn main() !void {
     // try dwf_bonuses.append(str_bonus_2);
     
     var elf = Race {.speed = 30};
-    const elf_name = "elf";
+    const elf_name = "elf     ";
     elf.name = &elf_name[0];
 
     var elf_bonuses = std.ArrayList(Attribute).init(allocator);
@@ -176,12 +175,70 @@ pub fn main() !void {
     
     // try dwf_bonuses.append(str_bonus_2);
     
-    char.race = drb;
+    var races = std.ArrayList(Race).init(allocator);
+    try races.append(drb);
+    try races.append(dwf);
+    try races.append(elf);
+
+    for (races.items) |value, index| {
+        try stdout.print("({}) {s}", .{index+1, value.name[0..]});
+        if (index < races.items.len-1) {
+            try stdout.print(", ",.{});
+        }
+    }
+    try stdout.print(".\n",.{});
+    try bw.flush();
+    var k: usize = 0;
+    while (k < 1) {
+        
+        try stdout.print("Choose a race:", .{});   
+        try bw.flush();
+        const c = try choose_race(&races);
+
+        char.race = c;
+        k+=1;
+        try stdout.print("Your {s} is now {s}.\n", .{"race"[0..], c.name});
+        try bw.flush();
+    }
+    
     print("char: {}", .{char});
 
     try bw.flush(); // don't forget to flush!
 }
+fn choose_race(list: *std.ArrayList(Race)) !Race {
+    const out = std.io.getStdOut();
+    var bw = std.io.bufferedWriter(out);
+    const in = std.io.getStdIn();
+    var rd = in.reader();
 
+    const max_choice = list.items.len;
+    var buff: [10]u8 = undefined;
+    while (true) {    
+        const input = while (true) break nextLine(rd, &buff) catch continue else unreachable;
+        if (input) |value| {
+            // print("input: {s}",.{value});
+            const a = std.fmt.parseInt(u8, value, 10)
+                catch |err| switch(err) {
+                    error.Overflow => {
+                            try out.writeAll("Please enter a small positive number\n");
+                            try bw.flush();
+                            continue;
+                    },
+                    error.InvalidCharacter => {
+                            try out.writeAll("Please enter a valid number\n");
+                            try bw.flush();
+                            continue;
+                    },
+                };
+            if (a<1 or a>max_choice) {
+                try out.writer().print("Please enter a number between 1 and {}\n", .{max_choice});
+                try bw.flush();
+                continue;    
+            }
+            return list.items[a-1];
+        }
+    }
+}
 const Attribute = struct {
     name: *const [20]u8 = undefined,
     abbr: *const [3]u8,
