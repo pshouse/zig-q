@@ -99,6 +99,86 @@ pub fn main() !void {
         print("{s}: {any}", .{myAttr.abbr[0..], myAttr.stat});
     
     }
+    var char = Character{};
+    const char_name = "George";
+    char.name = &char_name[0];
+    char.attributes = myAttributes;
+
+    var drb = Race {.speed = 30};
+    const drb_name = "dragonborn";
+    drb.name = &drb_name[0];
+
+    var drb_bonuses = std.ArrayList(Attribute).init(allocator);
+    defer drb_bonuses.deinit();
+    drb.attr_bonuses = drb_bonuses;
+
+    var cha_bonus_1 = Attribute{.abbr="CHA", .stat=1};
+    const charisma_bonus_1 = "charisma_bonus_1";
+    cha_bonus_1.name=&charisma_bonus_1[0];
+    try drb_bonuses.append(cha_bonus_1);
+    
+    var cha_bonus_2 = Attribute{.abbr="CHA", .stat=2};
+    const charisma_bonus_2 = "charisma_bonus_2";
+    cha_bonus_2.name=&charisma_bonus_2[0];
+    //try drb_bonuses.append(cha_bonus_2);
+    
+    var str_bonus_1 = Attribute{.abbr="STR", .stat=1};
+    const strength_bonus_1 = "strength_bonus_1";
+    str_bonus_1.name=&strength_bonus_1[0];
+    // try drb_bonuses.append(str_bonus_1);
+    
+    var str_bonus_2 = Attribute{.abbr="STR", .stat=2};
+    const strength_bonus_2 = "strength_bonus_2";
+    str_bonus_2.name=&strength_bonus_2[0];
+    try drb_bonuses.append(str_bonus_2);
+    
+    var dwf = Race {.speed = 25};
+    const dwf_name = "dwarf";
+    dwf.name = &dwf_name[0];
+
+    var dwf_bonuses = std.ArrayList(Attribute).init(allocator);
+    defer dwf_bonuses.deinit();
+    dwf.attr_bonuses = dwf_bonuses;
+
+    var con_bonus_1 = Attribute{.abbr="CON", .stat=1};
+    const constitution_bonus_1 = "constitution_bonus_1";
+    con_bonus_1.name=&constitution_bonus_1[0];
+    // try dwf_bonuses.append(con_bonus_1);
+    
+    var con_bonus_2 = Attribute{.abbr="CON", .stat=2};
+    const constitution_bonus_2 = "constitution_bonus_2";
+    con_bonus_2.name=&constitution_bonus_2[0];
+    try dwf_bonuses.append(con_bonus_2);
+    
+    // try dwf_bonuses.append(str_bonus_1);
+    
+    // try dwf_bonuses.append(str_bonus_2);
+    
+    var elf = Race {.speed = 30};
+    const elf_name = "elf";
+    elf.name = &elf_name[0];
+
+    var elf_bonuses = std.ArrayList(Attribute).init(allocator);
+    defer elf_bonuses.deinit();
+    elf.attr_bonuses = elf_bonuses;
+
+    var dex_bonus_1 = Attribute{.abbr="DEX", .stat=1};
+    const dexterity_bonus_1 = "dexterity_bonus_1";
+    dex_bonus_1.name=&dexterity_bonus_1[0];
+    // try elf_bonuses.append(dex_bonus_1);
+    
+    var dex_bonus_2 = Attribute{.abbr="DEX", .stat=2};
+    const dexterity_bonus_2 = "dexterity_bonus_2";
+    dex_bonus_2.name=&dexterity_bonus_2[0];
+    try elf_bonuses.append(dex_bonus_2);
+    
+    // try elf_bonuses.append(str_bonus_1);
+    
+    // try dwf_bonuses.append(str_bonus_2);
+    
+    char.race = drb;
+    print("char: {}", .{char});
+
     try bw.flush(); // don't forget to flush!
 }
 
@@ -106,6 +186,19 @@ const Attribute = struct {
     name: *const [20]u8 = undefined,
     abbr: *const [3]u8,
     stat: u64,
+};
+
+pub const Race = struct {
+    name: *const [20]u8 = undefined,
+    attr_bonuses: std.ArrayList(Attribute) = undefined,
+    speed: u8,
+};
+
+pub const Character = struct {
+    name: *const [20]u8 = undefined,
+    attributes: std.ArrayList(Attribute) = undefined,
+    race: Race = undefined,
+    ready: bool = false,
 };
 
 fn choose(list: *List(Throw)) !Throw {
