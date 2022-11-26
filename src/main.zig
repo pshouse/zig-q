@@ -179,27 +179,28 @@ pub fn main() !void {
     try races.append(drb);
     try races.append(dwf);
     try races.append(elf);
-    const choose_race = Choose(Race);
+    const choose_race = Choose(Race, Character);
+    try choose_race.prompt(&races, &char);
 
-    for (races.items) |value, index| {
-        try stdout.print("({}) {s}", .{index+1, value.name[0..]});
-        if (index < races.items.len-1) {
-            try stdout.print(" ",.{});
-        }
-    }
-    try stdout.print("\n",.{});
-    try bw.flush();
-    var k: usize = 0;
-    while (k < 1) {
-        try stdout.print("Choose a race:", .{});   
-        try bw.flush();
-        const c = try choose_race.select(&races);
+    // for (races.items) |value, index| {
+    //     try stdout.print("({}) {s}", .{index+1, value.name[0..]});
+    //     if (index < races.items.len-1) {
+    //         try stdout.print(" ",.{});
+    //     }
+    // }
+    // try stdout.print("\n",.{});
+    // try bw.flush();
+    // var k: usize = 0;
+    // while (k < 1) {
+    //     try stdout.print("Choose a race:", .{});   
+    //     try bw.flush();
+    //     const c = try choose_race.select(&races);
 
-        char.race = c;
-        k+=1;
-        try stdout.print("Your {s} is now {s}.\n", .{"race"[0..], c.name});
-        try bw.flush();
-    }
+    //     char.race = c;
+    //     k+=1;
+    //     try stdout.print("Your {s} is now {s}.\n", .{"race"[0..], c.name});
+    //     try bw.flush();
+    // }
     
     var classes = std.ArrayList(Class).init(allocator);
     defer classes.deinit();
@@ -222,34 +223,46 @@ pub fn main() !void {
     bard.name = &bard_name[0];
     try classes.append(bard);
     
-    const choose_class = Choose(Class);
-    
-    for (classes.items) |value, index| {
-        try stdout.print("({}) {s}", .{index+1, value.name[0..]});
-        if (index < classes.items.len-1) {
-            try stdout.print(" ",.{});
-        }
-    }
-    try stdout.print("\n",.{});
-    try bw.flush();
-    var l: usize = 0;
-    while (l < 1) {
-        try stdout.print("Choose a class:", .{});   
-        try bw.flush();
-        const c = try choose_class.select(&classes);
+    const choose_class = Choose(Class, Character);
+    try choose_class.prompt(&classes, &char);
 
-        char.class = c;
-        l+=1;
-        try stdout.print("Your {s} is now {s}.\n", .{"class"[0..], c.name});
-        try bw.flush();
-    }
+    // for (classes.items) |value, index| {
+    //     try stdout.print("({}) {s}", .{index+1, value.name[0..]});
+    //     if (index < classes.items.len-1) {
+    //         try stdout.print(" ",.{});
+    //     }
+    // }
+    // try stdout.print("\n",.{});
+    // try bw.flush();
+    // var l: usize = 0;
+    // while (l < 1) {
+    //     try stdout.print("Choose a class:", .{});   
+    //     try bw.flush();
+    //     const c = try choose_class.select(&classes);
+
+    //     char.class = c;
+    //     l+=1;
+    //     try stdout.print("Your {s} is now {s}.\n", .{"class"[0..], c.name});
+    //     try bw.flush();
+    // }
     print("char: {}", .{char});
 
     try bw.flush(); // don't forget to flush!
 }
 
-fn Choose(comptime T: type) type {
+fn Choose(comptime T: type, comptime T2: type) type {
     return struct {
+        fn getFieldNameByType() []const u8 {
+            const fields = @typeInfo(T2).Struct.fields;
+            // TODO: why is this inline for not working?
+            // inline for (fields) |field| {
+            //     if (field.field_type == T2) return field.name;
+            // }
+            if (fields[2].field_type == T) return fields[2].name;
+            if (fields[3].field_type == T) return fields[3].name;
+            return "name";
+        }
+        
         fn select(list: *std.ArrayList(T)) !T {
             const out = std.io.getStdOut();
             var bw = std.io.bufferedWriter(out);
@@ -284,6 +297,44 @@ fn Choose(comptime T: type) type {
                 }
             }      
         }
+        fn prompt(list: *std.ArrayList(T), object: *T2) !void {
+            const Self = @This();
+            const out = std.io.getStdOut().writer();
+            var bw = std.io.bufferedWriter(out);
+            // const in = std.io.getStdIn();
+            // var rd = in.reader();
+            // const fields = @typeInfo(T).Struct.fields;
+            // print("field: {}", .{fields[0]});
+            // const field_name = inline for (fields) |field| {
+            //     if (field.field_type == T2) return field.name;
+            // }; 
+            const field_name = comptime getFieldNameByType();
+            try out.print("\nYour {s} options are\n", .{field_name});
+            for (list.items) |value, index| {
+                try out.print("({}) {s}", .{index+1, value.name[0..]});
+                if (index < list.items.len-1) {
+                    try out.print("\n",.{});
+                }
+            }
+            
+            try out.print("\n",.{});
+            try bw.flush();
+            var l: usize = 0;
+            while (l < 1) {
+                try out.print("Choose a {s}:", .{field_name});   
+                try bw.flush();
+                const c = try Self.select(list);
+                // _ = c;
+                // _ = object;
+                print("field_name: {s}", .{field_name});
+                @field(object, field_name) = c;
+                // &object = c;
+                l+=1;
+                try out.print("Your {s} is now {s}\n", .{field_name, c.name});
+                try bw.flush();
+            }
+
+        } 
     };
 }
 
