@@ -199,9 +199,97 @@ pub fn main() !void {
     try choose_class.prompt(&classes, &char);
 
     // print("char: {}", .{char});
+    var world = try World.init(42, allocator);
+    //
+        try world.start(&char);
+        // try stdout.print("Starting . . . {}", .{world});
 
+    //}
     try bw.flush(); // don't forget to flush!
 }
+
+fn make_rect_room(world: *World, x1: u64, y1: u64, w: u64, h: u64) !void {
+    const x2 = x1 + w;
+    const y2 = y1 + h;
+    var x: u64 = 0;
+    var y: u64 = 0;
+
+    while(y<y2) {
+        while(x<x2) {
+            try world.map.put(Loc.init(x,y), std.MultiArrayList(Entity){});
+            x+=1;
+        }
+        y+=1;
+    }
+}
+const Entity = struct {
+    id: u64,
+    name: []const u8 = undefined,
+    loc: *Loc = undefined,
+    movement: u64 = undefined,
+    char: *Character = undefined,
+
+    pub fn init(new_id: u64, new_char: *Character) !Entity {
+        var name_buf: [100]u8 = undefined;
+        const new_name = try std.fmt.bufPrint(&name_buf, "entity_{d}", .{new_id});
+        return .{
+            .id = new_id,
+            .name = new_name,
+           .char = new_char,
+        };
+    }
+};
+
+const World = struct {
+    map: std.AutoHashMap(Loc, std.MultiArrayList(Entity)),
+    seed: u12,
+    rndByteSq: RndByteSq = undefined,
+    entities: std.MultiArrayList(Entity) = undefined,
+
+    pub fn init(s: u12, ally: std.mem.Allocator ) !World {
+        
+        var map = std.AutoHashMap(Loc, std.MultiArrayList(Entity)).init(ally);
+        defer map.deinit();
+        var new_entities = std.MultiArrayList(Entity){};
+        defer new_entities.deinit(ally);
+
+        
+        return .{
+            .map = map,
+            .seed = s,
+            .entities = new_entities,
+
+        };
+    }
+    pub fn place_entity(self: *World, l: Loc,ent: *Entity) !void {
+        var ml = self.map.getEntry(l);
+        try self.map.put(ml, ent);
+    }
+    pub fn start(self: *World, new_char: *Character) !void {
+        self.rndByteSq = RndByteSq.init(self.seed);
+        try make_rect_room( self, 42, 42, 80, 40 );
+        var entity = try Entity.init(self.entities.len, new_char);
+        _=entity;
+    }
+
+};
+const Loc = struct {
+    x: u64,
+    y: u64,
+
+    pub fn init(x0: u64, y0:u64) Loc {
+        return .{
+            .x=x0, .y=y0,
+        };
+    }
+};
+fn dist_sq(p1: Loc, p2: Loc) f64 {
+    return std.math.pow((p1.x - p2.x),2) + std.math.pow((p1.y - p2.y), 2);  
+}
+const Status = enum {
+    exploring,
+    fighting,
+};
 
 fn Choose(comptime T: type, comptime T2: type) type {
     return struct {
@@ -287,26 +375,6 @@ fn Choose(comptime T: type, comptime T2: type) type {
         } 
     };
 }
-const Entity = struct {
-    id: u64,
-    name: []const u8 = undefined,
-
-};
-const World = struct {
-    map: std.AutoHashMap(Loc, std.MultiArrayList(Entity)),
-};
-const Loc = struct {
-    x: u64,
-    y: u64,
-
-};
-fn dist_sq(p1: Loc, p2: Loc) f64 {
-    return std.math.pow((p1.x - p2.x),2) + std.math.pow((p1.y - p2.y), 2);  
-}
-const Status = enum {
-    exploring,
-    fighting,
-};
 
 const Attribute = struct {
     name: []const u8 = undefined,
@@ -505,8 +573,8 @@ const RndByteSq = struct {
         return result;
     }
 };
-// const debug = false;
-const debug = true;
+const debug = false;
+// const debug = true;
 pub fn print(comptime fmt: []const u8, args: anytype) void {
     if (debug) {
         std.debug.print(fmt, args);
