@@ -1,9 +1,3 @@
-// simple
-// unexpected
-// concrete
-// credible
-// emotion
-// story
 
 const std = @import("std");
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -203,7 +197,20 @@ pub fn main() !void {
     //
         try world.start(&char);
         // try stdout.print("Starting . . . {}", .{world});
-
+        var whats_here = world.map.get(Loc.init(49,49));
+        if (whats_here) |value| {
+            try stdout.print("map(49,49): {}\n",.{value});
+            var ent = value.get(0);
+            try stdout.print("map(49,49)[0]: {}\n",.{ent.id});
+            
+        }
+        try stdout.print("world.entities: {}", .{world.entities});
+        var w_ent = world.entities.get(0);
+        try stdout.print("w_ent: {}", .{w_ent.id});
+        var g_l = w_ent.loc;
+        const g_x = g_l.x;
+        try stdout.print("w_ent: {}", .{g_x});
+        
     //}
     try bw.flush(); // don't forget to flush!
 }
@@ -277,7 +284,7 @@ const World = struct {
         var l = Loc.init(49,49);
         try self.place_entity(l, entity);
         entity.loc = &l;
-        std.debug.print("entity: {}",.{entity});
+        // std.debug.print("entity: {}",.{entity});
     }
 
 };
