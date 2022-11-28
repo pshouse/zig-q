@@ -7,7 +7,7 @@
 
 const std = @import("std");
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-const allocator = gpa.allocator();
+var allocator = gpa.allocator();
 
 pub fn main() !void {
     print("All your {s} are belong to us.", .{"die"});
@@ -199,7 +199,7 @@ pub fn main() !void {
     try choose_class.prompt(&classes, &char);
 
     // print("char: {}", .{char});
-    var world = try World.init(42, allocator);
+    var world = try World.init(42);
     //
         try world.start(&char);
         // try stdout.print("Starting . . . {}", .{world});
@@ -246,12 +246,12 @@ const World = struct {
     rndByteSq: RndByteSq = undefined,
     entities: std.MultiArrayList(Entity) = undefined,
 
-    pub fn init(s: u12, ally: std.mem.Allocator ) !World {
+    pub fn init(s: u12) !World {
         
-        var map = std.AutoHashMap(Loc, std.MultiArrayList(Entity)).init(ally);
+        var map = std.AutoHashMap(Loc, std.MultiArrayList(Entity)).init(allocator);
         defer map.deinit();
         var new_entities = std.MultiArrayList(Entity){};
-        defer new_entities.deinit(ally);
+        defer new_entities.deinit(allocator);
 
         
         return .{
@@ -261,15 +261,23 @@ const World = struct {
 
         };
     }
-    pub fn place_entity(self: *World, l: Loc,ent: *Entity) !void {
-        var ml = self.map.getEntry(l);
-        try self.map.put(ml, ent);
+    pub fn place_entity(self: *World, l: Loc,ent: Entity) !void {
+        var ent_list = std.MultiArrayList(Entity){};
+        defer ent_list.deinit(allocator);
+        var gp_result = try self.map.getOrPutValue(l, ent_list);
+        
+        try gp_result.value_ptr.append(allocator, ent);
+        
     }
     pub fn start(self: *World, new_char: *Character) !void {
         self.rndByteSq = RndByteSq.init(self.seed);
         try make_rect_room( self, 42, 42, 80, 40 );
         var entity = try Entity.init(self.entities.len, new_char);
-        _=entity;
+        try self.entities.append(allocator, entity);
+        var l = Loc.init(49,49);
+        try self.place_entity(l, entity);
+        entity.loc = &l;
+        std.debug.print("entity: {}",.{entity});
     }
 
 };
