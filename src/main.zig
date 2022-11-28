@@ -204,12 +204,12 @@ pub fn main() !void {
             try stdout.print("map(49,49)[0]: {}\n",.{ent.id});
             
         }
-        try stdout.print("world.entities: {}", .{world.entities});
+        try stdout.print("world.entities: {}\n", .{world.entities});
         var w_ent = world.entities.get(0);
-        try stdout.print("w_ent: {}", .{w_ent.id});
+        try stdout.print("w_ent: {}\n", .{w_ent});
         var g_l = w_ent.loc;
         const g_x = g_l.x;
-        try stdout.print("w_ent: {}", .{g_x});
+        try stdout.print("w_ent: {}\n", .{g_x});
         
     //}
     try bw.flush(); // don't forget to flush!
@@ -232,7 +232,7 @@ fn make_rect_room(world: *World, x1: u64, y1: u64, w: u64, h: u64) !void {
 const Entity = struct {
     id: u64,
     name: []const u8 = undefined,
-    loc: *Loc = undefined,
+    loc: Loc = undefined,
     movement: u64 = undefined,
     char: *Character = undefined,
 
@@ -283,7 +283,7 @@ const World = struct {
         try self.entities.append(allocator, entity);
         var l = Loc.init(49,49);
         try self.place_entity(l, entity);
-        entity.loc = &l;
+        entity.loc = l;
         // std.debug.print("entity: {}",.{entity});
     }
 
