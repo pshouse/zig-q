@@ -1,36 +1,49 @@
 
 const std = @import("std");
-var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-var allocator = gpa.allocator();
+const Ally = std.mem.Allocator;
+
+fn repl(gpa: Ally) !void {
+    var line_buf = std.ArrayList(u8).init(gpa);
+    defer line_buf.deinit();
+
+    const stdin = std.io.getStdIn().reader();
+    const stdout = std.io.getStdOut().writer();
+
+    while (true) {
+        _ = try stdout.write("> ");
+        stdin.readUntilDelimiterArrayList(&line_buf, '\n', 2*1024) catch |e| {
+            _= try stdout.write("\n");
+            return e;
+        };
+
+        if (line_buf.items.len == 5 and std.mem.eql(u8, line_buf.items, "exit\r")) {
+            _ = try stdout.write("exiting . . .");
+            return;
+        } else {
+            std.debug.print("line_buf: {s}\n", .{line_buf.items});
+        }
+    }
+}
 
 pub fn main() !void {
-    print("All your {s} are belong to us.", .{"die"});
-    var myAttributes = std.ArrayList(Attribute).init(allocator);
-    defer myAttributes.deinit();
-    
-    var str = Attribute{.name="strength",.abbr="STR", .stat=0};
-    try myAttributes.append(str);
-    
-    var dex = Attribute{.name="dexterity", .abbr="DEX", .stat=0};
-    try myAttributes.append(dex);
-    
-    var con = Attribute{.name="constitution", .abbr="CON", .stat=0};
-    try myAttributes.append(con);
-    
-    var int = Attribute{.name="intelligence", .abbr="INT", .stat=0};
-    // const intelligence = ;
-    // int&intelligence[0];
-    try myAttributes.append(int);
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
 
-    var wis = Attribute{.name="wisdom", .abbr="WIS", .stat=0};
-    // const wisdom = ;
-    // wis&wisdom[0];
-    try myAttributes.append(wis);
-    
-    var cha = Attribute{.name="charisma", .abbr="CHA", .stat=0};
-    // const charisma = ;
-    // cha&charisma[0];
-    try myAttributes.append(cha);
+    const allocator = gpa.allocator();
+
+    var world = try World.init(42, allocator);
+
+    print("All your {s} are belong to us.", .{"die"});
+
+    const args = try std.process.argsAlloc(allocator);
+    defer std.process.argsFree(allocator, args);
+
+    std.debug.print("Arguments: {s}\n", .{args});
+    // if (args.len == 1) {
+    //     try repl(allocator);
+
+    // }
+
 
     const stdout_file = std.io.getStdOut().writer();
     var bw = std.io.bufferedWriter(stdout_file);
@@ -41,7 +54,7 @@ pub fn main() !void {
     var i: usize = 0;
     var results_buffer: [24]u64 = undefined;
     var myRoll = Throw{.n_times = 4, .drop = Drop.L, .results = &results_buffer};
-    
+
     var buffer: [6]Throw = undefined;
     var myRolls = List(Throw){
         .items = &buffer,
@@ -69,103 +82,33 @@ pub fn main() !void {
     try stdout.print(".\n",.{});
     try bw.flush();
     var j: usize = 0;
-    while (j < myAttributes.items.len) {
-        var myAttr = &myAttributes.items[j];
-        try stdout.print("Choose a roll for {s}: ", .{myAttr.abbr[0..]});   
+    while (j < world.attributes.items.len) {
+        var myAttr = &world.attributes.items[j];
+        try stdout.print("Choose a roll for {s}: ", .{myAttr.abbr[0..]});
         try bw.flush();
-        const c = try choose(&myRolls);
-
+        // const c = try choose(&myRolls);
+        const c = myRolls.items[j];
         myAttr.stat = c.sum;
         j+=1;
         try stdout.print("Your {s} is now {}.\n", .{myAttr.abbr[0..],c.sum});
         try bw.flush();
     }
-    
+
     print("myAttributes:", .{});
-    for (myAttributes.toOwnedSlice()) |myAttr| {
+    for (world.attributes.items) |myAttr| {
         print("{s}: {any}", .{myAttr.abbr[0..], myAttr.stat});
-    
+
     }
     var char = Character{.name="George"};
     // const char_name ="George";
     // char.name = x;
-    char.attributes = myAttributes;
+    char.attributes = try world.attributes.clone();
+    defer char.attributes.deinit();
 
-    var drb = Race {.name="dragonborn", .speed = 30};
-    // const drb_name = ;
-    // drb &drb_name[0];
 
-    var drb_bonuses = std.ArrayList(Attribute).init(allocator);
-    defer drb_bonuses.deinit();
-    drb.attr_bonuses = drb_bonuses;
-
-    var cha_bonus_1 = Attribute{.name="charisma_bonus_1", .abbr="CHA", .stat=1};
-    // const charisma_bonus_1 = ;
-    // cha_bonus_1.name=&charisma_bonus_1[0];
-    try drb_bonuses.append(cha_bonus_1);
-    
-    var cha_bonus_2 = Attribute{.name="charisma_bonus_2", .abbr="CHA", .stat=2};
-    _ = cha_bonus_2;
-    //try drb_bonuses.append(cha_bonus_2);
-    
-    var str_bonus_1 = Attribute{.name="strength_bonus_1", .abbr="STR", .stat=1};
-    _ = str_bonus_1;    
-    // try drb_bonuses.append(str_bonus_1);
-    
-    var str_bonus_2 = Attribute{.name="strength_bonus_2", .abbr="STR", .stat=2};
-    // const strength_bonus_2 = ;
-    // str_bonus_2.name=&strength_bonus_2[0];
-    try drb_bonuses.append(str_bonus_2);
-    
-    var dwf = Race {.name="dwarf", .speed = 25};
-    // const dwf_name = "dwarf     ";
-    // dwf.name = &dwf_name[0];
-
-    var dwf_bonuses = std.ArrayList(Attribute).init(allocator);
-    defer dwf_bonuses.deinit();
-    dwf.attr_bonuses = dwf_bonuses;
-
-    var con_bonus_1 = Attribute{.name="constitution_bonus_1", .abbr="CON", .stat=1};
-    _ = con_bonus_1;
-    // const constitution_bonus_1 = ;
-    // con_bonus_1.name=&constitution_bonus_1[0];
-    // try dwf_bonuses.append(con_bonus_1);
-    
-    var con_bonus_2 = Attribute{.name="constitution_bonus_2", .abbr="CON", .stat=2};
-    // const constitution_bonus_2 = ;
-    // con_bonus_2.name=&constitution_bonus_2[0];
-    try dwf_bonuses.append(con_bonus_2);
-    
-    // try dwf_bonuses.append(str_bonus_1);
-    
-    // try dwf_bonuses.append(str_bonus_2);
-    
-    var elf = Race {.name="elf", .speed = 30};
-    // const elf_name =        ";
-    // elf.name = &elf_name[0];
-    var elf_bonuses = std.ArrayList(Attribute).init(allocator);
-    defer elf_bonuses.deinit();
-    elf.attr_bonuses = elf_bonuses;
-
-    var dex_bonus_1 = Attribute{.name="dexterity_bonus_1", .abbr="DEX", .stat=1};
-    _=dex_bonus_1;
-    // try elf_bonuses.append(dex_bonus_1);
-    
-    var dex_bonus_2 = Attribute{.name="dexterity_bonus_2", .abbr="DEX", .stat=2};
-    // const dexterity_bonus_2 = ;
-    // dex_bonus_2.name=&dexterity_bonus_2[0];
-    try elf_bonuses.append(dex_bonus_2);
-    
-    // try elf_bonuses.append(str_bonus_1);
-    
-    // try dwf_bonuses.append(str_bonus_2);
-    
-    var races = std.ArrayList(Race).init(allocator);
-    try races.append(drb);
-    try races.append(dwf);
-    try races.append(elf);
-    const choose_race = Choose(Race, Character);
-    try choose_race.prompt(&races, &char);
+    // const choose_race = Choose(Race, Character);
+    // try choose_race.prompt(&races, &char);
+    char.race = world.races.items[0];
 
     var classes = std.ArrayList(Class).init(allocator);
     defer classes.deinit();
@@ -182,44 +125,91 @@ pub fn main() !void {
     // const ftr_name =    ";
     // ftr.name = &ftr_name[0];
     try classes.append(ftr);
-    
+
     const d8 = D{.sides=8};
     var bard = Class{.name="bard", .hd=d8};
     // const bard_name = "bard     ";
     // bard.name = &bard_name[0];
     try classes.append(bard);
-    
-    const choose_class = Choose(Class, Character);
-    try choose_class.prompt(&classes, &char);
+
+    // const choose_class = Choose(Class, Character);
+    // try choose_class.prompt(&classes, &char);
+
+    char.class = classes.items[0];
 
     // print("char: {}", .{char});
-    var world = try World.init(42);
     //
         try world.start(&char);
-        // try stdout.print("Starting . . . {}", .{world});
-        var whats_here = world.map.get(Loc.init(49,49));
-        if (whats_here) |value| {
-            try stdout.print("map(49,49): {}\n",.{value});
-            var ent = value.get(0);
-            try stdout.print("map(49,49)[0]: {}\n",.{ent.id});
-            
+        // std.debug.print("entity.name: {s}\n",.{world.entities.items(.name)[0]});
+
+        // try stdout.print("Starting . . . {}\n", .{world});
+        // var target = Loc.init(49,49);
+
+        // var whats_here = world.map.get(target);
+        // if (whats_here) |value| {
+        //     // try stdout.print("map(49,49): {}\n",.{value});
+        //     var ent = value.get(0);
+        //     // try stdout.print("map(49,49)[0]: {}\n",.{ent.id});
+        //     try stdout.print("ent.name: {s}\n", .{ent.name});
+        //     // std.debug.print("ent.name: {}\n", .{ent.name[0..]});
+
+        // }
+        // var it = world.map.iterator();
+        // while (it.next()) |entry| {
+        //     if (entry.value_ptr.*.len>0)
+        //         std.debug.print("{}: {}\n", .{entry.key_ptr.*, entry.value_ptr.*});
+        // }
+        var r: usize = 0;
+        var c: usize = 0;
+        const radius = 5;
+        const c0 = 49;
+        const r0 = 49;
+
+        while(r + (r0-radius) < (r0+radius)) {
+            while(c + (c0-radius*2) < (c0+radius*2)) {
+                const entry = world.map.get(Loc.init(r + (r0-radius), c + (c0-radius*2)));
+                if (entry) |value| {
+                    if (value.len>0) {
+                        try stdout.print("#", .{});
+                    } else {
+                        try stdout.print(".", .{});
+                    }
+                } else {
+                    try stdout.print("*", .{});
+
+                }
+                c+=1;
+            }
+            try stdout.print("\n", .{});
+            r+=1;
+            c=0;
         }
-        try stdout.print("world.entities: {}\n", .{world.entities});
-        var w_ent = world.entities.get(0);
-        try stdout.print("w_ent: {}\n", .{w_ent});
-        var g_l = w_ent.loc;
-        const g_x = g_l.x;
-        try stdout.print("w_ent: {}\n", .{g_x});
-        
+        // try stdout.print("world.entities: {}\n", .{world.entities});
+        // var w_ent = world.entities.get(0);
+        // // try stdout.print("w_ent: {}\n", .{w_ent});
+        // try stdout.print("w_ent: {s}\n", .{w_ent.name});
+        // try stdout.print("w_ent: {s}\n", .{w_ent.char.name});
+        // var g_l = w_ent.loc;
+        // const g_x = g_l.x;
+        // try stdout.print("g_x: {}\n", .{g_x});
+
     //}
     try bw.flush(); // don't forget to flush!
+    allocator.free(world.entities.items(.name)[0]);
+    var result = try world.map.getOrPutValue(Loc.init(49,49), .{});
+    result.value_ptr.deinit(allocator);
+
+    defer world.attributes.deinit();
+    defer world.races.deinit();
+    defer world.entities.deinit(allocator);
+    defer world.map.deinit();
 }
 
 fn make_rect_room(world: *World, x1: u64, y1: u64, w: u64, h: u64) !void {
     const x2 = x1 + w;
     const y2 = y1 + h;
-    var x: u64 = 0;
-    var y: u64 = 0;
+    var x: u64 = x1;
+    var y: u64 = y1;
 
     while(y<y2) {
         while(x<x2) {
@@ -227,6 +217,7 @@ fn make_rect_room(world: *World, x1: u64, y1: u64, w: u64, h: u64) !void {
             x+=1;
         }
         y+=1;
+        x = x1;
     }
 }
 const Entity = struct {
@@ -236,12 +227,14 @@ const Entity = struct {
     movement: u64 = undefined,
     char: *Character = undefined,
 
-    pub fn init(new_id: u64, new_char: *Character) !Entity {
+    pub fn init(allocator: Ally, new_id: u64, new_char: *Character) !Entity {
         var name_buf: [100]u8 = undefined;
-        const new_name = try std.fmt.bufPrint(&name_buf, "entity_{d}", .{new_id});
+        const new_name = try std.fmt.bufPrintZ(&name_buf, "entity_{d}", .{new_id});
+        const bytes = try allocator.alloc(u8, new_name.len);
+        std.mem.copy(u8, bytes, new_name);
         return .{
             .id = new_id,
-            .name = new_name,
+            .name = bytes,
            .char = new_char,
         };
     }
@@ -252,39 +245,151 @@ const World = struct {
     seed: u12,
     rndByteSq: RndByteSq = undefined,
     entities: std.MultiArrayList(Entity) = undefined,
+    attributes: std.ArrayList(Attribute) = undefined,
+    races: std.ArrayList(Race) = undefined,
+    allocator: Ally,
 
-    pub fn init(s: u12) !World {
-        
+    pub fn init(s: u12, allocator: Ally) !World {
+        var my_attributes = std.ArrayList(Attribute).init(allocator);
+        defer my_attributes.deinit();
+
+        var str = Attribute{.name="strength",.abbr="STR", .stat=0};
+        try my_attributes.append(str);
+
+        var dex = Attribute{.name="dexterity", .abbr="DEX", .stat=0};
+        try my_attributes.append(dex);
+
+        var con = Attribute{.name="constitution", .abbr="CON", .stat=0};
+        try my_attributes.append(con);
+
+        var int = Attribute{.name="intelligence", .abbr="INT", .stat=0};
+        // const intelligence = ;
+        // int&intelligence[0];
+        try my_attributes.append(int);
+
+        var wis = Attribute{.name="wisdom", .abbr="WIS", .stat=0};
+        // const wisdom = ;
+        // wis&wisdom[0];
+        try my_attributes.append(wis);
+
+        var cha = Attribute{.name="charisma", .abbr="CHA", .stat=0};
+        // const charisma = ;
+        // cha&charisma[0];
+        try my_attributes.append(cha);
+
+
+        var drb = Race {.name="dragonborn", .speed = 30};
+        // const drb_name = ;
+        // drb &drb_name[0];
+
+        var drb_bonuses = std.ArrayList(Attribute).init(allocator);
+        defer drb_bonuses.deinit();
+        drb.attr_bonuses = drb_bonuses;
+
+        var cha_bonus_1 = Attribute{.name="charisma_bonus_1", .abbr="CHA", .stat=1};
+        // const charisma_bonus_1 = ;
+        // cha_bonus_1.name=&charisma_bonus_1[0];
+        try drb_bonuses.append(cha_bonus_1);
+
+        var cha_bonus_2 = Attribute{.name="charisma_bonus_2", .abbr="CHA", .stat=2};
+        _ = cha_bonus_2;
+        //try drb_bonuses.append(cha_bonus_2);
+
+        var str_bonus_1 = Attribute{.name="strength_bonus_1", .abbr="STR", .stat=1};
+        _ = str_bonus_1;
+        // try drb_bonuses.append(str_bonus_1);
+
+        var str_bonus_2 = Attribute{.name="strength_bonus_2", .abbr="STR", .stat=2};
+        // const strength_bonus_2 = ;
+        // str_bonus_2.name=&strength_bonus_2[0];
+        try drb_bonuses.append(str_bonus_2);
+
+        var dwf = Race {.name="dwarf", .speed = 25};
+        // const dwf_name = "dwarf     ";
+        // dwf.name = &dwf_name[0];
+
+        var dwf_bonuses = std.ArrayList(Attribute).init(allocator);
+        defer dwf_bonuses.deinit();
+        dwf.attr_bonuses = dwf_bonuses;
+
+        var con_bonus_1 = Attribute{.name="constitution_bonus_1", .abbr="CON", .stat=1};
+        _ = con_bonus_1;
+        // const constitution_bonus_1 = ;
+        // con_bonus_1.name=&constitution_bonus_1[0];
+        // try dwf_bonuses.append(con_bonus_1);
+
+        var con_bonus_2 = Attribute{.name="constitution_bonus_2", .abbr="CON", .stat=2};
+        // const constitution_bonus_2 = ;
+        // con_bonus_2.name=&constitution_bonus_2[0];
+        try dwf_bonuses.append(con_bonus_2);
+
+        // try dwf_bonuses.append(str_bonus_1);
+
+        // try dwf_bonuses.append(str_bonus_2);
+
+        var elf = Race {.name="elf", .speed = 30};
+        // const elf_name =        ";
+        // elf.name = &elf_name[0];
+        var elf_bonuses = std.ArrayList(Attribute).init(allocator);
+        defer elf_bonuses.deinit();
+        elf.attr_bonuses = elf_bonuses;
+
+        var dex_bonus_1 = Attribute{.name="dexterity_bonus_1", .abbr="DEX", .stat=1};
+        _=dex_bonus_1;
+        // try elf_bonuses.append(dex_bonus_1);
+
+        var dex_bonus_2 = Attribute{.name="dexterity_bonus_2", .abbr="DEX", .stat=2};
+        // const dexterity_bonus_2 = ;
+        // dex_bonus_2.name=&dexterity_bonus_2[0];
+        try elf_bonuses.append(dex_bonus_2);
+
+        // try elf_bonuses.append(str_bonus_1);
+
+        // try dwf_bonuses.append(str_bonus_2);
+
+        var races = std.ArrayList(Race).init(allocator);
+        defer races.deinit();
+        try races.append(drb);
+        try races.append(dwf);
+        try races.append(elf);
+
         var map = std.AutoHashMap(Loc, std.MultiArrayList(Entity)).init(allocator);
         defer map.deinit();
         var new_entities = std.MultiArrayList(Entity){};
         defer new_entities.deinit(allocator);
 
-        
+
         return .{
             .map = map,
             .seed = s,
             .entities = new_entities,
-
+            .attributes = try my_attributes.clone(),
+            .races = try races.clone(),
+            .allocator = allocator,
         };
     }
-    pub fn place_entity(self: *World, l: Loc,ent: Entity) !void {
+    pub fn place_entity(self: *World, loc: Loc, ent: Entity) !void {
         var ent_list = std.MultiArrayList(Entity){};
-        defer ent_list.deinit(allocator);
-        var gp_result = try self.map.getOrPutValue(l, ent_list);
-        
-        try gp_result.value_ptr.append(allocator, ent);
-        
+        defer ent_list.deinit(self.allocator);
+        var gp_result = try self.map.getOrPutValue(loc, ent_list);
+        try gp_result.value_ptr.append(self.allocator, ent);
     }
     pub fn start(self: *World, new_char: *Character) !void {
         self.rndByteSq = RndByteSq.init(self.seed);
         try make_rect_room( self, 42, 42, 80, 40 );
-        var entity = try Entity.init(self.entities.len, new_char);
-        try self.entities.append(allocator, entity);
+        var entity = try Entity.init(self.allocator, self.entities.len, new_char);
+ //       if (entity.name.len == 8 and entity.name == "entity_0")
+            // std.debug.print("entity: {s}\n", .{entity.name});
+        try self.entities.append(self.allocator, entity);
         var l = Loc.init(49,49);
-        try self.place_entity(l, entity);
-        entity.loc = l;
-        // std.debug.print("entity: {}",.{entity});
+        // std.debug.print("entity: {}\n", .{@ptrToInt(&entity)});
+        // std.debug.print("entity: {s}\n", .{entity.name});
+        // try self.place_entity(l, entity);
+        var ent_list = std.MultiArrayList(Entity){};
+        var gp_result = try self.map.getOrPutValue(l, ent_list);
+        try gp_result.value_ptr.append(self.allocator, entity);
+        // std.debug.print("entity.name: {s}\n",.{self.entities.items(.name)[0]});
+        // std.debug.print("entity.loc: {}\n",.{self.entities.items(.loc)[0]});
     }
 
 };
@@ -298,8 +403,9 @@ const Loc = struct {
         };
     }
 };
+
 fn dist_sq(p1: Loc, p2: Loc) f64 {
-    return std.math.pow((p1.x - p2.x),2) + std.math.pow((p1.y - p2.y), 2);  
+    return std.math.pow((p1.x - p2.x),2) + std.math.pow((p1.y - p2.y), 2);
 }
 const Status = enum {
     exploring,
@@ -318,7 +424,7 @@ fn Choose(comptime T: type, comptime T2: type) type {
             if (fields[3].field_type == T) return fields[3].name;
             return "name";
         }
-        
+
         fn select(list: *std.ArrayList(T)) !T {
             const out = std.io.getStdOut();
             var bw = std.io.bufferedWriter(out);
@@ -327,7 +433,7 @@ fn Choose(comptime T: type, comptime T2: type) type {
 
             const max_choice = list.items.len;
             var buff: [10]u8 = undefined;
-            while (true) {    
+            while (true) {
                 const input = while (true) break nextLine(rd, &buff) catch continue else unreachable;
                 if (input) |value| {
                     // print("input: {s}",.{value});
@@ -347,11 +453,11 @@ fn Choose(comptime T: type, comptime T2: type) type {
                     if (a<1 or a>max_choice) {
                         try out.writer().print("Please enter a number between 1 and {}\n", .{max_choice});
                         try bw.flush();
-                        continue;    
+                        continue;
                     }
                     return list.items[a-1];
                 }
-            }      
+            }
         }
         fn prompt(list: *std.ArrayList(T), object: *T2) !void {
             const Self = @This();
@@ -363,7 +469,7 @@ fn Choose(comptime T: type, comptime T2: type) type {
             // print("field: {}", .{fields[0]});
             // const field_name = inline for (fields) |field| {
             //     if (field.field_type == T2) return field.name;
-            // }; 
+            // };
             const field_name = comptime getFieldNameByType();
             try out.print("\nYour {s} options are\n", .{field_name});
             for (list.items) |value, index| {
@@ -372,12 +478,12 @@ fn Choose(comptime T: type, comptime T2: type) type {
                     try out.print("\n",.{});
                 }
             }
-            
+
             try out.print("\n",.{});
             try bw.flush();
             var l: usize = 0;
             while (l < 1) {
-                try out.print("Choose a {s}:", .{field_name});   
+                try out.print("Choose a {s}:", .{field_name});
                 try bw.flush();
                 const c = try Self.select(list);
                 //print("field_name: {s}", .{field_name});
@@ -387,7 +493,7 @@ fn Choose(comptime T: type, comptime T2: type) type {
                 try bw.flush();
             }
 
-        } 
+        }
     };
 }
 
@@ -428,7 +534,7 @@ fn choose(list: *List(Throw)) !Throw {
     const max_choice = list.items.len;
     // print("max_choice: {}", .{max_choice});
     var buff: [10]u8 = undefined;
-    while (true) {    
+    while (true) {
         const input = while (true) break nextLine(rd, &buff) catch continue else unreachable;
         if (input) |value| {
             // print("input: {s}",.{value});
@@ -448,7 +554,7 @@ fn choose(list: *List(Throw)) !Throw {
             if (a<1 or a>max_choice) {
                 try out.writer().print("Please enter a number between 1 and {}\n", .{max_choice});
                 try bw.flush();
-                continue;    
+                continue;
             }
             if (list.items[a-1].assigned) {
                 try out.writer().print("({}) {} is already assigned. Choose another.\n", .{a, list.items[a-1].sum});
@@ -501,7 +607,7 @@ pub const D = struct {
             throw.append(r);
             i+=1;
         }
-        
+
         throw.sum += throw.b;
 
         if (throw.drop) | value | {
@@ -510,13 +616,13 @@ pub const D = struct {
                 Drop.L => {
                     throw.sum -= throw.min;
                     print("dropped: {}", .{throw.min});
-                }, 
+                },
                 Drop.H => {
                     throw.sum -= throw.max;
                 },
             }
         }
-        
+
        // return throw;
     }
 };
@@ -534,7 +640,7 @@ pub const Throw = struct {
     max: u64 = 0,
     sum: u64 = 0,
     assigned: bool = false,
-    
+
     pub fn append(self: *Throw, result: u64) void {
         self.results[self.i] = result;
         self.sum += result;
@@ -543,13 +649,13 @@ pub const Throw = struct {
             self.max = result;
         }
         if (result < self.min) {
-            self.min = result;    
+            self.min = result;
         }
         if (result > self.max) {
             self.max = result;
         }
-         
-        self.i +%= 1; 
+
+        self.i +%= 1;
     }
 };
 
@@ -563,7 +669,7 @@ pub fn getRnd(gen: *RndByteSq, d: u8) u64 {
     const unit = @intToFloat(f64, rndByte) / fullByte;
     // print("unit: {}", .{unit});
     const rndNum = d - @floatToInt(u8, unit * @intToFloat(f64, d));
-    
+
     return rndNum;
 }
 
@@ -595,7 +701,7 @@ pub fn print(comptime fmt: []const u8, args: anytype) void {
         std.debug.print(fmt, args);
         std.debug.print("\n", .{});
     }
-    
+
 }
 
 const byteSq = [_]u8{
