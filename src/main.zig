@@ -2,7 +2,8 @@
 const std = @import("std");
 const Ally = std.mem.Allocator;
 
-fn repl(gpa: Ally) !void {
+fn repl(world: *World) !void {
+    var gpa = world.allocator;
     var line_buf = std.ArrayList(u8).init(gpa);
     defer line_buf.deinit();
 
@@ -10,19 +11,29 @@ fn repl(gpa: Ally) !void {
     const stdout = std.io.getStdOut().writer();
 
     while (true) {
+        
         _ = try stdout.write("> ");
         stdin.readUntilDelimiterArrayList(&line_buf, '\n', 2*1024) catch |e| {
             _= try stdout.write("\n");
             return e;
         };
-
+        
         if (line_buf.items.len == 5 and std.mem.eql(u8, line_buf.items, "exit\r")) {
             _ = try stdout.write("exiting . . .");
             return;
+        
+        } else if (std.mem.eql(u8, line_buf.items, "time\r")) {
+                // try stdout.print("{s}", .{@typeName(@TypeOf(stdout))});
+                try world.time();
+            
+        } else if (std.mem.eql(u8, line_buf.items, "look\r")) {
+            var pc = world.entities.items[0];
+            try pc.look(world);
         } else {
             std.debug.print("line_buf: {s}\n", .{line_buf.items});
         }
     }
+    
 }
 
 pub fn main() !void {
@@ -194,20 +205,22 @@ pub fn main() !void {
         // try stdout.print("g_x: {}\n", .{g_x});
 
     //}
+
     try bw.flush(); // don't forget to flush!
-    allocator.free(world.entities.items(.name)[0]);
+    
+    allocator.free(world.entities.items[0].name);
     var result = try world.map.getOrPutValue(Loc.init(49,49), .{});
     result.value_ptr.deinit(allocator);
 
     defer world.attributes.deinit();
     defer world.races.deinit();
-    defer world.entities.deinit(allocator);
+    defer world.entities.deinit();
     defer world.map.deinit();
 }
-
+ 
 fn make_rect_room(world: *World, x1: u64, y1: u64, w: u64, h: u64) !void {
     const x2 = x1 + w;
-    const y2 = y1 + h;
+    const y2 = y1 + h; 
     var x: u64 = x1;
     var y: u64 = y1;
 
@@ -220,34 +233,131 @@ fn make_rect_room(world: *World, x1: u64, y1: u64, w: u64, h: u64) !void {
         x = x1;
     }
 }
+
+const Condition = enum {
+    blinded,        
+    charmed,        
+    deafened,        
+    exhaustion,        
+    frightened,        
+    grappled,        
+    incapacitated,        
+    invisible,        
+    paralyzed,        
+    petrified,        
+    poisoned,        
+    prone,        
+    restrained,        
+    stunned,        
+    unconscious,
+    dead,
+};
+
 const Entity = struct {
     id: u64,
     name: []const u8 = undefined,
     loc: Loc = undefined,
     movement: u64 = undefined,
     char: *Character = undefined,
+    conditions: std.EnumMap(Condition, u64),
 
-    pub fn init(allocator: Ally, new_id: u64, new_char: *Character) !Entity {
+    pub fn init(allocator: Ally, new_id: u64, new_char: *Character, conditions: std.EnumMap(Condition, u64)) !Entity {
         var name_buf: [100]u8 = undefined;
         const new_name = try std.fmt.bufPrintZ(&name_buf, "entity_{d}", .{new_id});
         const bytes = try allocator.alloc(u8, new_name.len);
         std.mem.copy(u8, bytes, new_name);
+        
         return .{
             .id = new_id,
             .name = bytes,
            .char = new_char,
+           .conditions = conditions
         };
     }
+
+    pub fn look(self: *Entity, world: *World) !void {
+        const stdout = std.io.getStdOut().writer();
+
+        if (self.conditions.contains(Condition.blinded)) {
+            try stdout.print("You cannot see in this condition.\n", .{});
+            return;
+        }
+        var r: usize = 0;
+        var c: usize = 0;
+        const radius = 5;
+        const c0 = 49;
+        const r0 = 49;
+
+        while(r + (r0-radius) < (r0+radius)) {
+            while(c + (c0-radius*2) < (c0+radius*2)) {
+                const entry = world.map.get(Loc.init(r + (r0-radius), c + (c0-radius*2)));
+                if (entry) |value| {
+                    if (value.len>0) {
+                        try stdout.print("#", .{});
+                    } else {
+                        try stdout.print(".", .{});
+                    }
+                } else {
+                    try stdout.print("*", .{});
+
+                }
+                c+=1;
+            }
+            try stdout.print("\n", .{});
+            r+=1;
+            c=0;
+        }
+
+        world.clock.tick();
+    }
+    pub fn makeProne(self: *Entity) !void {
+        const stdout = std.io.getStdOut().writer();
+        self.conditions.put(Condition.prone, 0);
+
+        try stdout.writeAll("You are prone.\n"); 
+    } 
+
+    pub fn blind(self: *Entity) !void {
+        const stdout = std.io.getStdOut().writer();
+        self.conditions.put(Condition.blinded, 0);
+        try stdout.writeAll("You are blinded.\n");
+    }
+};
+
+const Clock = struct {
+    ticks: u64,
+    time_of_day: f64,
+    seconds_per_day: f64,
+    update_rate: f64,
+    time_multiplier: f64,
+
+    pub fn init(time: f64, seconds_per_day: f64, update_rate: f64, time_multiplier: f64) 
+        Clock {
+            return .{
+                .ticks = 0,
+                .time_of_day = time,
+                .seconds_per_day= seconds_per_day,
+                .update_rate= update_rate,
+                .time_multiplier= time_multiplier,
+            };
+        }
+    pub fn tick(self: *Clock) void {
+        self.ticks += 1;
+        self.time_of_day += ((1.0 + self.update_rate) / self.seconds_per_day) * self.time_multiplier;
+        if (self.time_of_day > 1) self.time_of_day = 0;
+    }
+
 };
 
 const World = struct {
     map: std.AutoHashMap(Loc, std.MultiArrayList(Entity)),
     seed: u12,
     rndByteSq: RndByteSq = undefined,
-    entities: std.MultiArrayList(Entity) = undefined,
+    entities: std.ArrayList(*Entity) = undefined,
     attributes: std.ArrayList(Attribute) = undefined,
     races: std.ArrayList(Race) = undefined,
     allocator: Ally,
+    clock: Clock,
 
     pub fn init(s: u12, allocator: Ally) !World {
         var my_attributes = std.ArrayList(Attribute).init(allocator);
@@ -355,17 +465,18 @@ const World = struct {
 
         var map = std.AutoHashMap(Loc, std.MultiArrayList(Entity)).init(allocator);
         defer map.deinit();
-        var new_entities = std.MultiArrayList(Entity){};
-        defer new_entities.deinit(allocator);
-
+        var new_entities = std.ArrayList(*Entity).init(allocator);
+        defer new_entities.deinit();
+        var clock = Clock.init(0.45, 120.0, 5.0, 1.0);
 
         return .{
             .map = map,
             .seed = s,
-            .entities = new_entities,
+            .entities = try new_entities.clone(),
             .attributes = try my_attributes.clone(),
             .races = try races.clone(),
             .allocator = allocator,
+            .clock = clock,
         };
     }
     pub fn place_entity(self: *World, loc: Loc, ent: Entity) !void {
@@ -377,10 +488,10 @@ const World = struct {
     pub fn start(self: *World, new_char: *Character) !void {
         self.rndByteSq = RndByteSq.init(self.seed);
         try make_rect_room( self, 42, 42, 80, 40 );
-        var entity = try Entity.init(self.allocator, self.entities.len, new_char);
+        var entity = try Entity.init(self.allocator, self.entities.items.len, new_char, .{});
  //       if (entity.name.len == 8 and entity.name == "entity_0")
             // std.debug.print("entity: {s}\n", .{entity.name});
-        try self.entities.append(self.allocator, entity);
+        try self.entities.append(&entity);
         var l = Loc.init(49,49);
         // std.debug.print("entity: {}\n", .{@ptrToInt(&entity)});
         // std.debug.print("entity: {s}\n", .{entity.name});
@@ -388,10 +499,20 @@ const World = struct {
         var ent_list = std.MultiArrayList(Entity){};
         var gp_result = try self.map.getOrPutValue(l, ent_list);
         try gp_result.value_ptr.append(self.allocator, entity);
+        self.clock.tick();
+        try entity.makeProne();
+        try entity.blind();
+
         // std.debug.print("entity.name: {s}\n",.{self.entities.items(.name)[0]});
         // std.debug.print("entity.loc: {}\n",.{self.entities.items(.loc)[0]});
+        try repl(self);
+    }
+    pub fn time(self: *World) !void {
+        const stdout = std.io.getStdOut().writer();
+        try stdout.print("{}\n", .{self.clock});
     }
 
+    
 };
 const Loc = struct {
     x: u64,
