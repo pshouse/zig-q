@@ -207,8 +207,9 @@ pub fn main() !void {
     //}
 
     try bw.flush(); // don't forget to flush!
-    
-    allocator.free(world.entities.items[0].name);
+    var entity = world.entities.items[0].*;
+    allocator.free(entity.name);
+    allocator.destroy(world.entities.items[0]);
     var result = try world.map.getOrPutValue(Loc.init(49,49), .{});
     result.value_ptr.deinit(allocator);
 
@@ -488,24 +489,26 @@ const World = struct {
     pub fn start(self: *World, new_char: *Character) !void {
         self.rndByteSq = RndByteSq.init(self.seed);
         try make_rect_room( self, 42, 42, 80, 40 );
-        var entity = try Entity.init(self.allocator, self.entities.items.len, new_char, .{});
+        var tmp_entity = try Entity.init(self.allocator, self.entities.items.len, new_char, .{});
+        var entity = try self.allocator.create(Entity);
+        entity.* = tmp_entity;
  //       if (entity.name.len == 8 and entity.name == "entity_0")
             // std.debug.print("entity: {s}\n", .{entity.name});
-        try self.entities.append(&entity);
+        try self.entities.append(entity);
         var l = Loc.init(49,49);
         // std.debug.print("entity: {}\n", .{@ptrToInt(&entity)});
         // std.debug.print("entity: {s}\n", .{entity.name});
         // try self.place_entity(l, entity);
         var ent_list = std.MultiArrayList(Entity){};
         var gp_result = try self.map.getOrPutValue(l, ent_list);
-        try gp_result.value_ptr.append(self.allocator, entity);
+        try gp_result.value_ptr.append(self.allocator, entity.*);
         self.clock.tick();
         try entity.makeProne();
         try entity.blind();
 
         // std.debug.print("entity.name: {s}\n",.{self.entities.items(.name)[0]});
         // std.debug.print("entity.loc: {}\n",.{self.entities.items(.loc)[0]});
-        try repl(self);
+        // try repl(self);
     }
     pub fn time(self: *World) !void {
         const stdout = std.io.getStdOut().writer();
