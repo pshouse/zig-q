@@ -3,6 +3,8 @@ const loc = @import("loc.zig");
 const world = @import("world.zig");
 const session = @import("session.zig");
 const map_render = @import("map_render.zig");
+const commands = @import("commands.zig");
+const repl = @import("repl.zig");
 
 pub const Step = union(enum) {
     roll_stats,
@@ -10,6 +12,7 @@ pub const Step = union(enum) {
     tick: u32,
     time,
     look,
+    command: []const u8,
     render_map: struct { x: u64, y: u64, radius: u8 },
 };
 
@@ -31,6 +34,20 @@ pub const default_scenario = Scenario{
         .look,
         .{ .tick = 1 },
         .time,
+    },
+};
+
+pub const explore_scenario = Scenario{
+    .name = "explore",
+    .seed = 42,
+    .steps = &.{
+        .roll_stats,
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .command = "look" },
+        .{ .command = "move east" },
+        .{ .command = "look" },
+        .{ .command = "time" },
+        .{ .command = "exit" },
     },
 };
 
@@ -101,6 +118,14 @@ pub const Harness = struct {
                 try writer.print("step look\n", .{});
                 try map_render.renderLook(&self.w, self.player_id, writer);
             },
+            .command => |line| {
+                try writer.print("step command {s}\n", .{line});
+                const cmd = commands.parseLine(line);
+                const result = try commands.execute(&self.w, self.player_id, cmd, writer);
+                if (result == .exit_repl) {
+                    try writer.print("step exit\n", .{});
+                }
+            },
             .render_map => |cfg| {
                 try writer.print("step render_map center=({},{}) radius={}\n", .{ cfg.x, cfg.y, cfg.radius });
                 try map_render.renderViewport(&self.w, loc.Loc.init(cfg.x, cfg.y), cfg.radius, writer);
@@ -109,11 +134,16 @@ pub const Harness = struct {
     }
 };
 
+pub fn scenarioByName(name: []const u8, seed: u64) ?Scenario {
+    if (std.mem.eql(u8, name, "bootstrap"))
+        return Scenario{ .name = "bootstrap", .seed = seed, .steps = default_scenario.steps };
+    if (std.mem.eql(u8, name, "explore"))
+        return Scenario{ .name = "explore", .seed = seed, .steps = explore_scenario.steps };
+    return null;
+}
+
 pub fn runNamedScenario(allocator: std.mem.Allocator, name: []const u8, seed: u64, writer: anytype) !void {
-    const scenario = if (std.mem.eql(u8, name, "bootstrap"))
-        Scenario{ .name = "bootstrap", .seed = seed, .steps = default_scenario.steps }
-    else
-        return error.UnknownScenario;
+    const scenario = scenarioByName(name, seed) orelse return error.UnknownScenario;
 
     var harness = try Harness.init(allocator, seed);
     defer harness.deinit();
@@ -133,6 +163,23 @@ test "dst bootstrap scenario is byte-identical across runs" {
     const out_a = fbs_a.getWritten();
     const out_b = fbs_b.getWritten();
     try std.testing.expect(out_a.len > 0);
+    try std.testing.expectEqualSlices(u8, out_a, out_b);
+}
+
+test "dst explore scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    var buf_a: [8192]u8 = undefined;
+    var buf_b: [8192]u8 = undefined;
+    var fbs_a = std.io.fixedBufferStream(&buf_a);
+    var fbs_b = std.io.fixedBufferStream(&buf_b);
+
+    try runNamedScenario(allocator, "explore", 42, fbs_a.writer());
+    try runNamedScenario(allocator, "explore", 42, fbs_b.writer());
+
+    const out_a = fbs_a.getWritten();
+    const out_b = fbs_b.getWritten();
+    try std.testing.expect(out_a.len > 0);
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "moved to") != null);
     try std.testing.expectEqualSlices(u8, out_a, out_b);
 }
 

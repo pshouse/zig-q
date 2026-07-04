@@ -1,0 +1,89 @@
+const std = @import("std");
+const loc = @import("loc.zig");
+const world = @import("world.zig");
+const entity = @import("entity.zig");
+
+pub const Direction = enum {
+    north,
+    south,
+    east,
+    west,
+
+    pub fn parse(word: []const u8) ?Direction {
+        if (std.mem.eql(u8, word, "north") or std.mem.eql(u8, word, "n")) return .north;
+        if (std.mem.eql(u8, word, "south") or std.mem.eql(u8, word, "s")) return .south;
+        if (std.mem.eql(u8, word, "east") or std.mem.eql(u8, word, "e")) return .east;
+        if (std.mem.eql(u8, word, "west") or std.mem.eql(u8, word, "w")) return .west;
+        return null;
+    }
+};
+
+pub fn step(from: loc.Loc, dir: Direction) ?loc.Loc {
+    return switch (dir) {
+        .north => if (from.x == 0) null else loc.Loc.init(from.x - 1, from.y),
+        .south => loc.Loc.init(from.x + 1, from.y),
+        .east => loc.Loc.init(from.x, from.y + 1),
+        .west => if (from.y == 0) null else loc.Loc.init(from.x, from.y - 1),
+    };
+}
+
+/// Moves entity on the sparse map, ticks the clock on success.
+pub fn moveEntity(w: *world.World, id: entity.EntityId, dir: Direction) !loc.Loc {
+    const ent = w.store.get(id) orelse return error.EntityNotFound;
+    const old_loc = ent.loc;
+    const new_loc = step(old_loc, dir) orelse return error.Blocked;
+    if (w.tile_map.isBlockedFor(new_loc, id)) return error.Blocked;
+
+    w.tile_map.remove(old_loc, id);
+    try w.tile_map.place(new_loc, id);
+    ent.loc = new_loc;
+    w.tick();
+    return new_loc;
+}
+
+test "moveEntity updates loc and map occupancy" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 1);
+    defer w.deinit();
+
+    const id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    const start = loc.Loc.init(49, 49);
+
+    try std.testing.expectEqual(@as(usize, 1), w.tile_map.entityCountAt(start));
+    try std.testing.expectEqual(@as(usize, 0), w.tile_map.entityCountAt(loc.Loc.init(49, 50)));
+
+    const after = try moveEntity(&w, id, .east);
+    try std.testing.expectEqual(loc.Loc.init(49, 50), after);
+    try std.testing.expectEqual(@as(usize, 0), w.tile_map.entityCountAt(start));
+    try std.testing.expectEqual(@as(usize, 1), w.tile_map.entityCountAt(after));
+    try std.testing.expectEqual(after.x, w.store.get(id).?.loc.x);
+    try std.testing.expectEqual(after.y, w.store.get(id).?.loc.y);
+}
+
+test "moveEntity advances clock" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 1);
+    defer w.deinit();
+
+    const id = try w.spawnTestPlayer(loc.Loc.init(10, 10));
+    try std.testing.expectEqual(@as(u64, 0), w.game_clock.ticks);
+
+    _ = try moveEntity(&w, id, .south);
+    try std.testing.expectEqual(@as(u64, 1), w.game_clock.ticks);
+}
+
+test "moveEntity rejects blocked tile" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 1);
+    defer w.deinit();
+
+    const a = try w.spawnTestPlayer(loc.Loc.init(5, 5));
+    const b = try w.spawnTestPlayer(loc.Loc.init(5, 6));
+
+    const a_loc = w.store.get(a).?.loc;
+    const b_loc = w.store.get(b).?.loc;
+    _ = a_loc;
+    _ = b_loc;
+
+    try std.testing.expectError(error.Blocked, moveEntity(&w, a, .east));
+}

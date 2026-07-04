@@ -29,6 +29,29 @@ pub const TileMap = struct {
         try gop.value_ptr.append(self.allocator, id);
     }
 
+    pub fn remove(self: *TileMap, position: loc.Loc, id: entity.EntityId) void {
+        const list_ptr = self.cells.getPtr(position) orelse return;
+        var i: usize = 0;
+        while (i < list_ptr.items.len) : (i += 1) {
+            if (list_ptr.items[i] == id) {
+                _ = list_ptr.orderedRemove(i);
+                break;
+            }
+        }
+        if (list_ptr.items.len == 0) {
+            list_ptr.deinit(self.allocator);
+            _ = self.cells.remove(position);
+        }
+    }
+
+    pub fn isBlockedFor(self: *const TileMap, position: loc.Loc, exclude_id: entity.EntityId) bool {
+        const list = self.cells.get(position) orelse return false;
+        for (list.items) |eid| {
+            if (eid != exclude_id) return true;
+        }
+        return false;
+    }
+
     pub fn entityCountAt(self: *const TileMap, position: loc.Loc) usize {
         const list = self.cells.get(position) orelse return 0;
         return list.items.len;

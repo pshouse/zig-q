@@ -10,9 +10,12 @@ pub const clock = @import("clock.zig");
 pub const entity = @import("entity.zig");
 pub const map = @import("map.zig");
 pub const world = @import("world.zig");
+pub const movement = @import("movement.zig");
+pub const commands = @import("commands.zig");
 pub const map_render = @import("map_render.zig");
 pub const session = @import("session.zig");
 pub const demo = @import("demo.zig");
+pub const repl = @import("repl.zig");
 pub const dst = @import("dst.zig");
 
 test {
@@ -25,8 +28,11 @@ test {
     _ = @import("entity.zig");
     _ = @import("map.zig");
     _ = @import("world.zig");
+    _ = @import("movement.zig");
+    _ = @import("commands.zig");
     _ = @import("map_render.zig");
     _ = @import("session.zig");
     _ = @import("demo.zig");
+    _ = @import("repl.zig");
     _ = @import("dst.zig");
 }

@@ -16,7 +16,7 @@ zig build
 zig build test
 ```
 
-Runs unit tests for dice/RNG determinism, world init/place/deinit, demo replay, and the DST harness.
+Runs unit tests for dice/RNG determinism, world lifecycle, movement/map occupancy, command handlers, REPL scripts, and DST scenarios.
 
 ## Run (non-interactive demo)
 
@@ -25,32 +25,47 @@ zig build run -- --demo
 zig build run -- --demo 42    # explicit seed (default: 42)
 ```
 
-Prints stat rolls, spawn info, clock ticks, and an ASCII map viewport. Two runs with the same seed produce identical output.
+## Run (REPL)
+
+```bash
+zig build run -- --repl
+zig build run -- --repl 42
+```
+
+Commands: `look`, `time`, `move <north|south|east|west>`, `help`, `exit`.
+
+Piped input example (PowerShell):
+
+```powershell
+"look","move east","look","time","exit" | .\zig-out\bin\zig-q.exe --repl 42
+```
 
 ## DST harness (deterministic simulation testing)
 
 ```bash
 zig build dst -- bootstrap
 zig build dst -- bootstrap 42
+zig build dst -- explore
+zig build dst -- explore 42
 ```
 
-Runs a scripted, seed-fixed scenario (stat rolls → spawn → ticks → time → map render → look) and prints a transcript to stdout. Two consecutive runs with the same scenario and seed are byte-identical.
+- **bootstrap** — stat rolls, spawn, ticks, map render, look
+- **explore** — spawn, look, move east, look, time, exit
+
+Two consecutive runs with the same scenario and seed produce byte-identical transcripts.
 
 ## Project layout
 
 ```
 src/
-  dice.zig       Dice rolling (4d6 drop-low, etc.)
+  movement.zig   Entity movement on sparse map
+  commands.zig   REPL command parse/execute
+  repl.zig       REPL loop and scripted driver
+  dice.zig       Dice rolling
   rng.zig        Seeded deterministic RNG
-  types.zig      Attributes, races, classes, conditions
   world.zig      World init/spawn/deinit
-  map.zig        Sparse tile map (entity IDs only)
-  entity.zig     Entity store
-  session.zig    Character bootstrap
-  demo.zig       Non-interactive demo runner
   dst.zig        DST harness scenarios
   main.zig       CLI entry point
-  dst_main.zig   DST harness entry point
 ```
 
 ## Help
