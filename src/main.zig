@@ -19,27 +19,9 @@ pub fn main() !void {
     }
 
     if (args.len >= 2 and std.mem.eql(u8, args[1], "--repl")) {
-        var seed: u64 = 42;
-        var record: ?zig_q.transcript.RecordOpts = null;
-
-        var i: usize = 2;
-        while (i < args.len) : (i += 1) {
-            if (std.mem.eql(u8, args[i], "--record")) {
-                if (i + 1 < args.len and args[i + 1][0] != '-') {
-                    record = .{ .path = args[i + 1] };
-                    i += 1;
-                } else {
-                    record = .{};
-                }
-                continue;
-            }
-            if (parseSeed(args[i])) |s| {
-                seed = s;
-            } else |_| return error.UnknownArgument;
-        }
-
+        const cli = try zig_q.repl.parseReplCli(args[2..]);
         const stdin = std.fs.File.stdin().deprecatedReader();
-        try zig_q.repl.runRepl(allocator, seed, stdin, stdout, .{ .record = record });
+        try zig_q.repl.runRepl(allocator, cli.seed, stdin, stdout, .{ .record = cli.record });
         return;
     }
 
@@ -49,6 +31,7 @@ pub fn main() !void {
             \\Usage:
             \\  zig build run -- --demo [seed]              Non-interactive demo (default seed 42)
             \\  zig build run -- --repl [seed] [--record [path]]
+            \\  zig build run -- --repl --record [seed]      Same; numeric after --record is seed
             \\                                              Interactive REPL (default seed 42)
             \\  zig build dst -- bootstrap [seed]           DST harness: bootstrap scenario
             \\  zig build dst -- explore [seed]             DST harness: explore scenario

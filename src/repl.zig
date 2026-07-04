@@ -8,6 +8,49 @@ pub const RunOpts = struct {
     record: ?transcript.RecordOpts = null,
 };
 
+pub const ReplCli = struct {
+    seed: u64 = 42,
+    record: ?transcript.RecordOpts = null,
+};
+
+/// Parse REPL args after `--repl`: `[seed] [--record [path]]` in any order.
+/// A numeric token after `--record` is the seed (default transcript path).
+/// Use a path with separators or extension to set a custom transcript file.
+pub fn parseReplCli(args: []const []const u8) !ReplCli {
+    var result: ReplCli = .{};
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        const arg = args[i];
+        if (std.mem.eql(u8, arg, "--record")) {
+            if (i + 1 < args.len and args[i + 1][0] != '-') {
+                const next = args[i + 1];
+                if (looksLikeRecordPath(next)) {
+                    result.record = .{ .path = next };
+                    i += 1;
+                } else {
+                    result.record = .{};
+                    result.seed = try std.fmt.parseInt(u64, next, 10);
+                    i += 1;
+                }
+            } else {
+                result.record = .{};
+            }
+            continue;
+        }
+        if (arg[0] == '-') return error.UnknownArgument;
+        result.seed = try std.fmt.parseInt(u64, arg, 10);
+    }
+    return result;
+}
+
+fn looksLikeRecordPath(text: []const u8) bool {
+    if (std.mem.indexOfAny(u8, text, "/\\.")) |_| return true;
+    for (text) |c| {
+        if (c < '0' or c > '9') return true;
+    }
+    return false;
+}
+
 pub fn runRepl(
     allocator: std.mem.Allocator,
     seed: u64,
@@ -134,6 +177,25 @@ fn readLine(allocator: std.mem.Allocator, reader: anytype) !?[]u8 {
     }
 
     return try list.toOwnedSlice(allocator);
+}
+
+test "parseReplCli treats --record 42 as seed not path" {
+    const cli = try parseReplCli(&.{ "--record", "42" });
+    try std.testing.expectEqual(@as(u64, 42), cli.seed);
+    try std.testing.expect(cli.record != null);
+    try std.testing.expect(cli.record.?.path == null);
+}
+
+test "parseReplCli accepts seed before --record" {
+    const cli = try parseReplCli(&.{ "99", "--record" });
+    try std.testing.expectEqual(@as(u64, 99), cli.seed);
+    try std.testing.expect(cli.record != null);
+}
+
+test "parseReplCli accepts custom transcript path" {
+    const cli = try parseReplCli(&.{ "42", "--record", "transcripts/foo.txt" });
+    try std.testing.expectEqual(@as(u64, 42), cli.seed);
+    try std.testing.expectEqualStrings("transcripts/foo.txt", cli.record.?.path.?);
 }
 
 test "repl recording captures session transcript" {

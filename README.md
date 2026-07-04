@@ -31,10 +31,11 @@ zig build run -- --demo 42    # explicit seed (default: 42)
 zig build run -- --repl
 zig build run -- --repl 42
 zig build run -- --repl 42 --record
+zig build run -- --repl --record 42
 zig build run -- --repl 42 --record my-session.txt
 ```
 
-Use `--record` to save a transcript (default: `transcripts/session-<timestamp>-seed<N>.txt`). Transcripts include `#` metadata headers plus the same output and `> command` lines shown in the session.
+Use `--record` to save a transcript (default: `transcripts/session-<timestamp>-seed<N>.txt`). A bare number after `--record` is the **seed**, not a filename — use a path like `transcripts/foo.txt` for a custom file. Transcripts include `#` metadata headers plus the same output and `> command` lines shown in the session.
 
 The REPL rolls six stats on start, then accepts creation commands before spawning a player.
 
