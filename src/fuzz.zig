@@ -99,7 +99,7 @@ pub fn run(allocator: std.mem.Allocator, cfg: Config) !Report {
             .session = null,
         };
 
-        try out.print("zig-q repl seed={}\n", .{cfg.world_seed});
+        try out.print("zig-q repl version={s} seed={}\n", .{ @import("version.zig").semver, cfg.world_seed });
         try session.formatStatPool(draft.pool, &out);
 
         var step: u32 = 0;

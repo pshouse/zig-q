@@ -3,14 +3,17 @@ const world = @import("world.zig");
 const session = @import("session.zig");
 const commands = @import("commands.zig");
 const transcript = @import("transcript.zig");
+const version = @import("version.zig");
 
 pub const RunOpts = struct {
     record: ?transcript.RecordOpts = null,
+    semver: ?[]const u8 = null,
 };
 
 pub const ReplCli = struct {
     seed: u64 = 42,
     record: ?transcript.RecordOpts = null,
+    semver: ?[]const u8 = null,
 };
 
 /// Parse REPL args after `--repl`: `[seed] [--record [path]]` in any order.
@@ -25,16 +28,23 @@ pub fn parseReplCli(args: []const []const u8) !ReplCli {
             if (i + 1 < args.len and args[i + 1][0] != '-') {
                 const next = args[i + 1];
                 if (looksLikeRecordPath(next)) {
-                    result.record = .{ .path = next };
+                    result.record = .{ .path = next, .semver = result.semver };
                     i += 1;
                 } else {
-                    result.record = .{};
+                    result.record = .{ .semver = result.semver };
                     result.seed = try std.fmt.parseInt(u64, next, 10);
                     i += 1;
                 }
             } else {
-                result.record = .{};
+                result.record = .{ .semver = result.semver };
             }
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--semver")) {
+            if (i + 1 >= args.len) return error.UnknownArgument;
+            result.semver = args[i + 1];
+            if (result.record) |*rec| rec.semver = result.semver;
+            i += 1;
             continue;
         }
         if (arg[0] == '-') return error.UnknownArgument;
@@ -73,9 +83,10 @@ pub fn runRepl(
     var recording: ?transcript.Session = null;
     defer if (recording) |*rec| rec.deinit();
 
+    const semver = opts.semver;
     if (opts.record) |record_opts| {
         recording = try transcript.Session.open(allocator, seed, record_opts);
-        try recording.?.writeHeader(seed);
+        try recording.?.writeHeader(seed, record_opts.semver orelse semver);
     }
 
     var out = transcript.Output(@TypeOf(stdout_writer)){
@@ -83,7 +94,7 @@ pub fn runRepl(
         .session = if (recording) |*rec| rec else null,
     };
 
-    try out.print("zig-q repl seed={}\n", .{seed});
+    try out.print("zig-q repl version={s} seed={}\n", .{ version.resolve(semver), seed });
     try session.formatStatPool(draft.pool, &out);
     try out.print("type 'help' for commands\n", .{});
     if (recording) |*rec| {
@@ -132,9 +143,10 @@ pub fn runReplScript(
     var recording: ?transcript.Session = null;
     defer if (recording) |*rec| rec.deinit();
 
+    const semver = opts.semver;
     if (opts.record) |record_opts| {
         recording = try transcript.Session.open(allocator, seed, record_opts);
-        try recording.?.writeHeader(seed);
+        try recording.?.writeHeader(seed, record_opts.semver orelse semver);
     }
 
     var out = transcript.Output(@TypeOf(stdout_writer)){
@@ -142,7 +154,7 @@ pub fn runReplScript(
         .session = if (recording) |*rec| rec else null,
     };
 
-    try out.print("zig-q repl seed={}\n", .{seed});
+    try out.print("zig-q repl version={s} seed={}\n", .{ version.resolve(semver), seed });
     try session.formatStatPool(draft.pool, &out);
 
     for (script) |line| {
@@ -198,6 +210,12 @@ test "parseReplCli accepts custom transcript path" {
     try std.testing.expectEqualStrings("transcripts/foo.txt", cli.record.?.path.?);
 }
 
+test "parseReplCli accepts --semver override" {
+    const cli = try parseReplCli(&.{ "42", "--record", "--semver", "0.6.0-dev" });
+    try std.testing.expectEqualStrings("0.6.0-dev", cli.semver.?);
+    try std.testing.expectEqualStrings("0.6.0-dev", cli.record.?.semver.?);
+}
+
 test "repl recording captures session transcript" {
     const allocator = std.testing.allocator;
 
@@ -216,6 +234,7 @@ test "repl recording captures session transcript" {
     defer allocator.free(file);
 
     const stdout = out_stream.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, file, "# version=0.5.0") != null);
     try std.testing.expect(std.mem.indexOf(u8, file, "# seed=42") != null);
     try std.testing.expect(std.mem.indexOf(u8, file, "> help") != null);
     try std.testing.expect(std.mem.indexOf(u8, file, "exiting...") != null);

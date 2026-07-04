@@ -1,8 +1,11 @@
 const std = @import("std");
+const version = @import("version.zig");
 
 pub const RecordOpts = struct {
     /// `null` selects `transcripts/session-<unix_ts>-seed<N>.txt` under cwd.
     path: ?[]const u8 = null,
+    /// Override semver written to transcript header (default: compile-time `version.semver`).
+    semver: ?[]const u8 = null,
 };
 
 pub const Session = struct {
@@ -43,9 +46,10 @@ pub const Session = struct {
         return self.owned_path;
     }
 
-    pub fn writeHeader(self: *Session, seed: u64) !void {
+    pub fn writeHeader(self: *Session, seed: u64, semver_override: ?[]const u8) !void {
         const w = self.file.deprecatedWriter();
         try w.print("# zig-q repl transcript\n", .{});
+        try w.print("# version={s}\n", .{version.resolve(semver_override)});
         try w.print("# seed={}\n", .{seed});
         try w.print("# started={d}\n", .{std.time.timestamp()});
         try w.print("# ---\n", .{});
@@ -101,7 +105,7 @@ test "session mirrors output and input" {
     var session = try Session.open(allocator, 42, .{ .path = dest_path });
     defer session.deinit();
 
-    try session.writeHeader(42);
+    try session.writeHeader(42, null);
 
     var buf: [256]u8 = undefined;
     var capture = std.io.fixedBufferStream(&buf);
@@ -116,6 +120,7 @@ test "session mirrors output and input" {
     const file = try std.fs.cwd().readFileAlloc(allocator, dest_path, 1024);
     defer allocator.free(file);
 
+    try std.testing.expect(std.mem.indexOf(u8, file, "# version=0.5.0") != null);
     try std.testing.expect(std.mem.indexOf(u8, file, "# seed=42") != null);
     try std.testing.expect(std.mem.indexOf(u8, file, "zig-q repl seed=42") != null);
     try std.testing.expect(std.mem.indexOf(u8, file, "> help") != null);

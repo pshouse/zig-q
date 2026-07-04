@@ -20,6 +20,7 @@ pub const demo = @import("demo.zig");
 pub const repl = @import("repl.zig");
 pub const transcript = @import("transcript.zig");
 pub const fuzz = @import("fuzz.zig");
+pub const version = @import("version.zig");
 pub const dst = @import("dst.zig");
 
 test {
@@ -42,5 +43,6 @@ test {
     _ = @import("repl.zig");
     _ = @import("transcript.zig");
     _ = @import("fuzz.zig");
+    _ = @import("version.zig");
     _ = @import("dst.zig");
 }

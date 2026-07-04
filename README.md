@@ -1,8 +1,12 @@
 # zig-q
 
-A Zig prototype for tabletop-style character creation, dice rolling, and world simulation.
+A Zig prototype for deterministic **dungeon crawl** simulation: character creation, dice, combat (planned), and SQLite persistence (planned).
 
-**Requires Zig 0.15+** (tested on 0.15.2).
+**Requires Zig 0.15+** (tested on 0.15.2). **Version:** `0.5.0` — see [ROADMAP.md](ROADMAP.md) for v0.6→v1.0.
+
+```bash
+zig build run -- --version
+```
 
 ## Build
 
@@ -16,7 +20,9 @@ zig build
 zig build test
 ```
 
-Runs unit tests for dice/RNG determinism, world lifecycle, movement/map occupancy, character assignment and racial bonuses, command handlers, REPL scripts, and DST scenarios.
+Runs unit tests for dice/RNG determinism, world lifecycle, movement/map occupancy, character assignment and racial bonuses, command handlers, REPL scripts, DST scenarios, and fuzz smoke tests.
+
+**Release gate:** `zig build fuzz` must pass before each version ships (see ROADMAP.md).
 
 ## Run (non-interactive demo)
 
@@ -35,7 +41,7 @@ zig build run -- --repl --record 42
 zig build run -- --repl 42 --record my-session.txt
 ```
 
-Use `--record` to save a transcript (default: `transcripts/session-<timestamp>-seed<N>.txt`). A bare number after `--record` is the **seed**, not a filename — use a path like `transcripts/foo.txt` for a custom file. Transcripts include `#` metadata headers plus the same output and `> command` lines shown in the session.
+Use `--record` to save a transcript (default: `transcripts/session-<timestamp>-seed<N>.txt`). A bare number after `--record` is the **seed**, not a filename — use a path like `transcripts/foo.txt` for a custom file. Transcripts include `# version=<semver>`, `# seed=`, and `> command` lines. Override version metadata with `--semver 0.6.0-dev`.
 
 The REPL rolls six stats on start, then accepts creation commands before spawning a player.
 

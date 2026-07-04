@@ -16,7 +16,8 @@ pub fn main() !void {
     if (args.len >= 4) cfg.world_seed = try std.fmt.parseInt(u64, args[3], 10);
 
     const stdout = io_out.stdoutWriter();
-    try stdout.print("zig-q fuzz iterations={} seed={} world_seed={}\n", .{
+    try stdout.print("zig-q fuzz version={s} iterations={} seed={} world_seed={}\n", .{
+        zig_q.version.semver,
         cfg.iterations,
         cfg.seed,
         cfg.world_seed,
