@@ -218,23 +218,32 @@ test "draft dwarf with con 7 yields hp 10 on real build path" {
     try std.testing.expectEqual(@as(u32, 10), maxHpLevel1(char));
 }
 
-test "formatDraftStats shows hp and ac from draft" {
+pub const low_con_draft_sheet =
+    \\character (draft) George race=dwarf class=barbarian
+    \\STR: 12
+    \\DEX: 14
+    \\CON: 7
+    \\INT: 10
+    \\WIS: 12
+    \\CHA: 13
+    \\HP: 10
+    \\AC: 12
+    \\
+;
+
+test "formatDraftStats exact low-con dwarf barbarian sheet" {
     const allocator = std.testing.allocator;
     var w = try world.World.init(allocator, 42);
     defer w.deinit();
 
     var draft: session.CreationDraft = .{};
     _ = session.draftRoll(&w, &draft);
-    try session.draftAssign(&draft, .{ 6, 5, 4, 3, 2, 1 });
+    try session.draftAssign(&draft, .{ 6, 5, 2, 4, 3, 1 });
     try session.draftChooseRace(&draft, 2);
     try session.draftChooseClass(&draft, 1);
 
     var buf: [512]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
     try formatDraftStats(allocator, &w, &draft, fbs.writer());
-    const out = fbs.getWritten();
-    try std.testing.expect(std.mem.indexOf(u8, out, "character (draft)") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "HP:") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "AC:") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "dwarf") != null);
+    try std.testing.expectEqualStrings(low_con_draft_sheet, fbs.getWritten());
 }

@@ -286,14 +286,14 @@ test "bare assign shows usage not unknown" {
     try std.testing.expect(std.mem.indexOf(u8, out, "stat_rolls:") != null);
 }
 
-test "stats before spawn shows draft hp and ac" {
+test "stats before spawn exact low-con draft via execute" {
     const allocator = std.testing.allocator;
     var w = try world.World.init(allocator, 42);
     defer w.deinit();
 
     var draft: session.CreationDraft = .{};
     _ = session.draftRoll(&w, &draft);
-    try session.draftAssign(&draft, .{ 6, 5, 4, 3, 2, 1 });
+    try session.draftAssign(&draft, .{ 6, 5, 2, 4, 3, 1 });
     try session.draftChooseRace(&draft, 2);
     try session.draftChooseClass(&draft, 1);
 
@@ -301,9 +301,7 @@ test "stats before spawn shows draft hp and ac" {
     var buf: [512]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
     _ = try execute(&ctx, .stats, fbs.writer());
-    const out = fbs.getWritten();
-    try std.testing.expect(std.mem.indexOf(u8, out, "character (draft)") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "HP:") != null);
+    try std.testing.expectEqualStrings(character.low_con_draft_sheet, fbs.getWritten());
 }
 
 test "assign rejected after spawn" {
