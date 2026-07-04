@@ -46,14 +46,13 @@ pub fn main() !void {
             \\  zig build dst -- explore [seed]            DST harness: explore scenario
             \\  zig build dst -- create [seed]             DST harness: character creation scenario
             \\  zig build dst -- crawl_start [seed]       DST harness: dungeon crawl start
-            \\  zig build dst -- brawl [seed]              DST harness: combat scenario
             \\  zig build fuzz -- [iterations] [seed] [world_seed]
             \\                                           Deterministic REPL fuzz harness (required gate)
             \\
             \\  --record writes a transcript under transcripts/ unless path is given.
             \\  Transcripts include # version=<semver>; --semver overrides for this run.
             \\
-            \\  See ROADMAP.md for v0.8-v1.0 dungeon crawl plan.
+            \\  See ROADMAP.md for v0.6-v1.0 dungeon crawl plan.
             \\
         , .{zig_q.version.semver});
         return;

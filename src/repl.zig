@@ -244,9 +244,7 @@ test "repl recording captures session transcript" {
     defer allocator.free(file);
 
     const stdout = out_stream.getWritten();
-    const ver_line = try std.fmt.allocPrint(allocator, "# version={s}", .{@import("version.zig").semver});
-    defer allocator.free(ver_line);
-    try std.testing.expect(std.mem.indexOf(u8, file, ver_line) != null);
+    try std.testing.expect(std.mem.indexOf(u8, file, "# version=0.6.0") != null);
     try std.testing.expect(std.mem.indexOf(u8, file, "# seed=42") != null);
     try std.testing.expect(std.mem.indexOf(u8, file, "> help") != null);
     try std.testing.expect(std.mem.indexOf(u8, file, "exiting...") != null);

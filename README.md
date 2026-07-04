@@ -2,7 +2,7 @@
 
 A Zig prototype for deterministic **dungeon crawl** simulation: character creation, dungeon tiles, level-1 combat sheet (HP/AC), combat (planned), and SQLite persistence (planned).
 
-**Requires Zig 0.15+** (tested on 0.15.2). **Version:** `0.7.0` — see [ROADMAP.md](ROADMAP.md) for v0.8→v1.0.
+**Requires Zig 0.15+** (tested on 0.15.2). **Version:** `0.6.0` — see [ROADMAP.md](ROADMAP.md) for v0.7→v1.0.
 
 ```bash
 zig build run -- --version
@@ -49,8 +49,6 @@ The REPL loads **floor 1** dungeon tiles, rolls six stats on start, then accepts
 
 **Exploration commands:** `look`, `time`, `move <north|south|east|west>`, `help`, `exit`
 
-**Combat commands:** `attack [target]`, `end turn` (melee d20 + STR mod vs AC; monsters counter on their turn)
-
 Races: 1=dragonborn, 2=dwarf (+2 CON), 3=elf (+2 DEX). Classes: 1=barbarian, 2=fighter, 3=bard.
 
 Piped crawl script (PowerShell):
@@ -82,15 +80,12 @@ zig build dst -- create
 zig build dst -- create 42
 zig build dst -- crawl_start
 zig build dst -- crawl_start 42
-zig build dst -- brawl
-zig build dst -- brawl 42
 ```
 
 - **bootstrap** — stat rolls, spawn, ticks, map render, look (v0.2 compat path)
 - **explore** — spawn, look, move east, look, time, exit
 - **create** — roll, assign picks, choose dwarf/barbarian, spawn, stats, exit
 - **crawl_start** — floor 1 dungeon, creation, spawn, look, wall block, stats
-- **brawl** — floor 1, creation, spawn, goblin fight, attack/end turn, stats
 
 Two consecutive runs with the same scenario and seed produce byte-identical transcripts.
 

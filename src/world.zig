@@ -7,9 +7,6 @@ const entity = @import("entity.zig");
 const map = @import("map.zig");
 const terrain = @import("terrain.zig");
 const dungeon = @import("dungeon.zig");
-const character = @import("character.zig");
-const combat = @import("combat.zig");
-const monsters = @import("monsters.zig");
 
 pub const World = struct {
     allocator: std.mem.Allocator,
@@ -24,7 +21,6 @@ pub const World = struct {
     game_clock: clock.Clock,
     next_entity_id: entity.EntityId,
     staged_character: ?*types.Character = null,
-    combat: ?*combat.CombatState = null,
 
     pub fn init(allocator: std.mem.Allocator, seed: u64) !World {
         var races = try types.defaultRaces(allocator);
@@ -45,7 +41,6 @@ pub const World = struct {
     }
 
     pub fn deinit(self: *World) void {
-        combat.endCombat(self);
         if (self.staged_character) |char| self.destroyCharacter(char);
         self.staged_character = null;
         self.store.deinit(self.allocator);
@@ -80,25 +75,14 @@ pub const World = struct {
         return self.spawnPlayer(char, position, name);
     }
 
-    fn initCharacterHp(char: *types.Character) void {
-        if (char.max_hp == 0) char.max_hp = character.maxHpLevel1(char);
-        if (char.current_hp == 0) char.current_hp = char.max_hp;
-    }
-
     /// Takes ownership of `character`; freed when the world is torn down.
-    pub fn spawnPlayer(self: *World, char_ptr: *types.Character, position: loc.Loc, name: []const u8) !entity.EntityId {
-        initCharacterHp(char_ptr);
+    pub fn spawnPlayer(self: *World, character: *types.Character, position: loc.Loc, name: []const u8) !entity.EntityId {
         const id = self.next_entity_id;
         self.next_entity_id += 1;
-        _ = try self.store.create(self.allocator, id, name, position, char_ptr);
+        _ = try self.store.create(self.allocator, id, name, position, character);
         try self.tile_map.place(position, id);
         if (self.store.get(id)) |ent| ent.loc = position;
         return id;
-    }
-
-    pub fn spawnMonster(self: *World, kind: monsters.Kind, position: loc.Loc, name: []const u8) !entity.EntityId {
-        const char_ptr = try monsters.buildCharacter(self.allocator, kind);
-        return self.spawnPlayer(char_ptr, position, name);
     }
 
     /// Test helper: allocates a character owned by the world until `deinit`.

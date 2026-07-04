@@ -51,10 +51,9 @@ fn formatSheetBody(char: *const types.Character, writer: anytype) !void {
     for (char.attributes.items) |attr| {
         try writer.print("{s}: {}\n", .{ attr.abbr, attr.stat });
     }
-    const max_hp = if (char.max_hp > 0) char.max_hp else maxHpLevel1(char);
-    const cur_hp = if (char.current_hp > 0 or char.max_hp > 0) char.current_hp else max_hp;
-    const ac = if (char.is_monster) @import("monsters.zig").armorClass(char) else armorClass(char);
-    try writer.print("HP: {}/{}\n", .{ cur_hp, max_hp });
+    const hp = maxHpLevel1(char);
+    const ac = armorClass(char);
+    try writer.print("HP: {}\n", .{hp});
     try writer.print("AC: {}\n", .{ac});
 }
 
@@ -219,14 +218,14 @@ test "draft dwarf with con 7 yields hp 10 on real build path" {
     try std.testing.expectEqual(@as(u32, 10), maxHpLevel1(char));
 }
 
-test "formatDraftStats shows low-con draft hp and ac" {
+test "formatDraftStats shows hp and ac from draft" {
     const allocator = std.testing.allocator;
     var w = try world.World.init(allocator, 42);
     defer w.deinit();
 
     var draft: session.CreationDraft = .{};
     _ = session.draftRoll(&w, &draft);
-    try session.draftAssign(&draft, .{ 6, 5, 2, 4, 3, 1 });
+    try session.draftAssign(&draft, .{ 6, 5, 4, 3, 2, 1 });
     try session.draftChooseRace(&draft, 2);
     try session.draftChooseClass(&draft, 1);
 
@@ -235,8 +234,7 @@ test "formatDraftStats shows low-con draft hp and ac" {
     try formatDraftStats(allocator, &w, &draft, fbs.writer());
     const out = fbs.getWritten();
     try std.testing.expect(std.mem.indexOf(u8, out, "character (draft)") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "CON: 7") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "HP: 10") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "AC: 12") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "HP:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "AC:") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "dwarf") != null);
 }

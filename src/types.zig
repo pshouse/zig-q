@@ -63,10 +63,6 @@ pub const Character = struct {
     race: Race,
     class: Class,
     status: Status = .exploring,
-    current_hp: u32 = 0,
-    max_hp: u32 = 0,
-    damage_die: u8 = 8,
-    is_monster: bool = false,
 };
 
 pub fn defaultAttributes(allocator: std.mem.Allocator) !std.ArrayList(Attribute) {
