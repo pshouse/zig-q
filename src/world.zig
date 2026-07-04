@@ -5,6 +5,8 @@ const clock = @import("clock.zig");
 const loc = @import("loc.zig");
 const entity = @import("entity.zig");
 const map = @import("map.zig");
+const terrain = @import("terrain.zig");
+const dungeon = @import("dungeon.zig");
 
 pub const World = struct {
     allocator: std.mem.Allocator,
@@ -12,6 +14,9 @@ pub const World = struct {
     rng: rng.SeededRng,
     store: entity.EntityStore,
     tile_map: map.TileMap,
+    terrain: terrain.TerrainMap,
+    floor_index: u32 = 0,
+    has_dungeon: bool = false,
     races: std.ArrayList(types.Race),
     game_clock: clock.Clock,
     next_entity_id: entity.EntityId,
@@ -27,6 +32,7 @@ pub const World = struct {
             .rng = rng.SeededRng.init(seed),
             .store = entity.EntityStore.init(),
             .tile_map = map.TileMap.init(allocator),
+            .terrain = terrain.TerrainMap.init(allocator),
             .races = races,
             .game_clock = clock.Clock.init(0.45, 120.0, 5.0, 1.0),
             .next_entity_id = 0,
@@ -39,7 +45,17 @@ pub const World = struct {
         self.staged_character = null;
         self.store.deinit(self.allocator);
         self.tile_map.deinit();
+        self.terrain.deinit();
         types.deinitRaceList(self.allocator, &self.races);
+    }
+
+    pub fn loadFloor(self: *World, index: u32) !void {
+        switch (index) {
+            1 => try dungeon.loadFloor1(&self.terrain),
+            else => return error.UnknownFloor,
+        }
+        self.floor_index = index;
+        self.has_dungeon = true;
     }
 
     fn destroyCharacter(self: *World, char: *types.Character) void {

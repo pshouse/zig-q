@@ -32,6 +32,7 @@ pub fn moveEntity(w: *world.World, id: entity.EntityId, dir: Direction) !loc.Loc
     const ent = w.store.get(id) orelse return error.EntityNotFound;
     const old_loc = ent.loc;
     const new_loc = step(old_loc, dir) orelse return error.Blocked;
+    if (w.has_dungeon and !w.terrain.isWalkable(new_loc)) return error.Blocked;
     if (w.tile_map.isBlockedFor(new_loc, id)) return error.Blocked;
 
     w.tile_map.remove(old_loc, id);
@@ -70,6 +71,16 @@ test "moveEntity advances clock" {
 
     _ = try moveEntity(&w, id, .south);
     try std.testing.expectEqual(@as(u64, 1), w.game_clock.ticks);
+}
+
+test "moveEntity rejects dungeon wall" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 1);
+    defer w.deinit();
+    try w.loadFloor(1);
+
+    const id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    try std.testing.expectError(error.Blocked, moveEntity(&w, id, .north));
 }
 
 test "moveEntity rejects blocked tile" {

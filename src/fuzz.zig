@@ -57,6 +57,9 @@ const templates = [_][]const u8{
     "move south",
     "move east",
     "move west",
+    "move north",
+    "move north",
+    "move south",
     "move up",
     "move ",
     "l",
@@ -82,6 +85,7 @@ pub fn run(allocator: std.mem.Allocator, cfg: Config) !Report {
 
         var w = try world.World.init(a, cfg.world_seed);
         defer w.deinit();
+        try w.loadFloor(1);
 
         var draft: session.CreationDraft = .{};
         _ = session.draftRoll(&w, &draft);
@@ -156,6 +160,7 @@ pub fn runOne(
 ) !void {
     var w = try world.World.init(allocator, world_seed);
     defer w.deinit();
+    try w.loadFloor(1);
 
     var draft: session.CreationDraft = .{};
     _ = session.draftRoll(&w, &draft);
@@ -199,6 +204,12 @@ pub fn assertInvariants(w: *world.World, player_id: entity.EntityId) !void {
 
     if (player_id != entity.invalid_id and w.store.get(player_id) == null)
         return error.MissingPlayer;
+
+    if (w.has_dungeon) {
+        for (w.store.entities.items) |ent| {
+            if (!w.terrain.isWalkable(ent.loc)) return error.EntityInWall;
+        }
+    }
 }
 
 fn generateLine(allocator: std.mem.Allocator, fuzz_rng: *rng.SeededRng) ![]const u8 {

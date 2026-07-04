@@ -95,6 +95,16 @@ fn parseOnePick(prefix: []const u8, trimmed: []const u8) ?usize {
     return std.fmt.parseInt(usize, arg, 10) catch null;
 }
 
+fn isSpawned(ctx: *const Context) bool {
+    return ctx.player_id != entity.invalid_id;
+}
+
+fn rejectCreationAfterSpawn(ctx: *const Context, writer: anytype, verb: []const u8) !bool {
+    if (!isSpawned(ctx)) return false;
+    try writer.print("character already spawned ({s} disabled in crawl phase)\n", .{verb});
+    return true;
+}
+
 pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
     switch (cmd) {
         .look => {
@@ -126,10 +136,12 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
             try writer.print("moved to ({},{})\n", .{ new_loc.x, new_loc.y });
         },
         .roll => {
+            if (try rejectCreationAfterSpawn(ctx, writer, "roll")) return .continue_repl;
             const pool = session.draftRoll(ctx.w, ctx.draft);
             try session.formatStatPool(pool, writer);
         },
         .assign => |picks| {
+            if (try rejectCreationAfterSpawn(ctx, writer, "assign")) return .continue_repl;
             session.draftAssign(ctx.draft, picks) catch |err| switch (err) {
                 error.NoStatPool => {
                     try writer.print("roll stats first\n", .{});
@@ -140,6 +152,7 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
             try writer.print("stats assigned\n", .{});
         },
         .assign_usage => {
+            if (try rejectCreationAfterSpawn(ctx, writer, "assign")) return .continue_repl;
             try writer.print(
                 \\usage: assign <p1> <p2> <p3> <p4> <p5> <p6>
                 \\       map rolled stats (1-6) to STR DEX CON INT WIS CHA
@@ -149,6 +162,7 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
             if (ctx.draft.has_pool) try session.formatStatPool(ctx.draft.pool, writer);
         },
         .race => |pick| {
+            if (try rejectCreationAfterSpawn(ctx, writer, "race")) return .continue_repl;
             session.draftChooseRace(ctx.draft, pick) catch {
                 try writer.print("invalid race pick (1-3)\n", .{});
                 return .continue_repl;
@@ -156,6 +170,7 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
             try writer.print("race chosen\n", .{});
         },
         .race_usage => {
+            if (try rejectCreationAfterSpawn(ctx, writer, "race")) return .continue_repl;
             try writer.print(
                 \\usage: race <1-3>
                 \\       1=dragonborn (+2 CHA)  2=dwarf (+2 CON)  3=elf (+2 DEX)
@@ -163,6 +178,7 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
             , .{});
         },
         .class => |pick| {
+            if (try rejectCreationAfterSpawn(ctx, writer, "class")) return .continue_repl;
             session.draftChooseClass(ctx.draft, pick) catch {
                 try writer.print("invalid class pick (1-3)\n", .{});
                 return .continue_repl;
@@ -170,6 +186,7 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
             try writer.print("class chosen\n", .{});
         },
         .class_usage => {
+            if (try rejectCreationAfterSpawn(ctx, writer, "class")) return .continue_repl;
             try writer.print(
                 \\usage: class <1-3>
                 \\       1=barbarian  2=fighter  3=bard
@@ -189,11 +206,17 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
             try writer.print("spawned id={} at (49,49)\n", .{ ctx.player_id });
         },
         .stats => {
-            const ent = ctx.w.store.get(ctx.player_id) orelse {
-                try writer.print("no player spawned\n", .{});
-                return .continue_repl;
-            };
-            try character.formatStats(ent.char, writer);
+            if (ctx.w.store.get(ctx.player_id)) |ent| {
+                try character.formatStats(ent.char, writer);
+            } else {
+                character.formatDraftStats(ctx.allocator, ctx.w, ctx.draft, writer) catch |err| switch (err) {
+                    error.IncompleteDraft => {
+                        try writer.print("complete assign, race, and class for draft stats\n", .{});
+                        return .continue_repl;
+                    },
+                    else => |e| return e,
+                };
+            }
         },
         .help => {
             try writer.print(
@@ -261,6 +284,46 @@ test "bare assign shows usage not unknown" {
     const out = fbs.getWritten();
     try std.testing.expect(std.mem.indexOf(u8, out, "usage: assign") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "stat_rolls:") != null);
+}
+
+test "stats before spawn shows draft hp and ac" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+
+    var draft: session.CreationDraft = .{};
+    _ = session.draftRoll(&w, &draft);
+    try session.draftAssign(&draft, .{ 6, 5, 4, 3, 2, 1 });
+    try session.draftChooseRace(&draft, 2);
+    try session.draftChooseClass(&draft, 1);
+
+    var ctx = Context{ .allocator = allocator, .w = &w, .draft = &draft };
+    var buf: [512]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, .stats, fbs.writer());
+    const out = fbs.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, out, "character (draft)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "HP:") != null);
+}
+
+test "assign rejected after spawn" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+
+    var draft: session.CreationDraft = .{};
+    _ = session.draftRoll(&w, &draft);
+    try session.draftAssign(&draft, .{ 6, 5, 4, 3, 2, 1 });
+    try session.draftChooseRace(&draft, 2);
+    try session.draftChooseClass(&draft, 1);
+
+    var ctx = Context{ .allocator = allocator, .w = &w, .draft = &draft };
+    _ = try execute(&ctx, .spawn, std.io.null_writer);
+
+    var buf: [256]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, .{ .assign = .{ 1, 2, 3, 4, 5, 6 } }, fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "already spawned") != null);
 }
 
 test "spawn after creation shows dwarf con bonus in stats" {

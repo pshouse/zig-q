@@ -2,7 +2,7 @@
 
 **Product:** deterministic, scriptable **dungeon crawl** engine — create a character, descend floors, fight monsters, persist progress. No dialogue trees.
 
-**Current release:** `0.5.0` (creation REPL, DST, transcripts, fuzz harness).
+**Current release:** `0.6.0` (session phases, floor-1 dungeon tiles, HP/AC sheet, DST `crawl_start`).
 
 ---
 
@@ -20,21 +20,9 @@
 
 ---
 
-## v0.6 — Session model & dungeon map v1
+## v0.6 — Session model & dungeon map v1 (shipped)
 
 **Theme:** Clear create → crawl phases; walkable dungeon geometry.
-
-| Deliver | Notes |
-|---------|--------|
-| Explore vs create modes | Block creation commands after `spawn` |
-| Draft `stats` preview | Sheet visible before spawn |
-| HP / AC on sheet | Level 1, class hit die |
-| Dungeon tiles | floor, wall `#`, door; blocking movement |
-| Floor index (stub) | `floor 1` in look/status; single layout file |
-| DST `crawl_start` | create → spawn → look → move → stats |
-| **Fuzz** | Templates for wall collision; invariant: no entity inside wall |
-
-**Non-goals:** combat damage, SQLite, proc-gen, dialogue.
 
 ---
 
@@ -122,3 +110,4 @@
 | 0.3 | REPL, movement, explore |
 | 0.4 | Character creation, bonuses, stats |
 | 0.5 | Transcripts, fuzz harness, creation UX hints |
+| 0.6 | Session phases, dungeon tiles, HP/AC sheet, DST crawl_start |

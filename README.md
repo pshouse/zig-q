@@ -1,8 +1,8 @@
 # zig-q
 
-A Zig prototype for deterministic **dungeon crawl** simulation: character creation, dice, combat (planned), and SQLite persistence (planned).
+A Zig prototype for deterministic **dungeon crawl** simulation: character creation, dungeon tiles, level-1 combat sheet (HP/AC), combat (planned), and SQLite persistence (planned).
 
-**Requires Zig 0.15+** (tested on 0.15.2). **Version:** `0.5.0` — see [ROADMAP.md](ROADMAP.md) for v0.6→v1.0.
+**Requires Zig 0.15+** (tested on 0.15.2). **Version:** `0.6.0` — see [ROADMAP.md](ROADMAP.md) for v0.7→v1.0.
 
 ```bash
 zig build run -- --version
@@ -20,7 +20,7 @@ zig build
 zig build test
 ```
 
-Runs unit tests for dice/RNG determinism, world lifecycle, movement/map occupancy, character assignment and racial bonuses, command handlers, REPL scripts, DST scenarios, and fuzz smoke tests.
+Runs unit tests for dice/RNG determinism, world lifecycle, movement/map occupancy, dungeon terrain, character assignment and racial bonuses, HP/AC sheet, command handlers, REPL scripts, DST scenarios, and fuzz smoke tests.
 
 **Release gate:** `zig build fuzz` must pass before each version ships (see ROADMAP.md).
 
@@ -43,22 +43,25 @@ zig build run -- --repl 42 --record my-session.txt
 
 Use `--record` to save a transcript (default: `transcripts/session-<timestamp>-seed<N>.txt`). A bare number after `--record` is the **seed**, not a filename — use a path like `transcripts/foo.txt` for a custom file. Transcripts include `# version=<semver>`, `# seed=`, and `> command` lines. Override version metadata with `--semver 0.6.0-dev`.
 
-The REPL rolls six stats on start, then accepts creation commands before spawning a player.
+The REPL loads **floor 1** dungeon tiles, rolls six stats on start, then accepts creation commands before spawning a player. After `spawn`, creation commands are disabled.
 
-**Creation commands:** `roll`, `assign <6 picks>`, `race <1-3>`, `class <1-3>`, `spawn`, `stats`
+**Creation commands:** `roll`, `assign <6 picks>`, `race <1-3>`, `class <1-3>`, `spawn`, `stats` (draft preview before spawn)
 
 **Exploration commands:** `look`, `time`, `move <north|south|east|west>`, `help`, `exit`
 
 Races: 1=dragonborn, 2=dwarf (+2 CON), 3=elf (+2 DEX). Classes: 1=barbarian, 2=fighter, 3=bard.
 
-Piped creation script (PowerShell):
+Piped crawl script (PowerShell):
 
 ```powershell
 @(
   "assign 6 5 4 3 2 1",
   "race 2",
   "class 1",
+  "stats",
   "spawn",
+  "look",
+  "move north",
   "stats",
   "exit"
 ) | .\zig-out\bin\zig-q.exe --repl 42
@@ -75,11 +78,14 @@ zig build dst -- explore
 zig build dst -- explore 42
 zig build dst -- create
 zig build dst -- create 42
+zig build dst -- crawl_start
+zig build dst -- crawl_start 42
 ```
 
 - **bootstrap** — stat rolls, spawn, ticks, map render, look (v0.2 compat path)
 - **explore** — spawn, look, move east, look, time, exit
 - **create** — roll, assign picks, choose dwarf/barbarian, spawn, stats, exit
+- **crawl_start** — floor 1 dungeon, creation, spawn, look, wall block, stats
 
 Two consecutive runs with the same scenario and seed produce byte-identical transcripts.
 
@@ -94,13 +100,15 @@ zig build fuzz -- 10000 0 42
 
 Arguments: `iterations` (default 10000), fuzz `seed` (default 0), `world_seed` (default 42).
 
-Each iteration generates a random command script from seeded templates and byte mutations, executes it through the real REPL command path, and checks world/map invariants after every step. A failing seed reproduces exactly via `fuzz.runOne`.
+Each iteration loads floor 1, generates random command scripts, executes through the REPL path, and checks world/map/terrain invariants after every step.
 
 ## Project layout
 
 ```
 src/
-  character.zig  Stat assignment and racial bonus helpers
+  terrain.zig    Dungeon tile types and terrain map
+  dungeon.zig    Floor layout data
+  character.zig  Stat assignment, racial bonus, HP/AC sheet
   choose.zig     1-based pick indexing
   movement.zig   Entity movement on sparse map
   commands.zig   REPL command parse/execute

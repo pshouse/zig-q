@@ -9,6 +9,8 @@ pub const loc = @import("loc.zig");
 pub const clock = @import("clock.zig");
 pub const entity = @import("entity.zig");
 pub const map = @import("map.zig");
+pub const terrain = @import("terrain.zig");
+pub const dungeon = @import("dungeon.zig");
 pub const world = @import("world.zig");
 pub const movement = @import("movement.zig");
 pub const commands = @import("commands.zig");
@@ -32,6 +34,8 @@ test {
     _ = @import("clock.zig");
     _ = @import("entity.zig");
     _ = @import("map.zig");
+    _ = @import("terrain.zig");
+    _ = @import("dungeon.zig");
     _ = @import("world.zig");
     _ = @import("movement.zig");
     _ = @import("commands.zig");

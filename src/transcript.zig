@@ -120,7 +120,7 @@ test "session mirrors output and input" {
     const file = try std.fs.cwd().readFileAlloc(allocator, dest_path, 1024);
     defer allocator.free(file);
 
-    try std.testing.expect(std.mem.indexOf(u8, file, "# version=0.5.0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, file, "# version=0.6.0") != null);
     try std.testing.expect(std.mem.indexOf(u8, file, "# seed=42") != null);
     try std.testing.expect(std.mem.indexOf(u8, file, "zig-q repl seed=42") != null);
     try std.testing.expect(std.mem.indexOf(u8, file, "> help") != null);

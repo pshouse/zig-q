@@ -70,6 +70,7 @@ pub fn runRepl(
 ) !void {
     var w = try world.World.init(allocator, seed);
     defer w.deinit();
+    try w.loadFloor(1);
 
     var draft: session.CreationDraft = .{};
     _ = session.draftRoll(&w, &draft);
@@ -94,7 +95,11 @@ pub fn runRepl(
         .session = if (recording) |*rec| rec else null,
     };
 
-    try out.print("zig-q repl version={s} seed={}\n", .{ version.resolve(semver), seed });
+    try out.print("zig-q repl version={s} seed={} floor={}\n", .{
+        version.resolve(semver),
+        seed,
+        w.floor_index,
+    });
     try session.formatStatPool(draft.pool, &out);
     try out.print("type 'help' for commands\n", .{});
     if (recording) |*rec| {
@@ -130,6 +135,7 @@ pub fn runReplScript(
 ) !void {
     var w = try world.World.init(allocator, seed);
     defer w.deinit();
+    try w.loadFloor(1);
 
     var draft: session.CreationDraft = .{};
     _ = session.draftRoll(&w, &draft);
@@ -154,7 +160,11 @@ pub fn runReplScript(
         .session = if (recording) |*rec| rec else null,
     };
 
-    try out.print("zig-q repl version={s} seed={}\n", .{ version.resolve(semver), seed });
+    try out.print("zig-q repl version={s} seed={} floor={}\n", .{
+        version.resolve(semver),
+        seed,
+        w.floor_index,
+    });
     try session.formatStatPool(draft.pool, &out);
 
     for (script) |line| {
@@ -234,11 +244,43 @@ test "repl recording captures session transcript" {
     defer allocator.free(file);
 
     const stdout = out_stream.getWritten();
-    try std.testing.expect(std.mem.indexOf(u8, file, "# version=0.5.0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, file, "# version=0.6.0") != null);
     try std.testing.expect(std.mem.indexOf(u8, file, "# seed=42") != null);
     try std.testing.expect(std.mem.indexOf(u8, file, "> help") != null);
     try std.testing.expect(std.mem.indexOf(u8, file, "exiting...") != null);
     try std.testing.expect(std.mem.indexOf(u8, file, stdout) != null);
+}
+
+test "repl crawl script is deterministic" {
+    const allocator = std.testing.allocator;
+    const script = [_][]const u8{
+        "assign 6 5 4 3 2 1",
+        "race 2",
+        "class 1",
+        "stats",
+        "spawn",
+        "look",
+        "move north",
+        "stats",
+        "exit",
+    };
+
+    var buf_a: [16384]u8 = undefined;
+    var buf_b: [16384]u8 = undefined;
+    var fbs_a = std.io.fixedBufferStream(&buf_a);
+    var fbs_b = std.io.fixedBufferStream(&buf_b);
+
+    try runReplScript(allocator, 42, &script, fbs_a.writer(), .{});
+    try runReplScript(allocator, 42, &script, fbs_b.writer(), .{});
+
+    const out_a = fbs_a.getWritten();
+    const out_b = fbs_b.getWritten();
+    try std.testing.expect(out_a.len > 0);
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "character (draft)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "look floor=1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "HP:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "You cannot move there") != null);
+    try std.testing.expectEqualSlices(u8, out_a, out_b);
 }
 
 test "repl creation script is deterministic" {

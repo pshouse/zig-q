@@ -2,6 +2,7 @@ const std = @import("std");
 const loc = @import("loc.zig");
 const world = @import("world.zig");
 const entity = @import("entity.zig");
+const terrain = @import("terrain.zig");
 
 pub fn renderViewport(w: *const world.World, center: loc.Loc, radius: u8, writer: anytype) !void {
     const r0 = center.x;
@@ -17,6 +18,15 @@ pub fn renderViewport(w: *const world.World, center: loc.Loc, radius: u8, writer
             const count = w.tile_map.entityCountAt(tile);
             if (tile.x == center.x and tile.y == center.y) {
                 try writer.print("@", .{});
+            } else if (w.has_dungeon) {
+                const t = w.terrain.get(tile) orelse terrain.Tile.floor;
+                if (t == .wall or t == .door) {
+                    try writer.print("{c}", .{t.renderChar()});
+                } else if (count > 0) {
+                    try writer.print("*", .{});
+                } else {
+                    try writer.print(".", .{});
+                }
             } else if (count > 0) {
                 try writer.print("#", .{});
             } else {
@@ -33,7 +43,15 @@ pub fn renderLook(w: *const world.World, player_id: entity.EntityId, writer: any
         try writer.print("You cannot see in this condition.\n", .{});
         return;
     }
-    try writer.print("look center=({},{}) radius=5\n", .{ ent.loc.x, ent.loc.y });
+    if (w.has_dungeon) {
+        try writer.print("look floor={} center=({},{}) radius=5\n", .{
+            w.floor_index,
+            ent.loc.x,
+            ent.loc.y,
+        });
+    } else {
+        try writer.print("look center=({},{}) radius=5\n", .{ ent.loc.x, ent.loc.y });
+    }
     try renderViewport(w, ent.loc, 5, writer);
 }
 
@@ -52,4 +70,19 @@ test "center tile shows @ even when entity is present" {
     const output = fbs.getWritten();
     try std.testing.expect(std.mem.indexOf(u8, output, "@") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "#") == null);
+}
+
+test "dungeon look shows walls" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 1);
+    defer w.deinit();
+    try w.loadFloor(1);
+    const id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+
+    var buf: [4096]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    try renderLook(&w, id, fbs.writer());
+    const out = fbs.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, out, "look floor=1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "#") != null);
 }
