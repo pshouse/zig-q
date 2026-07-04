@@ -16,25 +16,7 @@ pub const Direction = enum {
         if (std.mem.eql(u8, word, "west") or std.mem.eql(u8, word, "w")) return .west;
         return null;
     }
-
-    pub fn token(dir: Direction) []const u8 {
-        return switch (dir) {
-            .north => "n",
-            .south => "s",
-            .east => "e",
-            .west => "w",
-        };
-    }
 };
-
-/// Compound compass shorthand (north-then-west, etc.).
-pub fn parseCompound(word: []const u8) ?[2]Direction {
-    if (std.mem.eql(u8, word, "nw")) return .{ .north, .west };
-    if (std.mem.eql(u8, word, "ne")) return .{ .north, .east };
-    if (std.mem.eql(u8, word, "sw")) return .{ .south, .west };
-    if (std.mem.eql(u8, word, "se")) return .{ .south, .east };
-    return null;
-}
 
 pub fn step(from: loc.Loc, dir: Direction) ?loc.Loc {
     return switch (dir) {
