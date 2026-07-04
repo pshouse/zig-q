@@ -100,7 +100,14 @@ After a recorded REPL session (`--record`), extract input commands for regressio
 zig build run -- --harvest transcripts/session-1783208416-seed42.txt
 ```
 
-Each `> command` line becomes one output line (seed header included). The harvested script is wired into the `playthrough` DST scenario and a REPL determinism test.
+Each `> command` line becomes one output line (seed header included). Shorthands are interpreted by intent:
+
+- `l` → look
+- `m n` → move north
+- `move nw` → north then west
+- `move w w` or `move w; move w` → two steps west
+
+The harvested script is wired into the `playthrough` DST scenario and a REPL determinism test.
 
 ## Fuzz harness
 

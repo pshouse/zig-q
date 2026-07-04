@@ -232,8 +232,7 @@ pub const Harness = struct {
                     .draft = &self.draft,
                     .player_id = self.player_id,
                 };
-                const cmd = commands.parseLine(line);
-                const result = try commands.execute(&ctx, cmd, writer);
+                const result = try commands.executeLine(&ctx, line, writer);
                 self.player_id = ctx.player_id;
                 if (result == .exit_repl) {
                     try writer.print("step exit\n", .{});

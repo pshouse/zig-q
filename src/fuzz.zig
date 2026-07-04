@@ -112,8 +112,7 @@ pub fn run(allocator: std.mem.Allocator, cfg: Config) !Report {
             try script_lines.append(allocator, try allocator.dupe(u8, line));
 
             try out.print("> {s}\n", .{line});
-            const cmd = commands.parseLine(line);
-            const result = commands.execute(&ctx, cmd, &out) catch |err| {
+            const result = commands.executeLine(&ctx, line, &out) catch |err| {
                 assertInvariants(&w, ctx.player_id) catch |inv_err| {
                     return failureReport(cfg.iterations, iteration, step, inv_err, &script_lines);
                 };
@@ -180,8 +179,7 @@ pub fn runOne(
 
     for (script) |line| {
         try out.print("> {s}\n", .{line});
-        const cmd = commands.parseLine(line);
-        const result = try commands.execute(&ctx, cmd, &out);
+        const result = try commands.executeLine(&ctx, line, &out);
         try assertInvariants(&w, ctx.player_id);
         if (result == .exit_repl) return;
     }
