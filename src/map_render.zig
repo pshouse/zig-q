@@ -15,10 +15,10 @@ pub fn renderViewport(w: *const world.World, center: loc.Loc, radius: u8, writer
         while (c < c_extent * 2 + 1) : (c += 1) {
             const tile = loc.Loc.init(r0 -% r_extent +% r, c0 -% c_extent +% c);
             const count = w.tile_map.entityCountAt(tile);
-            if (count > 0) {
-                try writer.print("#", .{});
-            } else if (tile.x == center.x and tile.y == center.y) {
+            if (tile.x == center.x and tile.y == center.y) {
                 try writer.print("@", .{});
+            } else if (count > 0) {
+                try writer.print("#", .{});
             } else {
                 try writer.print(".", .{});
             }
@@ -27,7 +27,7 @@ pub fn renderViewport(w: *const world.World, center: loc.Loc, radius: u8, writer
     }
 }
 
-pub fn renderLook(w: *world.World, player_id: entity.EntityId, writer: anytype) !void {
+pub fn renderLook(w: *const world.World, player_id: entity.EntityId, writer: anytype) !void {
     const ent = w.store.get(player_id) orelse return error.EntityNotFound;
     if (ent.conditions.has(.blinded)) {
         try writer.print("You cannot see in this condition.\n", .{});
@@ -35,5 +35,21 @@ pub fn renderLook(w: *world.World, player_id: entity.EntityId, writer: anytype) 
     }
     try writer.print("look center=({},{}) radius=5\n", .{ ent.loc.x, ent.loc.y });
     try renderViewport(w, ent.loc, 5, writer);
-    w.tick();
+}
+
+test "center tile shows @ even when entity is present" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 1);
+    defer w.deinit();
+
+    const id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    _ = id;
+
+    var buf: [256]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    try renderViewport(&w, loc.Loc.init(49, 49), 1, fbs.writer());
+
+    const output = fbs.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, output, "@") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "#") == null);
 }

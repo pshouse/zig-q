@@ -23,6 +23,8 @@ pub const EntityStore = struct {
 
     pub fn deinit(self: *EntityStore, allocator: std.mem.Allocator) void {
         for (self.entities.items) |*ent| {
+            ent.char.attributes.deinit(allocator);
+            allocator.destroy(ent.char);
             allocator.free(ent.name);
         }
         self.entities.deinit(allocator);
@@ -48,7 +50,7 @@ pub const EntityStore = struct {
         return id;
     }
 
-    pub fn get(self: *EntityStore, id: EntityId) ?*Entity {
+    pub fn get(self: *const EntityStore, id: EntityId) ?*Entity {
         for (self.entities.items) |*ent| {
             if (ent.id == id) return ent;
         }

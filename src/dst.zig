@@ -37,7 +37,6 @@ pub const default_scenario = Scenario{
 pub const Harness = struct {
     allocator: std.mem.Allocator,
     w: world.World,
-    character: ?*@import("types.zig").Character = null,
     player_id: u32 = std.math.maxInt(u32),
     last_pool: session.StatPool = undefined,
 
@@ -49,10 +48,6 @@ pub const Harness = struct {
     }
 
     pub fn deinit(self: *Harness) void {
-        if (self.character) |char| {
-            char.attributes.deinit(self.allocator);
-            self.allocator.destroy(char);
-        }
         self.w.deinit();
     }
 
@@ -81,19 +76,14 @@ pub const Harness = struct {
         switch (step) {
             .roll_stats => {
                 const boot = try session.bootstrapCharacter(self.allocator, &self.w, "George");
-                if (self.character) |old| {
-                    old.attributes.deinit(self.allocator);
-                    self.allocator.destroy(old);
-                }
-                self.character = boot.character;
+                self.w.stageCharacter(boot.character);
                 self.last_pool = boot.pool;
                 try writer.print("step roll_stats\n", .{});
                 try session.formatStatPool(boot.pool, writer);
             },
             .spawn => |s| {
-                const char = self.character orelse return error.MissingCharacter;
                 const position = loc.Loc.init(s.x, s.y);
-                self.player_id = try self.w.spawnPlayer(char, position, s.name);
+                self.player_id = try self.w.spawnStagedPlayer(position, s.name);
                 try writer.print("step spawn id={} at ({},{})\n", .{ self.player_id, s.x, s.y });
             },
             .tick => |n| {

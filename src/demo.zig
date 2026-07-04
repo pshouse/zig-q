@@ -16,11 +16,6 @@ pub fn runDemo(allocator: std.mem.Allocator, seed: u64, writer: anytype) !DemoRe
     try writer.print("zig-q demo seed={}\n", .{seed});
 
     const boot = try session.bootstrapCharacter(allocator, &w, "George");
-    defer {
-        boot.character.attributes.deinit(allocator);
-        allocator.destroy(boot.character);
-    }
-
     try session.formatStatPool(boot.pool, writer);
 
     const start = loc.Loc.init(49, 49);
@@ -29,8 +24,8 @@ pub fn runDemo(allocator: std.mem.Allocator, seed: u64, writer: anytype) !DemoRe
         player_id,
         start.x,
         start.y,
-        boot.character.race.name,
-        boot.character.class.name,
+        w.store.get(player_id).?.char.race.name,
+        w.store.get(player_id).?.char.class.name,
     });
 
     if (w.store.get(player_id)) |ent| {

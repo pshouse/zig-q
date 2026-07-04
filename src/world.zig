@@ -12,15 +12,12 @@ pub const World = struct {
     rng: rng.SeededRng,
     store: entity.EntityStore,
     tile_map: map.TileMap,
-    attribute_templates: std.ArrayList(types.Attribute),
     races: std.ArrayList(types.Race),
     game_clock: clock.Clock,
     next_entity_id: entity.EntityId,
+    staged_character: ?*types.Character = null,
 
     pub fn init(allocator: std.mem.Allocator, seed: u64) !World {
-        var attribute_templates = try types.defaultAttributes(allocator);
-        errdefer attribute_templates.deinit(allocator);
-
         var races = try types.defaultRaces(allocator);
         errdefer types.deinitRaceList(allocator, &races);
 
@@ -30,20 +27,39 @@ pub const World = struct {
             .rng = rng.SeededRng.init(seed),
             .store = entity.EntityStore.init(),
             .tile_map = map.TileMap.init(allocator),
-            .attribute_templates = attribute_templates,
             .races = races,
             .game_clock = clock.Clock.init(0.45, 120.0, 5.0, 1.0),
             .next_entity_id = 0,
+            .staged_character = null,
         };
     }
 
     pub fn deinit(self: *World) void {
+        if (self.staged_character) |char| self.destroyCharacter(char);
+        self.staged_character = null;
         self.store.deinit(self.allocator);
         self.tile_map.deinit();
-        self.attribute_templates.deinit(self.allocator);
         types.deinitRaceList(self.allocator, &self.races);
     }
 
+    fn destroyCharacter(self: *World, char: *types.Character) void {
+        char.attributes.deinit(self.allocator);
+        self.allocator.destroy(char);
+    }
+
+    /// Takes ownership of `char`; freed on `deinit` (via entity store or staged discard).
+    pub fn stageCharacter(self: *World, char: *types.Character) void {
+        if (self.staged_character) |old| self.destroyCharacter(old);
+        self.staged_character = char;
+    }
+
+    pub fn spawnStagedPlayer(self: *World, position: loc.Loc, name: []const u8) !entity.EntityId {
+        const char = self.staged_character orelse return error.NoStagedCharacter;
+        self.staged_character = null;
+        return self.spawnPlayer(char, position, name);
+    }
+
+    /// Takes ownership of `character`; freed when the world is torn down.
     pub fn spawnPlayer(self: *World, character: *types.Character, position: loc.Loc, name: []const u8) !entity.EntityId {
         const id = self.next_entity_id;
         self.next_entity_id += 1;
@@ -51,6 +67,19 @@ pub const World = struct {
         try self.tile_map.place(position, id);
         if (self.store.get(id)) |ent| ent.loc = position;
         return id;
+    }
+
+    /// Test helper: allocates a character owned by the world until `deinit`.
+    pub fn spawnTestPlayer(self: *World, position: loc.Loc) !entity.EntityId {
+        const attrs = try types.defaultAttributes(self.allocator);
+        const char = try self.allocator.create(types.Character);
+        char.* = .{
+            .name = "George",
+            .attributes = attrs,
+            .race = self.races.items[0],
+            .class = types.defaultClasses()[0],
+        };
+        return self.spawnPlayer(char, position, "entity_0");
     }
 
     pub fn tick(self: *World) void {
@@ -76,29 +105,26 @@ pub const Snapshot = struct {
     rng_offset: u16,
 };
 
-test "world init place deinit lifecycle" {
+test "world init place deinit lifecycle via single teardown path" {
     const allocator = std.testing.allocator;
 
     var world = try World.init(allocator, 42);
     defer world.deinit();
 
-    var attrs = try types.defaultAttributes(allocator);
-    defer attrs.deinit(allocator);
-
-    const char = try allocator.create(types.Character);
-    defer allocator.destroy(char);
-    char.* = .{
-        .name = "George",
-        .attributes = attrs,
-        .race = world.races.items[0],
-        .class = types.defaultClasses()[0],
-    };
-
-    const id = try world.spawnPlayer(char, loc.Loc.init(49, 49), "entity_0");
+    const id = try world.spawnTestPlayer(loc.Loc.init(49, 49));
     try std.testing.expectEqual(@as(entity.EntityId, 0), id);
     try std.testing.expectEqual(@as(usize, 1), world.store.count());
     try std.testing.expectEqual(@as(usize, 1), world.tile_map.occupiedCellCount());
     try std.testing.expectEqual(@as(usize, 1), world.tile_map.entityCountAt(loc.Loc.init(49, 49)));
+}
+
+test "world deinit frees staged character" {
+    const allocator = std.testing.allocator;
+    var world = try World.init(allocator, 1);
+    defer world.deinit();
+
+    const boot = try @import("session.zig").bootstrapCharacter(allocator, &world, "George");
+    world.stageCharacter(boot.character);
 }
 
 test "same seed yields identical world snapshot after spawn" {
@@ -109,30 +135,8 @@ test "same seed yields identical world snapshot after spawn" {
     var b = try World.init(allocator, 99);
     defer b.deinit();
 
-    var attrs_a = try types.defaultAttributes(allocator);
-    defer attrs_a.deinit(allocator);
-    var attrs_b = try types.defaultAttributes(allocator);
-    defer attrs_b.deinit(allocator);
-
-    const char_a = try allocator.create(types.Character);
-    defer allocator.destroy(char_a);
-    char_a.* = .{
-        .name = "George",
-        .attributes = attrs_a,
-        .race = a.races.items[0],
-        .class = types.defaultClasses()[0],
-    };
-    const char_b = try allocator.create(types.Character);
-    defer allocator.destroy(char_b);
-    char_b.* = .{
-        .name = "George",
-        .attributes = attrs_b,
-        .race = b.races.items[0],
-        .class = types.defaultClasses()[0],
-    };
-
-    _ = try a.spawnPlayer(char_a, loc.Loc.init(49, 49), "entity_0");
-    _ = try b.spawnPlayer(char_b, loc.Loc.init(49, 49), "entity_0");
+    _ = try a.spawnTestPlayer(loc.Loc.init(49, 49));
+    _ = try b.spawnTestPlayer(loc.Loc.init(49, 49));
 
     const sa = a.snapshot();
     const sb = b.snapshot();
