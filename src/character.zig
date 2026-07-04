@@ -26,7 +26,7 @@ pub fn applyRaceBonuses(char: *types.Character) void {
 }
 
 pub fn abilityModifier(stat: u64) i32 {
-    return @divTrunc(@as(i32, @intCast(stat)) - 10, 2);
+    return @divFloor(@as(i32, @intCast(stat)) - 10, 2);
 }
 
 pub fn statByAbbr(char: *const types.Character, abbr: []const u8) u64 {
@@ -127,6 +127,45 @@ test "assignStatPool maps picks to attributes" {
     try std.testing.expectEqual(@as(u64, 10), attrs.items[2].stat);
 }
 
+test "abilityModifier floors toward negative infinity" {
+    try std.testing.expectEqual(@as(i32, 0), abilityModifier(10));
+    try std.testing.expectEqual(@as(i32, -1), abilityModifier(9));
+    try std.testing.expectEqual(@as(i32, -2), abilityModifier(7));
+    try std.testing.expectEqual(@as(i32, 2), abilityModifier(14));
+}
+
+test "maxHpLevel1 with low con uses floor modifier" {
+    const allocator = std.testing.allocator;
+    var attrs = try types.defaultAttributes(allocator);
+    defer attrs.deinit(allocator);
+    for (attrs.items) |*attr| {
+        if (std.mem.eql(u8, attr.abbr, "CON")) attr.stat = 7;
+    }
+    const char = types.Character{
+        .name = "t",
+        .attributes = attrs,
+        .race = .{ .name = "human", .speed = 30, .attr_bonuses = .empty },
+        .class = .{ .name = "barbarian", .hit_die = 12 },
+    };
+    try std.testing.expectEqual(@as(u32, 10), maxHpLevel1(&char));
+}
+
+test "armorClass with low dex uses floor modifier" {
+    const allocator = std.testing.allocator;
+    var attrs = try types.defaultAttributes(allocator);
+    defer attrs.deinit(allocator);
+    for (attrs.items) |*attr| {
+        if (std.mem.eql(u8, attr.abbr, "DEX")) attr.stat = 9;
+    }
+    const char = types.Character{
+        .name = "t",
+        .attributes = attrs,
+        .race = .{ .name = "human", .speed = 30, .attr_bonuses = .empty },
+        .class = types.defaultClasses()[0],
+    };
+    try std.testing.expectEqual(@as(u32, 9), armorClass(&char));
+}
+
 test "maxHpLevel1 uses hit die and con modifier" {
     const allocator = std.testing.allocator;
     var attrs = try types.defaultAttributes(allocator);
@@ -157,6 +196,26 @@ test "armorClass uses dex modifier" {
         .class = types.defaultClasses()[0],
     };
     try std.testing.expectEqual(@as(u32, 12), armorClass(&char));
+}
+
+test "draft dwarf with con 7 yields hp 10 on real build path" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+
+    var draft: session.CreationDraft = .{};
+    _ = session.draftRoll(&w, &draft);
+    try session.draftAssign(&draft, .{ 6, 5, 2, 4, 3, 1 });
+    try session.draftChooseRace(&draft, 2);
+    try session.draftChooseClass(&draft, 1);
+
+    const char = try session.draftBuildCharacter(allocator, &w, &draft, "George");
+    defer {
+        char.attributes.deinit(allocator);
+        allocator.destroy(char);
+    }
+    try std.testing.expectEqual(@as(u64, 7), statByAbbr(char, "CON"));
+    try std.testing.expectEqual(@as(u32, 10), maxHpLevel1(char));
 }
 
 test "formatDraftStats shows hp and ac from draft" {
