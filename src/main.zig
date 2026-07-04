@@ -53,6 +53,8 @@ pub fn main() !void {
             \\  zig build dst -- bootstrap [seed]           DST harness: bootstrap scenario
             \\  zig build dst -- explore [seed]             DST harness: explore scenario
             \\  zig build dst -- create [seed]              DST harness: character creation scenario
+            \\  zig build fuzz -- [iterations] [seed] [world_seed]
+            \\                                              Deterministic REPL fuzz harness
             \\
             \\  --record writes a transcript under transcripts/ unless path is given.
             \\

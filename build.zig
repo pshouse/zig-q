@@ -52,4 +52,22 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| dst_run.addArgs(args);
     const dst_step = b.step("dst", "Run deterministic simulation harness");
     dst_step.dependOn(&dst_run.step);
+
+    const fuzz_exe = b.addExecutable(.{
+        .name = "zig-q-fuzz",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/fuzz_main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zig_q", .module = zig_q_mod },
+            },
+        }),
+    });
+    b.installArtifact(fuzz_exe);
+
+    const fuzz_run = b.addRunArtifact(fuzz_exe);
+    if (b.args) |args| fuzz_run.addArgs(args);
+    const fuzz_step = b.step("fuzz", "Run deterministic REPL fuzz harness");
+    fuzz_step.dependOn(&fuzz_run.step);
 }

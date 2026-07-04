@@ -76,6 +76,19 @@ zig build dst -- create 42
 
 Two consecutive runs with the same scenario and seed produce byte-identical transcripts.
 
+## Fuzz harness
+
+Zig's built-in `--fuzz` UI is not available on Windows yet, so zig-q ships a deterministic REPL fuzzer:
+
+```bash
+zig build fuzz
+zig build fuzz -- 10000 0 42
+```
+
+Arguments: `iterations` (default 10000), fuzz `seed` (default 0), `world_seed` (default 42).
+
+Each iteration generates a random command script from seeded templates and byte mutations, executes it through the real REPL command path, and checks world/map invariants after every step. A failing seed reproduces exactly via `fuzz.runOne`.
+
 ## Project layout
 
 ```
@@ -90,6 +103,7 @@ src/
   rng.zig        Seeded deterministic RNG
   world.zig      World init/spawn/deinit
   dst.zig        DST harness scenarios
+  fuzz.zig       Deterministic REPL fuzz harness
   main.zig       CLI entry point
 ```
 
