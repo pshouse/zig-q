@@ -80,14 +80,27 @@ zig build dst -- create
 zig build dst -- create 42
 zig build dst -- crawl_start
 zig build dst -- crawl_start 42
+zig build dst -- playthrough
+zig build dst -- playthrough 42
 ```
 
 - **bootstrap** — stat rolls, spawn, ticks, map render, look (v0.2 compat path)
 - **explore** — spawn, look, move east, look, time, exit
 - **create** — roll, assign picks, choose dwarf/barbarian, spawn, stats, exit
 - **crawl_start** — floor 1 dungeon, creation, spawn, look, wall block, stats
+- **playthrough** — harvested from `transcripts/session-1783208416-seed42.txt` (dragonborn crawl)
 
 Two consecutive runs with the same scenario and seed produce byte-identical transcripts.
+
+## Harvest playthrough transcripts
+
+After a recorded REPL session (`--record`), extract input commands for regression:
+
+```bash
+zig build run -- --harvest transcripts/session-1783208416-seed42.txt
+```
+
+Each `> command` line becomes one output line (seed header included). The harvested script is wired into the `playthrough` DST scenario and a REPL determinism test.
 
 ## Fuzz harness
 

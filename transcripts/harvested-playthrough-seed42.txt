@@ -1,0 +1,31 @@
+﻿# seed=42
+help
+assign 5 1 6 2 3 4
+race
+race 1
+stats
+help
+class
+class 1
+spawn
+stats
+l
+look
+m n
+move n
+move e
+look
+move e
+move s
+look
+move nw
+move w w
+move w; move w
+move w
+move w
+move w
+look
+time
+move n
+time
+exit

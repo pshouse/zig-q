@@ -251,6 +251,34 @@ test "repl recording captures session transcript" {
     try std.testing.expect(std.mem.indexOf(u8, file, stdout) != null);
 }
 
+test "harvested playthrough transcript is deterministic" {
+    const allocator = std.testing.allocator;
+    const path = "transcripts/session-1783208416-seed42.txt";
+
+    const harvested = try transcript.harvestFile(allocator, path);
+    defer transcript.freeCommands(allocator, harvested.commands);
+
+    try std.testing.expectEqual(@as(?u64, 42), harvested.header.seed);
+    try std.testing.expectEqual(@as(usize, 30), harvested.commands.len);
+    try std.testing.expectEqualStrings("assign 5 1 6 2 3 4", harvested.commands[1]);
+
+    var buf_a: [65536]u8 = undefined;
+    var buf_b: [65536]u8 = undefined;
+    var fbs_a = std.io.fixedBufferStream(&buf_a);
+    var fbs_b = std.io.fixedBufferStream(&buf_b);
+
+    const seed = harvested.header.seed orelse 42;
+    try runReplScript(allocator, seed, harvested.commands, fbs_a.writer(), .{});
+    try runReplScript(allocator, seed, harvested.commands, fbs_b.writer(), .{});
+
+    const out_a = fbs_a.getWritten();
+    const out_b = fbs_b.getWritten();
+    try std.testing.expect(out_a.len > 0);
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "dragonborn") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "look floor=1") != null);
+    try std.testing.expectEqualSlices(u8, out_a, out_b);
+}
+
 test "repl crawl script is deterministic" {
     const allocator = std.testing.allocator;
     const script = [_][]const u8{

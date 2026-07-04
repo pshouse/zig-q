@@ -71,6 +71,46 @@ pub const create_scenario = Scenario{
     },
 };
 
+/// Harvested from transcripts/session-1783208416-seed42.txt (recorded playthrough).
+pub const playthrough_scenario = Scenario{
+    .name = "playthrough",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .command = "help" },
+        .{ .command = "assign 5 1 6 2 3 4" },
+        .{ .command = "race" },
+        .{ .command = "race 1" },
+        .{ .command = "stats" },
+        .{ .command = "help" },
+        .{ .command = "class" },
+        .{ .command = "class 1" },
+        .{ .command = "spawn" },
+        .{ .command = "stats" },
+        .{ .command = "l" },
+        .{ .command = "look" },
+        .{ .command = "m n" },
+        .{ .command = "move n" },
+        .{ .command = "move e" },
+        .{ .command = "look" },
+        .{ .command = "move e" },
+        .{ .command = "move s" },
+        .{ .command = "look" },
+        .{ .command = "move nw" },
+        .{ .command = "move w w" },
+        .{ .command = "move w; move w" },
+        .{ .command = "move w" },
+        .{ .command = "move w" },
+        .{ .command = "move w" },
+        .{ .command = "look" },
+        .{ .command = "time" },
+        .{ .command = "move n" },
+        .{ .command = "time" },
+        .{ .command = "exit" },
+    },
+};
+
 pub const crawl_start_scenario = Scenario{
     .name = "crawl_start",
     .seed = 42,
@@ -194,6 +234,7 @@ pub const Harness = struct {
                 };
                 const cmd = commands.parseLine(line);
                 const result = try commands.execute(&ctx, cmd, writer);
+                self.player_id = ctx.player_id;
                 if (result == .exit_repl) {
                     try writer.print("step exit\n", .{});
                 }
@@ -215,6 +256,8 @@ pub fn scenarioByName(name: []const u8, seed: u64) ?Scenario {
         return Scenario{ .name = "create", .seed = seed, .steps = create_scenario.steps };
     if (std.mem.eql(u8, name, "crawl_start"))
         return Scenario{ .name = "crawl_start", .seed = seed, .steps = crawl_start_scenario.steps };
+    if (std.mem.eql(u8, name, "playthrough"))
+        return Scenario{ .name = "playthrough", .seed = seed, .steps = playthrough_scenario.steps };
     return null;
 }
 
@@ -256,6 +299,24 @@ test "dst explore scenario is byte-identical across runs" {
     const out_b = fbs_b.getWritten();
     try std.testing.expect(out_a.len > 0);
     try std.testing.expect(std.mem.indexOf(u8, out_a, "moved to") != null);
+    try std.testing.expectEqualSlices(u8, out_a, out_b);
+}
+
+test "dst playthrough scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    var buf_a: [65536]u8 = undefined;
+    var buf_b: [65536]u8 = undefined;
+    var fbs_a = std.io.fixedBufferStream(&buf_a);
+    var fbs_b = std.io.fixedBufferStream(&buf_b);
+
+    try runNamedScenario(allocator, "playthrough", 42, fbs_a.writer());
+    try runNamedScenario(allocator, "playthrough", 42, fbs_b.writer());
+
+    const out_a = fbs_a.getWritten();
+    const out_b = fbs_b.getWritten();
+    try std.testing.expect(out_a.len > 0);
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "dragonborn") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "look floor=1") != null);
     try std.testing.expectEqualSlices(u8, out_a, out_b);
 }
 

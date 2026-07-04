@@ -23,6 +23,22 @@ pub fn main() !void {
         return;
     }
 
+    if (args.len >= 2 and std.mem.eql(u8, args[1], "--harvest")) {
+        if (args.len < 3) {
+            try stdout.print("usage: --harvest <transcript.txt>\n", .{});
+            return;
+        }
+        const harvested = try zig_q.transcript.harvestFile(allocator, args[2]);
+        defer zig_q.transcript.freeCommands(allocator, harvested.commands);
+        if (harvested.header.seed) |seed| {
+            try stdout.print("# seed={}\n", .{seed});
+        }
+        for (harvested.commands) |cmd| {
+            try stdout.print("{s}\n", .{cmd});
+        }
+        return;
+    }
+
     if (args.len >= 2 and std.mem.eql(u8, args[1], "--repl")) {
         const cli = try zig_q.repl.parseReplCli(args[2..]);
         const stdin = std.fs.File.stdin().deprecatedReader();
@@ -46,6 +62,8 @@ pub fn main() !void {
             \\  zig build dst -- explore [seed]            DST harness: explore scenario
             \\  zig build dst -- create [seed]             DST harness: character creation scenario
             \\  zig build dst -- crawl_start [seed]       DST harness: dungeon crawl start
+            \\  zig build dst -- playthrough [seed]       DST harness: harvested REPL playthrough
+            \\  zig build run -- --harvest <transcript>   Print harvested > command lines
             \\  zig build fuzz -- [iterations] [seed] [world_seed]
             \\                                           Deterministic REPL fuzz harness (required gate)
             \\
@@ -58,7 +76,7 @@ pub fn main() !void {
         return;
     }
 
-    try stdout.print("zig-q: pass --version, --demo, --repl, or --help\n", .{});
+    try stdout.print("zig-q: pass --version, --demo, --repl, --harvest, or --help\n", .{});
 }
 
 fn parseSeed(text: []const u8) !u64 {
