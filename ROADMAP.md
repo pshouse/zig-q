@@ -92,6 +92,32 @@
 
 ---
 
+## Backlog — REPL UX from playthrough harvest
+
+Source: `transcripts/session-1783208416-seed42.txt` (seed 42, v0.6.0 recorded session). Harvest tooling (`--harvest`, DST `playthrough`) captures raw `> command` lines as-is; the expansions below are **not implemented** — document user intent for a future REPL/parser pass.
+
+| Input (as typed) | Inferred intent | Context / notes |
+|------------------|-----------------|-----------------|
+| `l` | `look` | Roguelike single-key look; typed immediately after `stats`, before full `look`. |
+| `m n` | `move north` | `m` = move shorthand; typed right before `move n` into the north wall. |
+| `race` (no arg) | show race usage | Intentional mid-creation help before `race 1` — already works. |
+| `class` (no arg) | show class usage | Same pattern before `class 1` — already works. |
+| `stats` (pre-class) | draft preview / validation | Mid-creation check; engine correctly reports incomplete draft. |
+| `move nw` | compound move (north then west) | At (50,50) corner navigation; roguelike compass compound. |
+| `move w w` | two steps west | Repeated direction token in one line. |
+| `move w; move w` | chained commands | Semicolon-separated multi-command input. |
+
+**Proposed deliverables (future version, likely post-v0.9 UX pass):**
+
+- `expandInput()` layer: split on `;`, map shorthands to canonical commands before `parseLine`.
+- Compound directions: `nw` / `ne` / `sw` / `se` → two cardinal moves (or diagonal if grid supports it).
+- Repeat syntax: `move w w` → multiple steps in one submission.
+- Update `help` and harvest docs once behavior ships; keep harvested transcripts byte-stable until then.
+
+**Non-goals for this backlog:** fuzzy NLP, aliases outside roguelike conventions, changing v0.6 golden transcripts retroactively.
+
+---
+
 ## Explicitly parked (post-1.0)
 
 - Dialogue / NPC conversation
