@@ -4,10 +4,14 @@ const world = @import("world.zig");
 const session = @import("session.zig");
 const map_render = @import("map_render.zig");
 const commands = @import("commands.zig");
-const repl = @import("repl.zig");
 
 pub const Step = union(enum) {
     roll_stats,
+    creation_roll,
+    assign_stats: [6]usize,
+    choose_race: usize,
+    choose_class: usize,
+    creation_finish: []const u8,
     spawn: struct { name: []const u8, x: u64, y: u64 },
     tick: u32,
     time,
@@ -51,9 +55,25 @@ pub const explore_scenario = Scenario{
     },
 };
 
+pub const create_scenario = Scenario{
+    .name = "create",
+    .seed = 42,
+    .steps = &.{
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 },
+        .{ .choose_class = 1 },
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .command = "stats" },
+        .{ .command = "exit" },
+    },
+};
+
 pub const Harness = struct {
     allocator: std.mem.Allocator,
     w: world.World,
+    draft: session.CreationDraft = .{},
     player_id: u32 = std.math.maxInt(u32),
     last_pool: session.StatPool = undefined,
 
@@ -98,6 +118,29 @@ pub const Harness = struct {
                 try writer.print("step roll_stats\n", .{});
                 try session.formatStatPool(boot.pool, writer);
             },
+            .creation_roll => {
+                const pool = session.draftRoll(&self.w, &self.draft);
+                self.last_pool = pool;
+                try writer.print("step creation_roll\n", .{});
+                try session.formatStatPool(pool, writer);
+            },
+            .assign_stats => |picks| {
+                try session.draftAssign(&self.draft, picks);
+                try writer.print("step assign_stats\n", .{});
+            },
+            .choose_race => |pick| {
+                try session.draftChooseRace(&self.draft, pick);
+                try writer.print("step choose_race pick={}\n", .{pick});
+            },
+            .choose_class => |pick| {
+                try session.draftChooseClass(&self.draft, pick);
+                try writer.print("step choose_class pick={}\n", .{pick});
+            },
+            .creation_finish => |name| {
+                const char = try session.draftBuildCharacter(self.allocator, &self.w, &self.draft, name);
+                self.w.stageCharacter(char);
+                try writer.print("step creation_finish name={s}\n", .{name});
+            },
             .spawn => |s| {
                 const position = loc.Loc.init(s.x, s.y);
                 self.player_id = try self.w.spawnStagedPlayer(position, s.name);
@@ -120,8 +163,14 @@ pub const Harness = struct {
             },
             .command => |line| {
                 try writer.print("step command {s}\n", .{line});
+                var ctx = commands.Context{
+                    .allocator = self.allocator,
+                    .w = &self.w,
+                    .draft = &self.draft,
+                    .player_id = self.player_id,
+                };
                 const cmd = commands.parseLine(line);
-                const result = try commands.execute(&self.w, self.player_id, cmd, writer);
+                const result = try commands.execute(&ctx, cmd, writer);
                 if (result == .exit_repl) {
                     try writer.print("step exit\n", .{});
                 }
@@ -139,6 +188,8 @@ pub fn scenarioByName(name: []const u8, seed: u64) ?Scenario {
         return Scenario{ .name = "bootstrap", .seed = seed, .steps = default_scenario.steps };
     if (std.mem.eql(u8, name, "explore"))
         return Scenario{ .name = "explore", .seed = seed, .steps = explore_scenario.steps };
+    if (std.mem.eql(u8, name, "create"))
+        return Scenario{ .name = "create", .seed = seed, .steps = create_scenario.steps };
     return null;
 }
 
@@ -180,6 +231,23 @@ test "dst explore scenario is byte-identical across runs" {
     const out_b = fbs_b.getWritten();
     try std.testing.expect(out_a.len > 0);
     try std.testing.expect(std.mem.indexOf(u8, out_a, "moved to") != null);
+    try std.testing.expectEqualSlices(u8, out_a, out_b);
+}
+
+test "dst create scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    var buf_a: [8192]u8 = undefined;
+    var buf_b: [8192]u8 = undefined;
+    var fbs_a = std.io.fixedBufferStream(&buf_a);
+    var fbs_b = std.io.fixedBufferStream(&buf_b);
+
+    try runNamedScenario(allocator, "create", 42, fbs_a.writer());
+    try runNamedScenario(allocator, "create", 42, fbs_b.writer());
+
+    const out_a = fbs_a.getWritten();
+    const out_b = fbs_b.getWritten();
+    try std.testing.expect(out_a.len > 0);
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "dwarf") != null);
     try std.testing.expectEqualSlices(u8, out_a, out_b);
 }
 

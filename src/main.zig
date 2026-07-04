@@ -27,12 +27,13 @@ pub fn main() !void {
 
     if (args.len >= 2 and std.mem.eql(u8, args[1], "--help")) {
         try stdout.print(
-            \\zig-q v0.3
+            \\zig-q v0.4
             \\Usage:
             \\  zig build run -- --demo [seed]    Non-interactive demo (default seed 42)
-            \\  zig build run -- --repl [seed]    Interactive REPL (default seed 42)
+            \\  zig build run -- --repl [seed]    Interactive REPL with character creation (default seed 42)
             \\  zig build dst -- bootstrap [seed]  DST harness: bootstrap scenario
             \\  zig build dst -- explore [seed]    DST harness: explore scenario
+            \\  zig build dst -- create [seed]     DST harness: character creation scenario
             \\
         , .{});
         return;

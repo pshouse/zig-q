@@ -1,23 +1,23 @@
 const std = @import("std");
 const world = @import("world.zig");
-const loc = @import("loc.zig");
 const session = @import("session.zig");
 const commands = @import("commands.zig");
-
-pub fn bootstrapPlayer(allocator: std.mem.Allocator, w: *world.World) !entity.EntityId {
-    const boot = try session.bootstrapCharacter(allocator, w, "George");
-    w.stageCharacter(boot.character);
-    return w.spawnStagedPlayer(loc.Loc.init(49, 49), "entity_0");
-}
-
-const entity = @import("entity.zig");
 
 pub fn runRepl(allocator: std.mem.Allocator, seed: u64, reader: anytype, writer: anytype) !void {
     var w = try world.World.init(allocator, seed);
     defer w.deinit();
 
-    const player_id = try bootstrapPlayer(allocator, &w);
+    var draft: session.CreationDraft = .{};
+    _ = session.draftRoll(&w, &draft);
+
+    var ctx = commands.Context{
+        .allocator = allocator,
+        .w = &w,
+        .draft = &draft,
+    };
+
     try writer.print("zig-q repl seed={}\n", .{seed});
+    try session.formatStatPool(draft.pool, writer);
     try writer.print("type 'help' for commands\n", .{});
 
     while (true) {
@@ -26,7 +26,7 @@ pub fn runRepl(allocator: std.mem.Allocator, seed: u64, reader: anytype, writer:
         defer allocator.free(line);
 
         const cmd = commands.parseLine(line);
-        const result = try commands.execute(&w, player_id, cmd, writer);
+        const result = try commands.execute(&ctx, cmd, writer);
         switch (result) {
             .continue_repl => {},
             .exit_repl => {
@@ -47,13 +47,22 @@ pub fn runReplScript(
     var w = try world.World.init(allocator, seed);
     defer w.deinit();
 
-    const player_id = try bootstrapPlayer(allocator, &w);
+    var draft: session.CreationDraft = .{};
+    _ = session.draftRoll(&w, &draft);
+
+    var ctx = commands.Context{
+        .allocator = allocator,
+        .w = &w,
+        .draft = &draft,
+    };
+
     try writer.print("zig-q repl seed={}\n", .{seed});
+    try session.formatStatPool(draft.pool, writer);
 
     for (script) |line| {
         try writer.print("> {s}\n", .{line});
         const cmd = commands.parseLine(line);
-        const result = try commands.execute(&w, player_id, cmd, writer);
+        const result = try commands.execute(&ctx, cmd, writer);
         switch (result) {
             .continue_repl => {},
             .exit_repl => {
@@ -83,9 +92,16 @@ fn readLine(allocator: std.mem.Allocator, reader: anytype) !?[]u8 {
     return try list.toOwnedSlice(allocator);
 }
 
-test "repl script is deterministic" {
+test "repl creation script is deterministic" {
     const allocator = std.testing.allocator;
-    const script = [_][]const u8{ "look", "move east", "look", "time", "exit" };
+    const script = [_][]const u8{
+        "assign 6 5 4 3 2 1",
+        "race 2",
+        "class 1",
+        "spawn",
+        "stats",
+        "exit",
+    };
 
     var buf_a: [4096]u8 = undefined;
     var buf_b: [4096]u8 = undefined;
@@ -95,5 +111,9 @@ test "repl script is deterministic" {
     try runReplScript(allocator, 42, &script, fbs_a.writer());
     try runReplScript(allocator, 42, &script, fbs_b.writer());
 
-    try std.testing.expectEqualSlices(u8, fbs_a.getWritten(), fbs_b.getWritten());
+    const out_a = fbs_a.getWritten();
+    const out_b = fbs_b.getWritten();
+    try std.testing.expect(out_a.len > 0);
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "dwarf") != null);
+    try std.testing.expectEqualSlices(u8, out_a, out_b);
 }

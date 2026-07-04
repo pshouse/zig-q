@@ -14,6 +14,8 @@ pub const movement = @import("movement.zig");
 pub const commands = @import("commands.zig");
 pub const map_render = @import("map_render.zig");
 pub const session = @import("session.zig");
+pub const character = @import("character.zig");
+pub const choose = @import("choose.zig");
 pub const demo = @import("demo.zig");
 pub const repl = @import("repl.zig");
 pub const dst = @import("dst.zig");
@@ -32,6 +34,8 @@ test {
     _ = @import("commands.zig");
     _ = @import("map_render.zig");
     _ = @import("session.zig");
+    _ = @import("character.zig");
+    _ = @import("choose.zig");
     _ = @import("demo.zig");
     _ = @import("repl.zig");
     _ = @import("dst.zig");
