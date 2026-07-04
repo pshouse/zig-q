@@ -2,7 +2,7 @@
 
 **Product:** deterministic, scriptable **dungeon crawl** engine — create a character, descend floors, fight monsters, persist progress. No dialogue trees.
 
-**Current release:** `0.6.0` (session phases, floor-1 dungeon tiles, HP/AC sheet, DST `crawl_start`).
+**Current release:** `0.7.0` (turn-based combat, goblin/skeleton monsters, DST `brawl`).
 
 ---
 
@@ -26,21 +26,9 @@
 
 ---
 
-## v0.7 — Combat & monsters
+## v0.7 — Combat & monsters (shipped)
 
 **Theme:** Turn-based fights in the dungeon.
-
-| Deliver | Notes |
-|---------|--------|
-| Turn state | exploring ↔ fighting |
-| Melee pipeline | d20 + mod vs AC, damage, HP → 0 |
-| Conditions | prone, blinded, etc. affect rolls |
-| Monster entities | goblin, skeleton — static stat blocks |
-| REPL | `attack`, `end turn` |
-| DST `brawl` | fixed seed combat transcript |
-| **Fuzz** | combat command sequences; invariant: HP ≥ 0, valid turn owner |
-
-**Non-goals:** spells, inventory, death saves, AI pathing.
 
 ---
 
@@ -111,3 +99,4 @@
 | 0.4 | Character creation, bonuses, stats |
 | 0.5 | Transcripts, fuzz harness, creation UX hints |
 | 0.6 | Session phases, dungeon tiles, HP/AC sheet, DST crawl_start |
+| 0.7 | Turn combat, monsters, attack/end turn, DST brawl |
