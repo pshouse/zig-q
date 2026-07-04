@@ -18,6 +18,7 @@ pub const character = @import("character.zig");
 pub const choose = @import("choose.zig");
 pub const demo = @import("demo.zig");
 pub const repl = @import("repl.zig");
+pub const transcript = @import("transcript.zig");
 pub const dst = @import("dst.zig");
 
 test {
@@ -38,5 +39,6 @@ test {
     _ = @import("choose.zig");
     _ = @import("demo.zig");
     _ = @import("repl.zig");
+    _ = @import("transcript.zig");
     _ = @import("dst.zig");
 }

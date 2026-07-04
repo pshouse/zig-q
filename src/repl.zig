@@ -2,47 +2,18 @@ const std = @import("std");
 const world = @import("world.zig");
 const session = @import("session.zig");
 const commands = @import("commands.zig");
+const transcript = @import("transcript.zig");
 
-pub fn runRepl(allocator: std.mem.Allocator, seed: u64, reader: anytype, writer: anytype) !void {
-    var w = try world.World.init(allocator, seed);
-    defer w.deinit();
+pub const RunOpts = struct {
+    record: ?transcript.RecordOpts = null,
+};
 
-    var draft: session.CreationDraft = .{};
-    _ = session.draftRoll(&w, &draft);
-
-    var ctx = commands.Context{
-        .allocator = allocator,
-        .w = &w,
-        .draft = &draft,
-    };
-
-    try writer.print("zig-q repl seed={}\n", .{seed});
-    try session.formatStatPool(draft.pool, writer);
-    try writer.print("type 'help' for commands\n", .{});
-
-    while (true) {
-        try writer.print("> ", .{});
-        const line = try readLine(allocator, reader) orelse break;
-        defer allocator.free(line);
-
-        const cmd = commands.parseLine(line);
-        const result = try commands.execute(&ctx, cmd, writer);
-        switch (result) {
-            .continue_repl => {},
-            .exit_repl => {
-                try writer.print("exiting...\n", .{});
-                return;
-            },
-        }
-    }
-}
-
-/// Drive REPL with a fixed script (for tests and DST-style verification).
-pub fn runReplScript(
+pub fn runRepl(
     allocator: std.mem.Allocator,
     seed: u64,
-    script: []const []const u8,
-    writer: anytype,
+    reader: anytype,
+    stdout_writer: anytype,
+    opts: RunOpts,
 ) !void {
     var w = try world.World.init(allocator, seed);
     defer w.deinit();
@@ -56,17 +27,90 @@ pub fn runReplScript(
         .draft = &draft,
     };
 
-    try writer.print("zig-q repl seed={}\n", .{seed});
-    try session.formatStatPool(draft.pool, writer);
+    var recording: ?transcript.Session = null;
+    defer if (recording) |*rec| rec.deinit();
 
-    for (script) |line| {
-        try writer.print("> {s}\n", .{line});
+    if (opts.record) |record_opts| {
+        recording = try transcript.Session.open(allocator, seed, record_opts);
+        try recording.?.writeHeader(seed);
+    }
+
+    var out = transcript.Output(@TypeOf(stdout_writer)){
+        .stdout = stdout_writer,
+        .session = if (recording) |*rec| rec else null,
+    };
+
+    try out.print("zig-q repl seed={}\n", .{seed});
+    try session.formatStatPool(draft.pool, &out);
+    try out.print("type 'help' for commands\n", .{});
+    if (recording) |*rec| {
+        try out.print("recording to {s}\n", .{rec.path()});
+    }
+
+    while (true) {
+        try stdout_writer.print("> ", .{});
+        const line = try readLine(allocator, reader) orelse break;
+        defer allocator.free(line);
+
+        if (recording) |*rec| try rec.logInput(line);
+
         const cmd = commands.parseLine(line);
-        const result = try commands.execute(&ctx, cmd, writer);
+        const result = try commands.execute(&ctx, cmd, &out);
         switch (result) {
             .continue_repl => {},
             .exit_repl => {
-                try writer.print("exiting...\n", .{});
+                try out.print("exiting...\n", .{});
+                return;
+            },
+        }
+    }
+}
+
+/// Drive REPL with a fixed script (for tests and DST-style verification).
+pub fn runReplScript(
+    allocator: std.mem.Allocator,
+    seed: u64,
+    script: []const []const u8,
+    stdout_writer: anytype,
+    opts: RunOpts,
+) !void {
+    var w = try world.World.init(allocator, seed);
+    defer w.deinit();
+
+    var draft: session.CreationDraft = .{};
+    _ = session.draftRoll(&w, &draft);
+
+    var ctx = commands.Context{
+        .allocator = allocator,
+        .w = &w,
+        .draft = &draft,
+    };
+
+    var recording: ?transcript.Session = null;
+    defer if (recording) |*rec| rec.deinit();
+
+    if (opts.record) |record_opts| {
+        recording = try transcript.Session.open(allocator, seed, record_opts);
+        try recording.?.writeHeader(seed);
+    }
+
+    var out = transcript.Output(@TypeOf(stdout_writer)){
+        .stdout = stdout_writer,
+        .session = if (recording) |*rec| rec else null,
+    };
+
+    try out.print("zig-q repl seed={}\n", .{seed});
+    try session.formatStatPool(draft.pool, &out);
+
+    for (script) |line| {
+        try out.print("> {s}\n", .{line});
+
+        const cmd = commands.parseLine(line);
+        const result = try commands.execute(&ctx, cmd, &out);
+        switch (result) {
+            .continue_repl => {},
+            .exit_repl => {
+                try out.print("exiting...\n", .{});
                 return;
             },
         }
@@ -92,6 +136,30 @@ fn readLine(allocator: std.mem.Allocator, reader: anytype) !?[]u8 {
     return try list.toOwnedSlice(allocator);
 }
 
+test "repl recording captures session transcript" {
+    const allocator = std.testing.allocator;
+
+    const path = "zig-q-repl-record-test.txt";
+    defer std.fs.cwd().deleteFile(path) catch {};
+
+    const script = [_][]const u8{ "help", "exit" };
+    var out_buf: [1024]u8 = undefined;
+    var out_stream = std.io.fixedBufferStream(&out_buf);
+
+    try runReplScript(allocator, 42, &script, out_stream.writer(), .{
+        .record = .{ .path = path },
+    });
+
+    const file = try std.fs.cwd().readFileAlloc(allocator, path, 4096);
+    defer allocator.free(file);
+
+    const stdout = out_stream.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, file, "# seed=42") != null);
+    try std.testing.expect(std.mem.indexOf(u8, file, "> help") != null);
+    try std.testing.expect(std.mem.indexOf(u8, file, "exiting...") != null);
+    try std.testing.expect(std.mem.indexOf(u8, file, stdout) != null);
+}
+
 test "repl creation script is deterministic" {
     const allocator = std.testing.allocator;
     const script = [_][]const u8{
@@ -108,8 +176,8 @@ test "repl creation script is deterministic" {
     var fbs_a = std.io.fixedBufferStream(&buf_a);
     var fbs_b = std.io.fixedBufferStream(&buf_b);
 
-    try runReplScript(allocator, 42, &script, fbs_a.writer());
-    try runReplScript(allocator, 42, &script, fbs_b.writer());
+    try runReplScript(allocator, 42, &script, fbs_a.writer(), .{});
+    try runReplScript(allocator, 42, &script, fbs_b.writer(), .{});
 
     const out_a = fbs_a.getWritten();
     const out_b = fbs_b.getWritten();

@@ -19,21 +19,42 @@ pub fn main() !void {
     }
 
     if (args.len >= 2 and std.mem.eql(u8, args[1], "--repl")) {
-        const seed: u64 = if (args.len >= 3) try parseSeed(args[2]) else 42;
+        var seed: u64 = 42;
+        var record: ?zig_q.transcript.RecordOpts = null;
+
+        var i: usize = 2;
+        while (i < args.len) : (i += 1) {
+            if (std.mem.eql(u8, args[i], "--record")) {
+                if (i + 1 < args.len and args[i + 1][0] != '-') {
+                    record = .{ .path = args[i + 1] };
+                    i += 1;
+                } else {
+                    record = .{};
+                }
+                continue;
+            }
+            if (parseSeed(args[i])) |s| {
+                seed = s;
+            } else |_| return error.UnknownArgument;
+        }
+
         const stdin = std.fs.File.stdin().deprecatedReader();
-        try zig_q.repl.runRepl(allocator, seed, stdin, stdout);
+        try zig_q.repl.runRepl(allocator, seed, stdin, stdout, .{ .record = record });
         return;
     }
 
     if (args.len >= 2 and std.mem.eql(u8, args[1], "--help")) {
         try stdout.print(
-            \\zig-q v0.4
+            \\zig-q v0.5
             \\Usage:
-            \\  zig build run -- --demo [seed]    Non-interactive demo (default seed 42)
-            \\  zig build run -- --repl [seed]    Interactive REPL with character creation (default seed 42)
-            \\  zig build dst -- bootstrap [seed]  DST harness: bootstrap scenario
-            \\  zig build dst -- explore [seed]    DST harness: explore scenario
-            \\  zig build dst -- create [seed]     DST harness: character creation scenario
+            \\  zig build run -- --demo [seed]              Non-interactive demo (default seed 42)
+            \\  zig build run -- --repl [seed] [--record [path]]
+            \\                                              Interactive REPL (default seed 42)
+            \\  zig build dst -- bootstrap [seed]           DST harness: bootstrap scenario
+            \\  zig build dst -- explore [seed]             DST harness: explore scenario
+            \\  zig build dst -- create [seed]              DST harness: character creation scenario
+            \\
+            \\  --record writes a transcript under transcripts/ unless path is given.
             \\
         , .{});
         return;

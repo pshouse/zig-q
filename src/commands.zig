@@ -15,8 +15,11 @@ pub const Command = union(enum) {
     exit,
     roll,
     assign: [6]usize,
+    assign_usage,
     race: usize,
+    race_usage,
     class: usize,
+    class_usage,
     spawn,
     stats,
     unknown: []const u8,
@@ -51,9 +54,23 @@ pub fn parseLine(line: []const u8) Command {
         if (movement.Direction.parse(arg)) |dir| return .{ .move = dir };
     }
 
-    if (parseSixPicks("assign ", trimmed)) |picks| return .{ .assign = picks };
-    if (parseOnePick("race ", trimmed)) |pick| return .{ .race = pick };
-    if (parseOnePick("class ", trimmed)) |pick| return .{ .class = pick };
+    if (std.mem.eql(u8, trimmed, "assign")) return .assign_usage;
+    if (std.mem.startsWith(u8, trimmed, "assign ")) {
+        if (parseSixPicks("assign ", trimmed)) |picks| return .{ .assign = picks };
+        return .assign_usage;
+    }
+
+    if (std.mem.eql(u8, trimmed, "race")) return .race_usage;
+    if (std.mem.startsWith(u8, trimmed, "race ")) {
+        if (parseOnePick("race ", trimmed)) |pick| return .{ .race = pick };
+        return .race_usage;
+    }
+
+    if (std.mem.eql(u8, trimmed, "class")) return .class_usage;
+    if (std.mem.startsWith(u8, trimmed, "class ")) {
+        if (parseOnePick("class ", trimmed)) |pick| return .{ .class = pick };
+        return .class_usage;
+    }
 
     return .{ .unknown = trimmed };
 }
@@ -122,6 +139,15 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
             };
             try writer.print("stats assigned\n", .{});
         },
+        .assign_usage => {
+            try writer.print(
+                \\usage: assign <p1> <p2> <p3> <p4> <p5> <p6>
+                \\       map rolled stats (1-6) to STR DEX CON INT WIS CHA
+                \\       example: assign 6 5 4 3 2 1
+                \\
+            , .{});
+            if (ctx.draft.has_pool) try session.formatStatPool(ctx.draft.pool, writer);
+        },
         .race => |pick| {
             session.draftChooseRace(ctx.draft, pick) catch {
                 try writer.print("invalid race pick (1-3)\n", .{});
@@ -129,12 +155,26 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
             };
             try writer.print("race chosen\n", .{});
         },
+        .race_usage => {
+            try writer.print(
+                \\usage: race <1-3>
+                \\       1=dragonborn (+2 CHA)  2=dwarf (+2 CON)  3=elf (+2 DEX)
+                \\
+            , .{});
+        },
         .class => |pick| {
             session.draftChooseClass(ctx.draft, pick) catch {
                 try writer.print("invalid class pick (1-3)\n", .{});
                 return .continue_repl;
             };
             try writer.print("class chosen\n", .{});
+        },
+        .class_usage => {
+            try writer.print(
+                \\usage: class <1-3>
+                \\       1=barbarian  2=fighter  3=bard
+                \\
+            , .{});
         },
         .spawn => {
             const char = session.draftBuildCharacter(ctx.allocator, ctx.w, ctx.draft, "George") catch |err| switch (err) {
@@ -157,8 +197,13 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
         },
         .help => {
             try writer.print(
-                \\commands: roll, assign <6 picks>, race <1-3>, class <1-3>, spawn, stats
-                \\         look, time, move <north|south|east|west>, help, exit
+                \\creation: roll, assign <6 picks>, race <1-3>, class <1-3>, spawn, stats
+                \\explore:  look, time, move <north|south|east|west>, help, exit
+                \\
+                \\example: assign 6 5 4 3 2 1
+                \\         race 2
+                \\         class 1
+                \\         spawn
                 \\
             , .{});
         },
@@ -194,6 +239,28 @@ test "parse and execute move changes position" {
     _ = try execute(&ctx, cmd, fbs.writer());
 
     try std.testing.expectEqual(@as(u64, 50), w.store.get(ctx.player_id).?.loc.y);
+}
+
+test "bare assign shows usage not unknown" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+
+    var draft: session.CreationDraft = .{};
+    _ = session.draftRoll(&w, &draft);
+    var ctx = Context{ .allocator = allocator, .w = &w, .draft = &draft };
+
+    var buf: [512]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    const cmd = parseLine("assign");
+    switch (cmd) {
+        .assign_usage => {},
+        else => return error.TestExpectedEqual,
+    }
+    _ = try execute(&ctx, cmd, fbs.writer());
+    const out = fbs.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, out, "usage: assign") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "stat_rolls:") != null);
 }
 
 test "spawn after creation shows dwarf con bonus in stats" {
