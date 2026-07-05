@@ -130,4 +130,35 @@ pub fn build(b: *std.Build) void {
     const evidence_v09_run = b.addRunArtifact(evidence_v09_exe);
     const evidence_v09_step = b.step("evidence-v09", "Emit v0.9 generator/descend verification transcript");
     evidence_v09_step.dependOn(&evidence_v09_run.step);
+
+    const evidence_v10_exe = b.addExecutable(.{
+        .name = "zig-q-evidence-v10",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/evidence_v10_main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zig_q", .module = zig_q_mod },
+            },
+        }),
+    });
+    b.installArtifact(evidence_v10_exe);
+
+    const evidence_v10_run = b.addRunArtifact(evidence_v10_exe);
+    const evidence_v10_step = b.step("evidence-v10", "Emit v1.0 reference-crawl verification transcript");
+    evidence_v10_step.dependOn(&evidence_v10_run.step);
+
+    const consumer_test_exe = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/consumer_test.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zig_q", .module = zig_q_mod },
+            },
+        }),
+    });
+    const consumer_test_run = b.addRunArtifact(consumer_test_exe);
+    const consumer_test_step = b.step("consumer-test", "Run public zig_q API integration tests");
+    consumer_test_step.dependOn(&consumer_test_run.step);
 }

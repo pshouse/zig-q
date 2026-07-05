@@ -2,7 +2,7 @@
 
 **Product:** deterministic, scriptable **dungeon crawl** engine — create a character, descend floors, fight monsters, persist progress. No dialogue trees.
 
-**Current release:** `0.9.0` (seeded floor generation, `descend`, data-driven scenarios).
+**Current release:** `1.0.0` (stable crawl engine, public API, reference crawl regression).
 
 ---
 
@@ -54,17 +54,17 @@ Terrain regenerates from seed on load (documented regen-only persistence for lay
 
 ---
 
-## v1.0 — Crawl engine release
+## v1.0 — Crawl engine release (shipped)
 
 **Theme:** Stable library + CLI for a full descent.
 
 | Deliver | Notes |
 |---------|--------|
-| Public `zig_q` API | documented World, crawl, combat, SQLite |
-| Reference crawl | scripted floor 1→3 with fight + save mid-run |
-| Semver policy | MAJOR.MINOR.PATCH tags; transcript records version |
-| Release gate | `build`, `test`, `dst *`, `fuzz`, one transcript regression |
-| **Fuzz** | 10k+ default; published failure repro seeds in `fuzz-corpus/` |
+| Public `zig_q` API | documented World, crawl, combat, SQLite; `zig build consumer-test` |
+| Reference crawl | DST `reference_crawl` floor 1→3, fight + save mid-run (seed 42) |
+| Semver policy | `1.0.0`; transcript records `# version=1.0.0` |
+| Release gate | `build`, `test`, `dst *`, `fuzz`, reference-crawl determinism |
+| **Fuzz** | 10k+ default; repro procedure in `fuzz-corpus/` |
 
 **Non-goals:** 1.0 ≠ content-complete bestiary; 1.0 = stable crawl engine.
 
@@ -110,3 +110,4 @@ DST `playthrough` runs without `unknown command` for these inputs. Harvested tra
 | 0.7 | Turn combat, monsters, attack/end turn, DST brawl |
 | 0.8 | SQLite save/load, DST save_roundtrip |
 | 0.9 | Seeded floor generation, descend, scenario files |
+| 1.0 | Public API, reference crawl 1→3, evidence-v10, fuzz-corpus |

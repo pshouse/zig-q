@@ -1,4 +1,13 @@
-//! Library root: re-exports modules and aggregates unit tests.
+//! Public `zig_q` library surface for deterministic dungeon crawl simulation.
+//!
+//! **World lifecycle:** `world.World.init` / `deinit`, `loadFloor`, `descend`, `spawnStagedPlayer`.
+//! **Dungeon crawl:** `dungeon.loadFloor1`, `dungeon.generateFloor`, `dungeon.walkSpawnToFloor1Stairs`.
+//! **Combat:** `combat.attack`, `combat.endTurn`, `combat.isInCombat`.
+//! **Persistence:** `sqlite_store.saveSlot`, `sqlite_store.loadSlot`, `sqlite_store.deleteDb`.
+//! **Scripted testing:** `dst.runNamedScenario`, `repl.runScripted`, `fuzz.run`.
+//!
+//! Internal modules are re-exported for in-repo tests; external consumers should depend on
+//! the documented symbols above and treat other exports as implementation details.
 
 const std = @import("std");
 
@@ -31,6 +40,7 @@ pub const save_state = @import("save_state.zig");
 pub const sqlite_store = @import("sqlite_store.zig");
 pub const evidence_v08 = @import("evidence_v08.zig");
 pub const evidence_v09 = @import("evidence_v09.zig");
+pub const evidence_v10 = @import("evidence_v10.zig");
 pub const help_text = @import("help_text.zig");
 pub const evidence_format = @import("evidence_format.zig");
 pub const scenario_file = @import("scenario_file.zig");
@@ -66,6 +76,7 @@ test {
     _ = @import("sqlite_store.zig");
     _ = @import("evidence_v08.zig");
     _ = @import("evidence_v09.zig");
+    _ = @import("evidence_v10.zig");
     _ = @import("help_text.zig");
     _ = @import("evidence_format.zig");
     _ = @import("scenario_file.zig");

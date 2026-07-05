@@ -122,6 +122,16 @@ fn parseSixPicks(tail: []const u8) ![6]usize {
     return picks;
 }
 
+test "runScenarioFile executes reference_crawl steps" {
+    const allocator = std.testing.allocator;
+    var buf: [131072]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    try dst.runScenarioFile(allocator, "scenarios/reference_crawl.txt", 42, fbs.writer());
+    const out = fbs.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, out, "descended to floor 3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "saved slot") != null);
+}
+
 test "runScenarioFile executes descend_crawl steps" {
     const allocator = std.testing.allocator;
     var buf: [65536]u8 = undefined;

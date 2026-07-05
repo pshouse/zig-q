@@ -174,6 +174,52 @@ pub const save_roundtrip_scenario = Scenario{
     },
 };
 
+/// Seed 42: floor 1→3 with goblin fights, save/load on floor 2, byte-stable DST transcript.
+pub const reference_crawl_scenario = Scenario{
+    .name = "reference_crawl",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 },
+        .{ .choose_class = 1 },
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .command = "move east" },
+        .{ .command = "move south" },
+        .{ .command = "move east" },
+        .{ .command = "descend" },
+        .{ .command = "move south" },
+        .{ .command = "move south" },
+        .{ .command = "move south" },
+        .{ .command = "attack goblin_0" },
+        .{ .command = "end turn" },
+        .{ .command = "attack goblin_0" },
+        .{ .command = "end turn" },
+        .{ .command = "attack goblin_0" },
+        .{ .command = "end turn" },
+        .{ .command = "attack goblin_0" },
+        .{ .command = "end turn" },
+        .{ .command = "attack goblin_0" },
+        .{ .command = "save" },
+        .{ .command = "load 1" },
+        .{ .command = "move south" },
+        .{ .command = "move south" },
+        .{ .command = "move east" },
+        .{ .command = "descend" },
+        .{ .command = "move south" },
+        .{ .command = "move south" },
+        .{ .command = "move south" },
+        .{ .command = "attack goblin_0" },
+        .{ .command = "end turn" },
+        .{ .command = "attack goblin_0" },
+        .{ .command = "look" },
+        .{ .command = "stats" },
+        .{ .command = "exit" },
+    },
+};
+
 pub const descend_crawl_scenario = Scenario{
     .name = "descend_crawl",
     .seed = 42,
@@ -216,6 +262,9 @@ pub const crawl_start_scenario = Scenario{
 fn floor1ProfileForScenario(name: []const u8) dungeon.Floor1Profile {
     if (std.mem.eql(u8, name, "descend_crawl")) return .v09;
     if (std.mem.eql(u8, name, "descend_crawl_file")) return .v09;
+    if (std.mem.eql(u8, name, "reference_crawl")) return .v09;
+    if (std.mem.eql(u8, name, "reference_crawl_file")) return .v09;
+    if (std.mem.startsWith(u8, name, "reference_crawl")) return .v09;
     return .v08;
 }
 
@@ -241,7 +290,9 @@ pub const Harness = struct {
     pub fn runScenario(self: *Harness, scenario: Scenario, writer: anytype) !void {
         try writer.print("dst scenario={s} seed={}\n", .{ scenario.name, scenario.seed });
 
-        if (std.mem.eql(u8, scenario.name, "save_roundtrip")) {
+        if (std.mem.eql(u8, scenario.name, "save_roundtrip") or
+            std.mem.startsWith(u8, scenario.name, "reference_crawl"))
+        {
             @import("sqlite_store.zig").deleteDb(self.save_path);
         }
 
@@ -371,6 +422,8 @@ pub fn scenarioByName(name: []const u8, seed: u64) ?Scenario {
         return Scenario{ .name = "playthrough", .seed = seed, .steps = playthrough_scenario.steps };
     if (std.mem.eql(u8, name, "descend_crawl"))
         return Scenario{ .name = "descend_crawl", .seed = seed, .steps = descend_crawl_scenario.steps };
+    if (std.mem.eql(u8, name, "reference_crawl"))
+        return Scenario{ .name = "reference_crawl", .seed = seed, .steps = reference_crawl_scenario.steps };
     return null;
 }
 
@@ -439,6 +492,27 @@ test "dst playthrough scenario is byte-identical across runs" {
     try std.testing.expect(out_a.len > 0);
     try std.testing.expect(std.mem.indexOf(u8, out_a, "dragonborn") != null);
     try std.testing.expect(std.mem.indexOf(u8, out_a, "look floor=1") != null);
+    try std.testing.expectEqualSlices(u8, out_a, out_b);
+}
+
+test "dst reference_crawl scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    var buf_a: [131072]u8 = undefined;
+    var buf_b: [131072]u8 = undefined;
+    var fbs_a = std.io.fixedBufferStream(&buf_a);
+    var fbs_b = std.io.fixedBufferStream(&buf_b);
+
+    try runNamedScenario(allocator, "reference_crawl", 42, fbs_a.writer());
+    try runNamedScenario(allocator, "reference_crawl", 42, fbs_b.writer());
+
+    const out_a = fbs_a.getWritten();
+    const out_b = fbs_b.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "descended to floor 2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "descended to floor 3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "look floor=3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "attack ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "saved slot") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "loaded slot") != null);
     try std.testing.expectEqualSlices(u8, out_a, out_b);
 }
 

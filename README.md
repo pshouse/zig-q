@@ -2,7 +2,7 @@
 
 A Zig prototype for deterministic **dungeon crawl** simulation: character creation, dungeon tiles, level-1 combat sheet (HP/AC), turn-based combat, and SQLite save/load.
 
-**Requires Zig 0.15+** (tested on 0.15.2). **Version:** `0.9.0` — see [ROADMAP.md](ROADMAP.md) for v1.0.
+**Requires Zig 0.15+** (tested on 0.15.2). **Version:** `1.0.0` — stable deterministic crawl engine release.
 
 SQLite is bundled via the amalgamation in `deps/sqlite3/` (no system SQLite install required).
 
@@ -94,7 +94,9 @@ zig build dst -- save_roundtrip
 zig build dst -- save_roundtrip 42
 zig build dst -- descend_crawl
 zig build dst -- descend_crawl 42
+zig build dst -- reference_crawl 42
 zig build dst -- @scenarios/descend_crawl.txt 42
+zig build dst -- @scenarios/reference_crawl.txt 42
 ```
 
 - **bootstrap** — stat rolls, spawn, ticks, map render, look (v0.2 compat path)
@@ -105,6 +107,7 @@ zig build dst -- @scenarios/descend_crawl.txt 42
 - **save_roundtrip** — floor 1 crawl, save/load slot 1, continue with look/stats/move
 - **playthrough** — harvested from `transcripts/session-1783208416-seed42.txt` (dragonborn crawl)
 - **descend_crawl** — floor 1 creation/explore, `descend` to procedural floor 2, look/stats
+- **reference_crawl** — floor 1→3 descent, goblin fights, save/load on floor 2 (seed 42 regression)
 - **@scenarios/*.txt** — data-driven step files (`load_floor`, `command`, `spawn`, …)
 
 Floors 2+ are generated deterministically from `(seed, floor_index)`; floor 1 stays handcrafted for regression.
