@@ -12,6 +12,10 @@ pub const Entity = struct {
     movement: u8 = 30,
     char: *types.Character,
     conditions: types.ConditionSet,
+    current_hp: u32 = 0,
+    max_hp: u32 = 0,
+    damage_die: u8 = 0,
+    is_monster: bool = false,
 };
 
 pub const EntityStore = struct {

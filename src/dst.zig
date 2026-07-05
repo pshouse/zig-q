@@ -13,6 +13,7 @@ pub const Step = union(enum) {
     choose_class: usize,
     creation_finish: []const u8,
     load_floor: u32,
+    spawn_monster: struct { kind: @import("monsters.zig").Kind, name: []const u8, x: u64, y: u64 },
     spawn: struct { name: []const u8, x: u64, y: u64 },
     tick: u32,
     time,
@@ -111,6 +112,33 @@ pub const playthrough_scenario = Scenario{
     },
 };
 
+pub const brawl_scenario = Scenario{
+    .name = "brawl",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 },
+        .{ .choose_class = 1 },
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .spawn_monster = .{ .kind = .goblin, .name = "goblin_0", .x = 50, .y = 49 } },
+        .{ .command = "attack goblin_0" },
+        .{ .command = "end turn" },
+        .{ .command = "attack goblin_0" },
+        .{ .command = "end turn" },
+        .{ .command = "attack goblin_0" },
+        .{ .command = "end turn" },
+        .{ .command = "attack goblin_0" },
+        .{ .command = "end turn" },
+        .{ .command = "attack goblin_0" },
+        .{ .command = "end turn" },
+        .{ .command = "stats" },
+        .{ .command = "exit" },
+    },
+};
+
 pub const crawl_start_scenario = Scenario{
     .name = "crawl_start",
     .seed = 42,
@@ -204,6 +232,16 @@ pub const Harness = struct {
                 try self.w.loadFloor(floor);
                 try writer.print("step load_floor {}\n", .{floor});
             },
+            .spawn_monster => |s| {
+                const position = loc.Loc.init(s.x, s.y);
+                const id = try self.w.spawnMonster(s.kind, position, s.name);
+                try writer.print("step spawn_monster id={} kind={s} at ({},{})\n", .{
+                    id,
+                    @tagName(s.kind),
+                    s.x,
+                    s.y,
+                });
+            },
             .spawn => |s| {
                 const position = loc.Loc.init(s.x, s.y);
                 self.player_id = try self.w.spawnStagedPlayer(position, s.name);
@@ -256,6 +294,8 @@ pub fn scenarioByName(name: []const u8, seed: u64) ?Scenario {
         return Scenario{ .name = "create", .seed = seed, .steps = create_scenario.steps };
     if (std.mem.eql(u8, name, "crawl_start"))
         return Scenario{ .name = "crawl_start", .seed = seed, .steps = crawl_start_scenario.steps };
+    if (std.mem.eql(u8, name, "brawl"))
+        return Scenario{ .name = "brawl", .seed = seed, .steps = brawl_scenario.steps };
     if (std.mem.eql(u8, name, "playthrough"))
         return Scenario{ .name = "playthrough", .seed = seed, .steps = playthrough_scenario.steps };
     return null;
@@ -317,6 +357,24 @@ test "dst playthrough scenario is byte-identical across runs" {
     try std.testing.expect(out_a.len > 0);
     try std.testing.expect(std.mem.indexOf(u8, out_a, "dragonborn") != null);
     try std.testing.expect(std.mem.indexOf(u8, out_a, "look floor=1") != null);
+    try std.testing.expectEqualSlices(u8, out_a, out_b);
+}
+
+test "dst brawl scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    var buf_a: [65536]u8 = undefined;
+    var buf_b: [65536]u8 = undefined;
+    var fbs_a = std.io.fixedBufferStream(&buf_a);
+    var fbs_b = std.io.fixedBufferStream(&buf_b);
+
+    try runNamedScenario(allocator, "brawl", 42, fbs_a.writer());
+    try runNamedScenario(allocator, "brawl", 42, fbs_b.writer());
+
+    const out_a = fbs_a.getWritten();
+    const out_b = fbs_b.getWritten();
+    try std.testing.expect(out_a.len > 0);
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "attack ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "HP:") != null);
     try std.testing.expectEqualSlices(u8, out_a, out_b);
 }
 

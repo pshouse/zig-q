@@ -7,6 +7,9 @@ const entity = @import("entity.zig");
 const map = @import("map.zig");
 const terrain = @import("terrain.zig");
 const dungeon = @import("dungeon.zig");
+const character = @import("character.zig");
+const combat = @import("combat.zig");
+const monsters = @import("monsters.zig");
 
 pub const World = struct {
     allocator: std.mem.Allocator,
@@ -21,6 +24,7 @@ pub const World = struct {
     game_clock: clock.Clock,
     next_entity_id: entity.EntityId,
     staged_character: ?*types.Character = null,
+    combat: ?*combat.CombatState = null,
 
     pub fn init(allocator: std.mem.Allocator, seed: u64) !World {
         var races = try types.defaultRaces(allocator);
@@ -41,6 +45,7 @@ pub const World = struct {
     }
 
     pub fn deinit(self: *World) void {
+        combat.endCombat(self);
         if (self.staged_character) |char| self.destroyCharacter(char);
         self.staged_character = null;
         self.store.deinit(self.allocator);
@@ -75,13 +80,36 @@ pub const World = struct {
         return self.spawnPlayer(char, position, name);
     }
 
+    fn initEntityCombat(ent: *entity.Entity) void {
+        if (ent.is_monster) return;
+        ent.max_hp = character.maxHpLevel1(ent.char);
+        ent.current_hp = ent.max_hp;
+        ent.damage_die = ent.char.class.hit_die;
+    }
+
     /// Takes ownership of `character`; freed when the world is torn down.
-    pub fn spawnPlayer(self: *World, character: *types.Character, position: loc.Loc, name: []const u8) !entity.EntityId {
+    pub fn spawnPlayer(self: *World, char_ptr: *types.Character, position: loc.Loc, name: []const u8) !entity.EntityId {
         const id = self.next_entity_id;
         self.next_entity_id += 1;
-        _ = try self.store.create(self.allocator, id, name, position, character);
+        _ = try self.store.create(self.allocator, id, name, position, char_ptr);
         try self.tile_map.place(position, id);
-        if (self.store.get(id)) |ent| ent.loc = position;
+        if (self.store.get(id)) |ent| {
+            ent.loc = position;
+            initEntityCombat(ent);
+        }
+        return id;
+    }
+
+    pub fn spawnMonster(self: *World, kind: monsters.Kind, position: loc.Loc, name: []const u8) !entity.EntityId {
+        const b = monsters.block(kind);
+        const char_ptr = try monsters.buildCharacter(self.allocator, kind);
+        const id = try self.spawnPlayer(char_ptr, position, name);
+        if (self.store.get(id)) |ent| {
+            ent.is_monster = true;
+            ent.max_hp = b.max_hp;
+            ent.current_hp = b.max_hp;
+            ent.damage_die = b.damage_die;
+        }
         return id;
     }
 

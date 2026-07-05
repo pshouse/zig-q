@@ -4,6 +4,8 @@ const world = @import("world.zig");
 const entity = @import("entity.zig");
 const session = @import("session.zig");
 const commands = @import("commands.zig");
+const combat = @import("combat.zig");
+const loc = @import("loc.zig");
 const transcript = @import("transcript.zig");
 
 pub const Config = struct {
@@ -64,6 +66,9 @@ const templates = [_][]const u8{
     "move ",
     "l",
     "stats before spawn",
+    "attack",
+    "attack goblin_0",
+    "end turn",
 };
 
 pub fn run(allocator: std.mem.Allocator, cfg: Config) !Report {
@@ -120,6 +125,10 @@ pub fn run(allocator: std.mem.Allocator, cfg: Config) !Report {
                 try out.print("fuzz tolerated error: {s}\n", .{@errorName(err)});
                 continue;
             };
+
+            if (ctx.player_id != entity.invalid_id and countLiveMonsters(&w) == 0) {
+                _ = w.spawnMonster(.goblin, loc.Loc.init(50, 49), "goblin_0") catch {};
+            }
 
             assertInvariants(&w, ctx.player_id) catch |inv_err| {
                 return failureReport(cfg.iterations, iteration, step, inv_err, &script_lines);
@@ -187,9 +196,18 @@ pub fn runOne(
     }
 }
 
+fn countLiveMonsters(w: *const world.World) usize {
+    var n: usize = 0;
+    for (w.store.entities.items) |ent| {
+        if (ent.is_monster and !ent.conditions.has(.dead) and ent.current_hp > 0) n += 1;
+    }
+    return n;
+}
+
 pub fn assertInvariants(w: *world.World, player_id: entity.EntityId) !void {
     var on_map: usize = 0;
-    for (w.store.entities.items) |ent| {
+    for (w.store.entities.items) |*ent| {
+        if (ent.current_hp > ent.max_hp) return error.HpAboveMax;
         on_map += 1;
         const list = w.tile_map.cells.get(ent.loc) orelse return error.EntityNotOnMap;
         var found = false;
@@ -208,6 +226,12 @@ pub fn assertInvariants(w: *world.World, player_id: entity.EntityId) !void {
     if (w.has_dungeon) {
         for (w.store.entities.items) |ent| {
             if (!w.terrain.isWalkable(ent.loc)) return error.EntityInWall;
+        }
+    }
+
+    if (w.combat != null) {
+        if (combat.activeTurn(w)) |active| {
+            if (w.store.get(active) == null) return error.InvalidTurnOwner;
         }
     }
 }

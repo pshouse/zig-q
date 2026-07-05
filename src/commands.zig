@@ -6,6 +6,7 @@ const movement = @import("movement.zig");
 const map_render = @import("map_render.zig");
 const session = @import("session.zig");
 const character = @import("character.zig");
+const combat = @import("combat.zig");
 
 pub const Command = union(enum) {
     look,
@@ -22,6 +23,9 @@ pub const Command = union(enum) {
     class_usage,
     spawn,
     stats,
+    attack,
+    attack_target: []const u8,
+    end_turn,
     unknown: []const u8,
 };
 
@@ -48,6 +52,13 @@ pub fn parseLine(line: []const u8) Command {
     if (std.mem.eql(u8, trimmed, "roll")) return .roll;
     if (std.mem.eql(u8, trimmed, "spawn")) return .spawn;
     if (std.mem.eql(u8, trimmed, "stats")) return .stats;
+    if (std.mem.eql(u8, trimmed, "attack")) return .attack;
+    if (std.mem.eql(u8, trimmed, "end turn")) return .end_turn;
+
+    if (std.mem.startsWith(u8, trimmed, "attack ")) {
+        const arg = std.mem.trim(u8, trimmed[7..], " \t");
+        if (arg.len > 0) return .{ .attack_target = arg };
+    }
 
     if (std.mem.startsWith(u8, trimmed, "move ")) {
         const arg = std.mem.trim(u8, trimmed[5..], " \t");
@@ -124,6 +135,10 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
         .move => |dir| {
             if (ctx.w.store.get(ctx.player_id) == null) {
                 try writer.print("no player spawned\n", .{});
+                return .continue_repl;
+            }
+            if (combat.isInCombat(ctx.w)) {
+                try writer.print("cannot move during combat\n", .{});
                 return .continue_repl;
             }
             const new_loc = movement.moveEntity(ctx.w, ctx.player_id, dir) catch |err| switch (err) {
@@ -218,10 +233,70 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                 };
             }
         },
+        .attack => {
+            if (!isSpawned(ctx)) {
+                try writer.print("no player spawned\n", .{});
+                return .continue_repl;
+            }
+            combat.attack(ctx.w, ctx.player_id, null, writer) catch |err| switch (err) {
+                error.NoTarget => {
+                    try writer.print("no valid attack target\n", .{});
+                    return .continue_repl;
+                },
+                error.NotYourTurn => {
+                    try writer.print("not your turn\n", .{});
+                    return .continue_repl;
+                },
+                error.NotAdjacent => {
+                    try writer.print("target not adjacent\n", .{});
+                    return .continue_repl;
+                },
+                else => |e| return e,
+            };
+        },
+        .attack_target => |target| {
+            if (!isSpawned(ctx)) {
+                try writer.print("no player spawned\n", .{});
+                return .continue_repl;
+            }
+            combat.attack(ctx.w, ctx.player_id, target, writer) catch |err| switch (err) {
+                error.NoTarget => {
+                    try writer.print("no valid attack target\n", .{});
+                    return .continue_repl;
+                },
+                error.NotYourTurn => {
+                    try writer.print("not your turn\n", .{});
+                    return .continue_repl;
+                },
+                error.NotAdjacent => {
+                    try writer.print("target not adjacent\n", .{});
+                    return .continue_repl;
+                },
+                else => |e| return e,
+            };
+        },
+        .end_turn => {
+            if (!isSpawned(ctx)) {
+                try writer.print("no player spawned\n", .{});
+                return .continue_repl;
+            }
+            combat.endTurn(ctx.w, ctx.player_id, writer) catch |err| switch (err) {
+                error.NotInCombat => {
+                    try writer.print("not in combat\n", .{});
+                    return .continue_repl;
+                },
+                error.NotYourTurn => {
+                    try writer.print("not your turn\n", .{});
+                    return .continue_repl;
+                },
+                else => |e| return e,
+            };
+        },
         .help => {
             try writer.print(
                 \\creation: roll, assign <6 picks>, race <1-3>, class <1-3>, spawn, stats
                 \\explore:  look, time, move <north|south|east|west>, help, exit
+                \\combat:   attack [target], end turn
                 \\
                 \\example: assign 6 5 4 3 2 1
                 \\         race 2
@@ -322,6 +397,28 @@ test "assign rejected after spawn" {
     var fbs = std.io.fixedBufferStream(&buf);
     _ = try execute(&ctx, .{ .assign = .{ 1, 2, 3, 4, 5, 6 } }, fbs.writer());
     try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "already spawned") != null);
+}
+
+test "stats after spawn uses v0.6 hp line format" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+
+    var draft: session.CreationDraft = .{};
+    _ = session.draftRoll(&w, &draft);
+    try session.draftAssign(&draft, .{ 6, 5, 4, 3, 2, 1 });
+    try session.draftChooseRace(&draft, 2);
+    try session.draftChooseClass(&draft, 1);
+
+    var ctx = Context{ .allocator = allocator, .w = &w, .draft = &draft };
+    _ = try execute(&ctx, .spawn, std.io.null_writer);
+
+    var buf: [512]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, .stats, fbs.writer());
+    const out = fbs.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, out, "HP: ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "/") == null);
 }
 
 test "spawn after creation shows dwarf con bonus in stats" {

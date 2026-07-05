@@ -62,6 +62,7 @@ pub fn main() !void {
             \\  zig build dst -- explore [seed]            DST harness: explore scenario
             \\  zig build dst -- create [seed]             DST harness: character creation scenario
             \\  zig build dst -- crawl_start [seed]       DST harness: dungeon crawl start
+            \\  zig build dst -- brawl [seed]              DST harness: combat scenario
             \\  zig build dst -- playthrough [seed]       DST harness: harvested REPL playthrough
             \\  zig build run -- --harvest <transcript>   Print harvested > command lines
             \\  zig build fuzz -- [iterations] [seed] [world_seed]
