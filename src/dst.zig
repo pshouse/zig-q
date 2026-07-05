@@ -1,5 +1,6 @@
 const std = @import("std");
 const loc = @import("loc.zig");
+const dungeon = @import("dungeon.zig");
 const world = @import("world.zig");
 const session = @import("session.zig");
 const map_render = @import("map_render.zig");
@@ -183,9 +184,10 @@ pub const descend_crawl_scenario = Scenario{
         .{ .choose_race = 2 },
         .{ .choose_class = 1 },
         .{ .creation_finish = "George" },
-        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 53 } },
-        .{ .command = "move west" },
-        .{ .command = "look" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .command = "move east" },
+        .{ .command = "move east" },
+        .{ .command = "move east" },
         .{ .command = "move east" },
         .{ .command = "descend" },
         .{ .command = "look" },
@@ -211,6 +213,12 @@ pub const crawl_start_scenario = Scenario{
         .{ .command = "exit" },
     },
 };
+
+fn floor1ProfileForScenario(name: []const u8) dungeon.Floor1Profile {
+    if (std.mem.eql(u8, name, "descend_crawl")) return .v09;
+    if (std.mem.eql(u8, name, "descend_crawl_file")) return .v09;
+    return .v08;
+}
 
 pub const Harness = struct {
     allocator: std.mem.Allocator,
@@ -242,6 +250,7 @@ pub const Harness = struct {
             self.deinit();
             self.* = try Harness.init(self.allocator, scenario.seed);
         }
+        self.w.floor1_profile = floor1ProfileForScenario(scenario.name);
 
         for (scenario.steps) |step| {
             try self.runStep(step, writer);

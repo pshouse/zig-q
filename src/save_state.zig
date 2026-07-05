@@ -6,6 +6,7 @@ const types = @import("types.zig");
 const combat = @import("combat.zig");
 const monsters = @import("monsters.zig");
 const character = @import("character.zig");
+const dungeon = @import("dungeon.zig");
 
 pub const schema_version: u32 = 1;
 
@@ -50,6 +51,7 @@ pub const WorldSave = struct {
     rng_state: u64,
     rng_offset: u16,
     floor_index: u32,
+    floor1_profile: dungeon.Floor1Profile = .v09,
     has_dungeon: bool,
     clock_ticks: u64,
     clock_time_of_day: f64,
@@ -173,6 +175,7 @@ pub fn capture(allocator: std.mem.Allocator, w: *const world.World, player_id: e
         .rng_state = w.rng.state,
         .rng_offset = w.rng.offset,
         .floor_index = w.floor_index,
+        .floor1_profile = w.floor1_profile,
         .has_dungeon = w.has_dungeon,
         .clock_ticks = w.game_clock.ticks,
         .clock_time_of_day = w.game_clock.time_of_day,
@@ -229,6 +232,7 @@ pub fn apply(allocator: std.mem.Allocator, save: *const WorldSave) !world.World 
     w.rng.state = save.rng_state;
     w.rng.offset = save.rng_offset;
     w.floor_index = save.floor_index;
+    w.floor1_profile = save.floor1_profile;
     if (save.has_dungeon) try w.loadFloor(save.floor_index);
     w.game_clock.ticks = save.clock_ticks;
     w.game_clock.time_of_day = save.clock_time_of_day;
@@ -284,6 +288,7 @@ pub fn expectEqual(a: *const WorldSave, b: *const WorldSave) !void {
     try std.testing.expectEqual(a.rng_state, b.rng_state);
     try std.testing.expectEqual(a.rng_offset, b.rng_offset);
     try std.testing.expectEqual(a.floor_index, b.floor_index);
+    try std.testing.expectEqual(a.floor1_profile, b.floor1_profile);
     try std.testing.expectEqual(a.has_dungeon, b.has_dungeon);
     try std.testing.expectEqual(a.clock_ticks, b.clock_ticks);
     try std.testing.expect(a.clock_time_of_day == b.clock_time_of_day);
@@ -321,7 +326,8 @@ test "capture apply roundtrip preserves multi-floor state" {
     try @import("session.zig").draftChooseClass(&draft, 1);
     const char = try @import("session.zig").draftBuildCharacter(allocator, &w, &draft, "George");
     w.stageCharacter(char);
-    const player_id = try w.spawnStagedPlayer(loc.Loc.init(49, 53), "entity_0");
+    const player_id = try w.spawnStagedPlayer(dungeon.floor1_spawn, "entity_0");
+    try dungeon.walkSpawnToFloor1Door(&w, player_id);
     try w.descend(player_id);
 
     var before = try capture(allocator, &w, player_id);

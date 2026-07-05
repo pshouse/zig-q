@@ -10,6 +10,13 @@ const TileEntry = struct {
     tile: terrain.Tile,
 };
 
+pub const Floor1Profile = enum {
+    /// v0.8 regression layout: door at (49,53) unreachable from spawn.
+    v08,
+    /// v0.9 playable layout: east corridor open at (49,51).
+    v09,
+};
+
 /// Floor 1: small chamber around spawn (49,49). North wall blocks `move north`.
 const floor1_tiles = [_]TileEntry{
     .{ .x = 47, .y = 47, .tile = .wall },
@@ -34,10 +41,26 @@ const floor1_tiles = [_]TileEntry{
     .{ .x = 49, .y = 53, .tile = .door },
 };
 
-pub fn loadFloor1(map: *terrain.TerrainMap) !void {
+fn skipFloor1Tile(profile: Floor1Profile, entry: TileEntry) bool {
+    return profile == .v09 and entry.x == 49 and entry.y == 51 and entry.tile == .wall;
+}
+
+pub fn loadFloor1(map: *terrain.TerrainMap, profile: Floor1Profile) !void {
     map.clear();
     for (floor1_tiles) |entry| {
+        if (skipFloor1Tile(profile, entry)) continue;
         try map.set(loc.Loc.init(entry.x, entry.y), entry.tile);
+    }
+}
+
+pub const floor1_spawn = loc.Loc.init(49, 49);
+pub const floor1_door = loc.Loc.init(49, 53);
+
+/// Moves from spawn to the floor-1 door along the east corridor (v0.9 layout).
+pub fn walkSpawnToFloor1Door(w: *@import("world.zig").World, player_id: @import("entity.zig").EntityId) !void {
+    var i: usize = 0;
+    while (i < 4) : (i += 1) {
+        _ = try @import("movement.zig").moveEntity(w, player_id, .east);
     }
 }
 
@@ -220,10 +243,38 @@ test "floor1 blocks north of spawn" {
     const allocator = std.testing.allocator;
     var map = terrain.TerrainMap.init(allocator);
     defer map.deinit();
-    try loadFloor1(&map);
+    try loadFloor1(&map, .v09);
     try std.testing.expect(!map.isWalkable(loc.Loc.init(48, 49)));
     try std.testing.expect(map.isWalkable(loc.Loc.init(49, 49)));
     try std.testing.expect(map.isWalkable(loc.Loc.init(49, 53)));
+}
+
+test "floor1 v08 blocks east corridor to door" {
+    const allocator = std.testing.allocator;
+    var map = terrain.TerrainMap.init(allocator);
+    defer map.deinit();
+    try loadFloor1(&map, .v08);
+    try std.testing.expect(!map.isWalkable(loc.Loc.init(49, 51)));
+}
+
+test "floor1 v09 door reachable from spawn via east corridor" {
+    const allocator = std.testing.allocator;
+    var map = terrain.TerrainMap.init(allocator);
+    defer map.deinit();
+    try loadFloor1(&map, .v09);
+    try std.testing.expect(map.isWalkable(loc.Loc.init(49, 51)));
+    try std.testing.expect(map.isWalkable(loc.Loc.init(49, 52)));
+
+    var pos = floor1_spawn;
+    var i: usize = 0;
+    while (i < 4) : (i += 1) {
+        pos = loc.Loc.init(pos.x, pos.y + 1);
+        try std.testing.expect(map.isWalkable(pos));
+    }
+    try std.testing.expectEqual(floor1_door.x, pos.x);
+    try std.testing.expectEqual(floor1_door.y, pos.y);
+    const door_tile = map.get(pos) orelse return error.TestExpectedEqual;
+    try std.testing.expect(door_tile.isDescendTrigger());
 }
 
 test "generated floor is deterministic for same seed" {

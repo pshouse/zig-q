@@ -6,9 +6,10 @@ assign_stats 6 5 4 3 2 1
 choose_race 2
 choose_class 1
 creation_finish George
-spawn entity_0 49 53
-command move west
-command look
+spawn entity_0 49 49
+command move east
+command move east
+command move east
 command move east
 command descend
 command look

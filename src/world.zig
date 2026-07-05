@@ -20,6 +20,7 @@ pub const World = struct {
     terrain: terrain.TerrainMap,
     floor_index: u32 = 0,
     floor_spawn: loc.Loc = loc.Loc.init(49, 49),
+    floor1_profile: dungeon.Floor1Profile = .v09,
     has_dungeon: bool = false,
     races: std.ArrayList(types.Race),
     game_clock: clock.Clock,
@@ -58,8 +59,8 @@ pub const World = struct {
     pub fn loadFloor(self: *World, index: u32) !void {
         switch (index) {
             1 => {
-                try dungeon.loadFloor1(&self.terrain);
-                self.floor_spawn = loc.Loc.init(49, 49);
+                try dungeon.loadFloor1(&self.terrain, self.floor1_profile);
+                self.floor_spawn = dungeon.floor1_spawn;
             },
             else => {
                 const gen = try dungeon.generateFloor(&self.terrain, self.seed, index);

@@ -10,6 +10,8 @@ const combat = @import("combat.zig");
 const save_state = @import("save_state.zig");
 const sqlite_store = @import("sqlite_store.zig");
 const help_text = @import("help_text.zig");
+const dungeon = @import("dungeon.zig");
+const evidence_format = @import("evidence_format.zig");
 
 pub const Command = union(enum) {
     look,
@@ -814,6 +816,63 @@ test "repl help via execute lists descend" {
     var fbs = std.io.fixedBufferStream(&buf);
     _ = try execute(&ctx, .help, fbs.writer());
     try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "descend") != null);
+}
+
+fn descendTestCtx(allocator: std.mem.Allocator, w: *world.World) !Context {
+    var draft: session.CreationDraft = .{};
+    _ = session.draftRoll(w, &draft);
+    try session.draftAssign(&draft, .{ 6, 5, 4, 3, 2, 1 });
+    try session.draftChooseRace(&draft, 2);
+    try session.draftChooseClass(&draft, 1);
+    var ctx = Context{ .allocator = allocator, .w = w, .draft = &draft };
+    _ = try execute(&ctx, .spawn, std.io.null_writer);
+    return ctx;
+}
+
+test "descend via execute from normal spawn reaches floor 2" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+
+    var ctx = try descendTestCtx(allocator, &w);
+    var buf: [4096]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    var i: usize = 0;
+    while (i < 4) : (i += 1) {
+        _ = try execute(&ctx, parseLine("move east"), fbs.writer());
+    }
+    _ = try execute(&ctx, .descend, fbs.writer());
+    const out = fbs.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, out, "descended to floor 2") != null);
+    try std.testing.expectEqual(@as(u32, 2), w.floor_index);
+
+    var layout_map = @import("terrain.zig").TerrainMap.init(allocator);
+    defer layout_map.deinit();
+    const gen = try dungeon.generateFloor(&layout_map, 42, w.floor_index);
+    var monster_count: usize = 0;
+    for (w.store.entities.items) |ent| {
+        if (ent.is_monster) monster_count += 1;
+    }
+    evidence_format.printDescendEvidence(w.floor_index, gen.layout_hash, gen.walkable_count, monster_count);
+}
+
+test "descend blocked during combat via execute" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+
+    var ctx = try descendTestCtx(allocator, &w);
+    try dungeon.walkSpawnToFloor1Door(&w, ctx.player_id);
+    _ = try w.spawnMonster(.goblin, loc.Loc.init(50, 53), "goblin_0");
+    _ = try execute(&ctx, parseLine("attack goblin_0"), std.io.null_writer);
+
+    var buf: [256]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, .descend, fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "cannot descend during combat") != null);
+    try std.testing.expectEqual(@as(u32, 1), w.floor_index);
 }
 
 test "dst_v08 help via execute matches golden" {

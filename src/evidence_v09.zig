@@ -50,25 +50,26 @@ pub fn run(allocator: std.mem.Allocator, writer: anytype) !void {
     try w.loadFloor(1);
 
     var draft: session.CreationDraft = .{};
-    _ = session.draftRoll(&w, &draft);
-    try session.draftAssign(&draft, .{ 6, 5, 4, 3, 2, 1 });
-    try session.draftChooseRace(&draft, 2);
-    try session.draftChooseClass(&draft, 1);
-
-    const char = try session.draftBuildCharacter(allocator, &w, &draft, "George");
-    w.stageCharacter(char);
-    const door = loc.Loc.init(49, 53);
 
     var ctx = commands.Context{
         .allocator = allocator,
         .w = &w,
         .draft = &draft,
     };
-    ctx.player_id = try w.spawnStagedPlayer(door, "entity_0");
-    try writer.print("pre_descend floor_index={} player_at=({},{})\n", .{
+    _ = session.draftRoll(&w, &draft);
+    try session.draftAssign(&draft, .{ 6, 5, 4, 3, 2, 1 });
+    try session.draftChooseRace(&draft, 2);
+    try session.draftChooseClass(&draft, 1);
+    _ = try commands.execute(&ctx, .spawn, writer);
+    var step: usize = 0;
+    while (step < 4) : (step += 1) {
+        _ = try commands.execute(&ctx, commands.parseLine("move east"), writer);
+    }
+    const ent = w.store.get(ctx.player_id) orelse return error.EntityNotFound;
+    try writer.print("pre_descend floor_index={} player_at=({},{}) spawn=(49,49)\n", .{
         w.floor_index,
-        door.x,
-        door.y,
+        ent.loc.x,
+        ent.loc.y,
     });
 
     _ = try commands.execute(&ctx, .descend, writer);

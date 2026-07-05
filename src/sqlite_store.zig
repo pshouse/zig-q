@@ -200,10 +200,18 @@ test "sqlite save load roundtrip preserves floor 2 after descend" {
     try @import("session.zig").draftAssign(&draft, .{ 6, 5, 4, 3, 2, 1 });
     try @import("session.zig").draftChooseRace(&draft, 2);
     try @import("session.zig").draftChooseClass(&draft, 1);
-    const char = try @import("session.zig").draftBuildCharacter(allocator, &w, &draft, "George");
-    w.stageCharacter(char);
-    const player_id = try w.spawnStagedPlayer(@import("loc.zig").Loc.init(49, 53), "entity_0");
-    try w.descend(player_id);
+    var ctx = @import("commands.zig").Context{
+        .allocator = allocator,
+        .w = &w,
+        .draft = &draft,
+    };
+    _ = try @import("commands.zig").execute(&ctx, .spawn, std.io.null_writer);
+    var i: usize = 0;
+    while (i < 4) : (i += 1) {
+        _ = try @import("commands.zig").execute(&ctx, @import("commands.zig").parseLine("move east"), std.io.null_writer);
+    }
+    _ = try @import("commands.zig").execute(&ctx, .descend, std.io.null_writer);
+    const player_id = ctx.player_id;
     try std.testing.expectEqual(@as(u32, 2), w.floor_index);
 
     var monster_count: usize = 0;
