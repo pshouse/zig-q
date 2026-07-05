@@ -328,7 +328,7 @@ pub const Harness = struct {
             },
             .look => {
                 try writer.print("step look\n", .{});
-                try map_render.renderLook(&self.w, self.player_id, writer);
+                try map_render.renderLook(&self.w, self.player_id, false, writer);
             },
             .command => |line| {
                 try writer.print("step command {s}\n", .{line});

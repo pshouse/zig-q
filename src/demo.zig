@@ -42,7 +42,7 @@ pub fn runDemo(allocator: std.mem.Allocator, seed: u64, writer: anytype) !DemoRe
     try writer.print("map viewport:\n", .{});
     try map_render.renderViewport(&w, start, 5, writer);
 
-    try map_render.renderLook(&w, player_id, writer);
+    try map_render.renderLook(&w, player_id, true, writer);
 
     const snap = w.snapshot();
     try writer.print("snapshot entities={} cells={} rng_offset={}\n", .{

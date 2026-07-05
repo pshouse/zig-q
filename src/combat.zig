@@ -100,6 +100,16 @@ pub fn livingParticipants(w: *world.World) usize {
     return n;
 }
 
+fn nameMatches(ent: *const entity.Entity, name: []const u8, allow_prefix: bool) bool {
+    if (std.mem.eql(u8, ent.name, name)) return true;
+    if (std.mem.eql(u8, ent.char.name, name)) return true;
+    if (allow_prefix and name.len > 0) {
+        if (std.mem.startsWith(u8, ent.name, name)) return true;
+        if (std.mem.startsWith(u8, ent.char.name, name)) return true;
+    }
+    return false;
+}
+
 pub fn findTarget(
     w: *const world.World,
     attacker_id: entity.EntityId,
@@ -108,12 +118,23 @@ pub fn findTarget(
     const attacker = w.store.get(attacker_id) orelse return null;
 
     if (target_name) |name| {
+        var exact: ?*entity.Entity = null;
+        var prefix: ?*entity.Entity = null;
+        var prefix_count: usize = 0;
         for (w.store.entities.items) |*ent| {
             if (ent.id == attacker_id) continue;
             if (!isAlive(ent)) continue;
-            if (std.mem.eql(u8, ent.name, name) or std.mem.eql(u8, ent.char.name, name))
-                return ent;
+            if (std.mem.eql(u8, ent.name, name) or std.mem.eql(u8, ent.char.name, name)) {
+                exact = ent;
+                break;
+            }
+            if (nameMatches(ent, name, true)) {
+                prefix_count += 1;
+                prefix = ent;
+            }
         }
+        if (exact) |e| return e;
+        if (prefix_count == 1) return prefix;
         return null;
     }
 
@@ -125,6 +146,41 @@ pub fn findTarget(
         if (best == null or ent.id < best.?.id) best = ent;
     }
     return best;
+}
+
+pub fn formatTargetHints(
+    w: *const world.World,
+    attacker_id: entity.EntityId,
+    writer: anytype,
+) !void {
+    const attacker = w.store.get(attacker_id) orelse return;
+    var adjacent = false;
+    var visible = false;
+    for (w.store.entities.items) |ent| {
+        if (ent.id == attacker_id) continue;
+        if (!isAlive(&ent)) continue;
+        const adj = isAdjacent(attacker.loc, ent.loc);
+        if (adj) {
+            if (!adjacent) {
+                try writer.writeAll("; adjacent: ");
+                adjacent = true;
+            } else {
+                try writer.writeAll(", ");
+            }
+            try writer.print("{s}", .{ent.name});
+        } else {
+            if (!visible) {
+                try writer.writeAll("; visible: ");
+                visible = true;
+            } else {
+                try writer.writeAll(", ");
+            }
+            try writer.print("{s} ({s})", .{ ent.name, ent.char.name });
+        }
+    }
+    if (!adjacent and !visible) {
+        try writer.writeAll("; no creatures in sight");
+    }
 }
 
 pub fn enterCombat(w: *world.World, player_id: entity.EntityId, enemy_id: entity.EntityId) !void {
@@ -241,7 +297,9 @@ pub fn attack(
         if (active != attacker_id) return error.NotYourTurn;
     }
 
+    const attacker = w.store.get(attacker_id) orelse return error.AttackerNotFound;
     const target = findTarget(w, attacker_id, target_name) orelse return error.NoTarget;
+    if (!isAdjacent(attacker.loc, target.loc)) return error.NotAdjacent;
     if (!isInCombat(w)) try enterCombat(w, attacker_id, target.id);
     try performAttack(w, attacker_id, target.id, writer);
 }
@@ -269,6 +327,34 @@ pub fn endTurn(w: *world.World, actor_id: entity.EntityId, writer: anytype) !voi
     } else {
         try writer.print("combat ended\n", .{});
     }
+}
+
+test "distant named attack does not enter combat" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    _ = try w.spawnMonster(.skeleton, loc.Loc.init(52, 49), "skeleton_0");
+
+    var buf: [256]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    const err = attack(&w, player_id, "skeleton", fbs.writer());
+    try std.testing.expectError(error.NotAdjacent, err);
+    try std.testing.expect(!isInCombat(&w));
+    try std.testing.expect(!isFighting(&w, player_id));
+}
+
+test "prefix attack name resolves unique goblin" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    _ = try w.spawnMonster(.goblin, loc.Loc.init(50, 49), "goblin_0");
+
+    const target = findTarget(&w, player_id, "goblin");
+    try std.testing.expect(target != null);
+    try std.testing.expectEqualStrings("goblin_0", target.?.name);
 }
 
 test "melee reduces target hp" {

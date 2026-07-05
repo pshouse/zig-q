@@ -53,6 +53,7 @@ pub const Context = struct {
     player_id: entity.EntityId = entity.invalid_id,
     save_path: []const u8 = sqlite_store.default_path,
     help_profile: help_text.Profile = .repl,
+    look_list_nearby: bool = true,
 };
 
 pub fn parseLine(line: []const u8) Command {
@@ -264,7 +265,7 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                 return .continue_repl;
             };
             _ = ent;
-            try map_render.renderLook(ctx.w, ctx.player_id, writer);
+            try map_render.renderLook(ctx.w, ctx.player_id, ctx.look_list_nearby, writer);
         },
         .time => {
             try writer.print("time ticks={} time_of_day={d:.4}\n", .{
@@ -384,7 +385,9 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
             }
             combat.attack(ctx.w, ctx.player_id, null, writer) catch |err| switch (err) {
                 error.NoTarget => {
-                    try writer.print("no valid attack target\n", .{});
+                    try writer.print("no valid attack target", .{});
+                    try combat.formatTargetHints(ctx.w, ctx.player_id, writer);
+                    try writer.writeAll("\n");
                     return .continue_repl;
                 },
                 error.NotYourTurn => {
@@ -392,7 +395,9 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                     return .continue_repl;
                 },
                 error.NotAdjacent => {
-                    try writer.print("target not adjacent\n", .{});
+                    try writer.print("target not adjacent; move next to it first", .{});
+                    try combat.formatTargetHints(ctx.w, ctx.player_id, writer);
+                    try writer.writeAll("\n");
                     return .continue_repl;
                 },
                 else => |e| return e,
@@ -405,7 +410,9 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
             }
             combat.attack(ctx.w, ctx.player_id, target, writer) catch |err| switch (err) {
                 error.NoTarget => {
-                    try writer.print("no valid attack target\n", .{});
+                    try writer.print("no valid attack target: {s}", .{target});
+                    try combat.formatTargetHints(ctx.w, ctx.player_id, writer);
+                    try writer.writeAll("\n");
                     return .continue_repl;
                 },
                 error.NotYourTurn => {
@@ -413,7 +420,9 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                     return .continue_repl;
                 },
                 error.NotAdjacent => {
-                    try writer.print("target not adjacent\n", .{});
+                    try writer.print("target not adjacent; move next to it first", .{});
+                    try combat.formatTargetHints(ctx.w, ctx.player_id, writer);
+                    try writer.writeAll("\n");
                     return .continue_repl;
                 },
                 else => |e| return e,
