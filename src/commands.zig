@@ -522,7 +522,7 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
             try help_text.writeMainHelp(writer, ctx.help_profile);
         },
         .help_descend => {
-            try writer.print("descend: use on stairs (+) or > tile to go to the next floor\n", .{});
+            try writer.print("descend: use on stairs (>) to go to the next floor\n", .{});
         },
         .exit => return .exit_repl,
         .unknown => |text| {
@@ -838,10 +838,9 @@ test "descend via execute from normal spawn reaches floor 2" {
     var ctx = try descendTestCtx(allocator, &w);
     var buf: [4096]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
-    var i: usize = 0;
-    while (i < 4) : (i += 1) {
-        _ = try execute(&ctx, parseLine("move east"), fbs.writer());
-    }
+    _ = try execute(&ctx, parseLine("move east"), fbs.writer());
+    _ = try execute(&ctx, parseLine("move south"), fbs.writer());
+    _ = try execute(&ctx, parseLine("move east"), fbs.writer());
     _ = try execute(&ctx, .descend, fbs.writer());
     const out = fbs.getWritten();
     try std.testing.expect(std.mem.indexOf(u8, out, "descended to floor 2") != null);
@@ -864,8 +863,8 @@ test "descend blocked during combat via execute" {
     try w.loadFloor(1);
 
     var ctx = try descendTestCtx(allocator, &w);
-    try dungeon.walkSpawnToFloor1Door(&w, ctx.player_id);
-    _ = try w.spawnMonster(.goblin, loc.Loc.init(50, 53), "goblin_0");
+    try dungeon.walkSpawnToFloor1Stairs(&w, ctx.player_id);
+    _ = try w.spawnMonster(.goblin, loc.Loc.init(51, 51), "goblin_0");
     _ = try execute(&ctx, parseLine("attack goblin_0"), std.io.null_writer);
 
     var buf: [256]u8 = undefined;

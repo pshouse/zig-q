@@ -61,10 +61,9 @@ pub fn run(allocator: std.mem.Allocator, writer: anytype) !void {
     try session.draftChooseRace(&draft, 2);
     try session.draftChooseClass(&draft, 1);
     _ = try commands.execute(&ctx, .spawn, writer);
-    var step: usize = 0;
-    while (step < 4) : (step += 1) {
-        _ = try commands.execute(&ctx, commands.parseLine("move east"), writer);
-    }
+    _ = try commands.execute(&ctx, commands.parseLine("move east"), writer);
+    _ = try commands.execute(&ctx, commands.parseLine("move south"), writer);
+    _ = try commands.execute(&ctx, commands.parseLine("move east"), writer);
     const ent = w.store.get(ctx.player_id) orelse return error.EntityNotFound;
     try writer.print("pre_descend floor_index={} player_at=({},{}) spawn=(49,49)\n", .{
         w.floor_index,

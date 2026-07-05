@@ -206,10 +206,9 @@ test "sqlite save load roundtrip preserves floor 2 after descend" {
         .draft = &draft,
     };
     _ = try @import("commands.zig").execute(&ctx, .spawn, std.io.null_writer);
-    var i: usize = 0;
-    while (i < 4) : (i += 1) {
-        _ = try @import("commands.zig").execute(&ctx, @import("commands.zig").parseLine("move east"), std.io.null_writer);
-    }
+    _ = try @import("commands.zig").execute(&ctx, @import("commands.zig").parseLine("move east"), std.io.null_writer);
+    _ = try @import("commands.zig").execute(&ctx, @import("commands.zig").parseLine("move south"), std.io.null_writer);
+    _ = try @import("commands.zig").execute(&ctx, @import("commands.zig").parseLine("move east"), std.io.null_writer);
     _ = try @import("commands.zig").execute(&ctx, .descend, std.io.null_writer);
     const player_id = ctx.player_id;
     try std.testing.expectEqual(@as(u32, 2), w.floor_index);

@@ -11,9 +11,9 @@ const TileEntry = struct {
 };
 
 pub const Floor1Profile = enum {
-    /// v0.8 regression layout: door at (49,53) unreachable from spawn.
+    /// v0.8 regression layout: door (+) at (49,53) unreachable from spawn.
     v08,
-    /// v0.9 playable layout: east corridor open at (49,51).
+    /// v0.9 playable layout: stairs (>) at south-east exit (50,51).
     v09,
 };
 
@@ -42,7 +42,11 @@ const floor1_tiles = [_]TileEntry{
 };
 
 fn skipFloor1Tile(profile: Floor1Profile, entry: TileEntry) bool {
-    return profile == .v09 and entry.x == 49 and entry.y == 51 and entry.tile == .wall;
+    if (profile != .v09) return false;
+    // v0.9: replace far-east door and south-east wall with proper stairs.
+    if (entry.x == 49 and entry.y == 53 and entry.tile == .door) return true;
+    if (entry.x == 50 and entry.y == 51 and entry.tile == .wall) return true;
+    return false;
 }
 
 pub fn loadFloor1(map: *terrain.TerrainMap, profile: Floor1Profile) !void {
@@ -51,17 +55,23 @@ pub fn loadFloor1(map: *terrain.TerrainMap, profile: Floor1Profile) !void {
         if (skipFloor1Tile(profile, entry)) continue;
         try map.set(loc.Loc.init(entry.x, entry.y), entry.tile);
     }
+    if (profile == .v09) {
+        try map.set(floor1_stairs_v09, .stairs);
+    }
 }
 
 pub const floor1_spawn = loc.Loc.init(49, 49);
-pub const floor1_door = loc.Loc.init(49, 53);
+/// v0.8 regression descend trigger (door glyph).
+pub const floor1_door_v08 = loc.Loc.init(49, 53);
+/// v0.9 descend trigger at the chamber's south-east exit.
+pub const floor1_stairs_v09 = loc.Loc.init(50, 51);
 
-/// Moves from spawn to the floor-1 door along the east corridor (v0.9 layout).
-pub fn walkSpawnToFloor1Door(w: *@import("world.zig").World, player_id: @import("entity.zig").EntityId) !void {
-    var i: usize = 0;
-    while (i < 4) : (i += 1) {
-        _ = try @import("movement.zig").moveEntity(w, player_id, .east);
-    }
+/// Moves from spawn to floor-1 stairs on the v0.9 layout: east, south, east.
+pub fn walkSpawnToFloor1Stairs(w: *@import("world.zig").World, player_id: @import("entity.zig").EntityId) !void {
+    const movement = @import("movement.zig");
+    _ = try movement.moveEntity(w, player_id, .east);
+    _ = try movement.moveEntity(w, player_id, .south);
+    _ = try movement.moveEntity(w, player_id, .east);
 }
 
 pub fn floorSeed(world_seed: u64, floor_index: u32) u64 {
@@ -246,7 +256,7 @@ test "floor1 blocks north of spawn" {
     try loadFloor1(&map, .v09);
     try std.testing.expect(!map.isWalkable(loc.Loc.init(48, 49)));
     try std.testing.expect(map.isWalkable(loc.Loc.init(49, 49)));
-    try std.testing.expect(map.isWalkable(loc.Loc.init(49, 53)));
+    try std.testing.expect(map.isWalkable(floor1_stairs_v09));
 }
 
 test "floor1 v08 blocks east corridor to door" {
@@ -257,24 +267,22 @@ test "floor1 v08 blocks east corridor to door" {
     try std.testing.expect(!map.isWalkable(loc.Loc.init(49, 51)));
 }
 
-test "floor1 v09 door reachable from spawn via east corridor" {
+test "floor1 v09 stairs reachable from spawn via south-east exit" {
     const allocator = std.testing.allocator;
     var map = terrain.TerrainMap.init(allocator);
     defer map.deinit();
     try loadFloor1(&map, .v09);
-    try std.testing.expect(map.isWalkable(loc.Loc.init(49, 51)));
-    try std.testing.expect(map.isWalkable(loc.Loc.init(49, 52)));
+    try std.testing.expect(!map.isWalkable(loc.Loc.init(49, 51)));
 
-    var pos = floor1_spawn;
-    var i: usize = 0;
-    while (i < 4) : (i += 1) {
-        pos = loc.Loc.init(pos.x, pos.y + 1);
-        try std.testing.expect(map.isWalkable(pos));
-    }
-    try std.testing.expectEqual(floor1_door.x, pos.x);
-    try std.testing.expectEqual(floor1_door.y, pos.y);
-    const door_tile = map.get(pos) orelse return error.TestExpectedEqual;
-    try std.testing.expect(door_tile.isDescendTrigger());
+    const path = [_]loc.Loc{
+        loc.Loc.init(49, 50),
+        loc.Loc.init(50, 50),
+        floor1_stairs_v09,
+    };
+    for (path) |tile| try std.testing.expect(map.isWalkable(tile));
+
+    const stairs_tile = map.get(floor1_stairs_v09) orelse return error.TestExpectedEqual;
+    try std.testing.expectEqual(terrain.Tile.stairs, stairs_tile);
 }
 
 test "generated floor is deterministic for same seed" {

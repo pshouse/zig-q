@@ -327,7 +327,7 @@ test "capture apply roundtrip preserves multi-floor state" {
     const char = try @import("session.zig").draftBuildCharacter(allocator, &w, &draft, "George");
     w.stageCharacter(char);
     const player_id = try w.spawnStagedPlayer(dungeon.floor1_spawn, "entity_0");
-    try dungeon.walkSpawnToFloor1Door(&w, player_id);
+    try dungeon.walkSpawnToFloor1Stairs(&w, player_id);
     try w.descend(player_id);
 
     var before = try capture(allocator, &w, player_id);

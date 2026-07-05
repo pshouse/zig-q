@@ -8,8 +8,7 @@ choose_class 1
 creation_finish George
 spawn entity_0 49 49
 command move east
-command move east
-command move east
+command move south
 command move east
 command descend
 command look
