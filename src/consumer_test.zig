@@ -2,15 +2,22 @@
 const std = @import("std");
 const zig_q = @import("zig_q");
 
+fn stagePlayer(allocator: std.mem.Allocator, w: *zig_q.world.World) !zig_q.entity.EntityId {
+    const boot = try zig_q.session.bootstrapCharacter(allocator, w, "George");
+    w.stageCharacter(boot.character);
+    return w.spawnStagedPlayer(zig_q.dungeon.floor1_spawn, "entity_0");
+}
+
 test "consumer world init spawn deinit" {
     const allocator = std.testing.allocator;
     var w = try zig_q.world.World.init(allocator, 42);
     defer w.deinit();
 
     try w.loadFloor(1);
-    const id = try w.spawnTestPlayer(zig_q.dungeon.floor1_spawn);
-    try std.testing.expectEqual(@as(zig_q.entity.EntityId, 0), id);
-    try std.testing.expectEqual(@as(usize, 1), w.store.count());
+    _ = try stagePlayer(allocator, &w);
+    const snap = w.snapshot();
+    try std.testing.expectEqual(@as(u32, 1), snap.floor_index);
+    try std.testing.expectEqual(@as(usize, 1), snap.entity_count);
 }
 
 test "consumer multi-floor descend" {
@@ -19,15 +26,13 @@ test "consumer multi-floor descend" {
     defer w.deinit();
 
     try w.loadFloor(1);
-    const boot = try zig_q.session.bootstrapCharacter(allocator, &w, "George");
-    w.stageCharacter(boot.character);
-    const id = try w.spawnStagedPlayer(zig_q.dungeon.floor1_spawn, "entity_0");
-
+    const id = try stagePlayer(allocator, &w);
     _ = try zig_q.dungeon.walkSpawnToFloor1Stairs(&w, id);
     try w.descend(id);
-    try std.testing.expectEqual(@as(u32, 2), w.floor_index);
-    try w.placeFloorMonsters();
-    try std.testing.expect(w.store.count() > 1);
+
+    const snap = w.snapshot();
+    try std.testing.expectEqual(@as(u32, 2), snap.floor_index);
+    try std.testing.expect(snap.entity_count > 1);
 }
 
 test "consumer combat attack" {
@@ -36,15 +41,13 @@ test "consumer combat attack" {
     defer w.deinit();
 
     try w.loadFloor(1);
-    const boot = try zig_q.session.bootstrapCharacter(allocator, &w, "George");
-    w.stageCharacter(boot.character);
-    const player = try w.spawnStagedPlayer(zig_q.loc.Loc.init(49, 49), "entity_0");
+    const player = try stagePlayer(allocator, &w);
     _ = try w.spawnMonster(.goblin, zig_q.loc.Loc.init(50, 49), "goblin_0");
 
     var buf: [1024]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
     try zig_q.combat.attack(&w, player, "goblin_0", fbs.writer());
-    try std.testing.expect(zig_q.combat.isFighting(&w, player));
+    try std.testing.expect(zig_q.combat.isInCombat(&w));
 }
 
 test "consumer sqlite save load roundtrip" {
@@ -56,15 +59,16 @@ test "consumer sqlite save load roundtrip" {
     var w = try zig_q.world.World.init(allocator, 42);
     defer w.deinit();
     try w.loadFloor(1);
-    const boot = try zig_q.session.bootstrapCharacter(allocator, &w, "George");
-    w.stageCharacter(boot.character);
-    const player = try w.spawnStagedPlayer(zig_q.dungeon.floor1_spawn, "entity_0");
+    const player = try stagePlayer(allocator, &w);
     _ = try zig_q.movement.moveEntity(&w, player, .east);
 
     try zig_q.sqlite_store.saveSlot(allocator, path, 1, &w, player, std.io.null_writer);
     const loaded = try zig_q.sqlite_store.loadSlot(allocator, path, 1, std.io.null_writer);
     var loaded_world = loaded.world;
     defer loaded_world.deinit();
-    try std.testing.expectEqual(@as(u32, 1), loaded_world.floor_index);
-    try std.testing.expectEqual(@as(u64, 42), loaded_world.seed);
+
+    const snap = loaded_world.snapshot();
+    try std.testing.expectEqual(@as(u32, 1), snap.floor_index);
+    try std.testing.expectEqual(@as(u64, 42), snap.seed);
+    try std.testing.expectEqual(@as(usize, 1), snap.entity_count);
 }

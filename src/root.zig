@@ -1,10 +1,14 @@
 //! Public `zig_q` library surface for deterministic dungeon crawl simulation.
 //!
-//! **World lifecycle:** `world.World.init` / `deinit`, `loadFloor`, `descend`, `spawnStagedPlayer`.
-//! **Dungeon crawl:** `dungeon.loadFloor1`, `dungeon.generateFloor`, `dungeon.walkSpawnToFloor1Stairs`.
+//! **World lifecycle:** `world.World.init` / `deinit`, `loadFloor`, `descend`, `spawnStagedPlayer`,
+//! `stageCharacter`, `spawnMonster`, `snapshot` (includes `floor_index` and `entity_count`).
+//! **Character setup:** `session.bootstrapCharacter` (rolls stats and builds a draft character).
+//! **Dungeon crawl:** `dungeon.floor1_spawn`, `dungeon.walkSpawnToFloor1Stairs`.
+//! **Movement:** `movement.moveEntity`.
 //! **Combat:** `combat.attack`, `combat.endTurn`, `combat.isInCombat`.
 //! **Persistence:** `sqlite_store.saveSlot`, `sqlite_store.loadSlot`, `sqlite_store.deleteDb`.
 //! **Scripted testing:** `dst.runNamedScenario`, `repl.runScripted`, `fuzz.run`.
+//! **Release identity:** `version.semver` (also recorded as `# version=<semver>` in REPL/DST transcripts).
 //!
 //! Internal modules are re-exported for in-repo tests; external consumers should depend on
 //! the documented symbols above and treat other exports as implementation details.

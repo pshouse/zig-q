@@ -195,6 +195,7 @@ pub const World = struct {
     pub fn snapshot(self: *const World) Snapshot {
         return .{
             .seed = self.seed,
+            .floor_index = self.floor_index,
             .entity_count = self.store.count(),
             .occupied_cells = self.tile_map.occupiedCellCount(),
             .clock_ticks = self.game_clock.ticks,
@@ -205,6 +206,7 @@ pub const World = struct {
 
 pub const Snapshot = struct {
     seed: u64,
+    floor_index: u32,
     entity_count: usize,
     occupied_cells: usize,
     clock_ticks: u64,

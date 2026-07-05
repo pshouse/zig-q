@@ -5,6 +5,7 @@ const world = @import("world.zig");
 const session = @import("session.zig");
 const map_render = @import("map_render.zig");
 const commands = @import("commands.zig");
+const version = @import("version.zig");
 
 pub const Step = union(enum) {
     roll_stats,
@@ -288,6 +289,8 @@ pub const Harness = struct {
     }
 
     pub fn runScenario(self: *Harness, scenario: Scenario, writer: anytype) !void {
+        try writer.print("# version={s}\n", .{version.semver});
+        try writer.print("# seed={}\n", .{scenario.seed});
         try writer.print("dst scenario={s} seed={}\n", .{ scenario.name, scenario.seed });
 
         if (std.mem.eql(u8, scenario.name, "save_roundtrip") or
@@ -507,6 +510,7 @@ test "dst reference_crawl scenario is byte-identical across runs" {
 
     const out_a = fbs_a.getWritten();
     const out_b = fbs_b.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "# version=1.0.0") != null);
     try std.testing.expect(std.mem.indexOf(u8, out_a, "descended to floor 2") != null);
     try std.testing.expect(std.mem.indexOf(u8, out_a, "descended to floor 3") != null);
     try std.testing.expect(std.mem.indexOf(u8, out_a, "look floor=3") != null);

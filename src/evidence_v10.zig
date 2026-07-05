@@ -11,7 +11,11 @@ pub fn run(allocator: std.mem.Allocator, writer: anytype) !void {
     try dst.runNamedScenario(allocator, "reference_crawl", 42, fbs.writer());
     const out = fbs.getWritten();
 
+    var version_line_buf: [64]u8 = undefined;
+    const version_line = try std.fmt.bufPrint(&version_line_buf, "# version={s}", .{version.semver});
+
     const markers = [_][]const u8{
+        version_line,
         "descended to floor 2",
         "descended to floor 3",
         "look floor=3",
@@ -29,6 +33,7 @@ test "evidence v10 reference crawl markers" {
     var fbs = std.io.fixedBufferStream(&buf);
     try run(std.testing.allocator, fbs.writer());
     const out = fbs.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, out, "marker # version=1.0.0: true") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "marker descended to floor 3: true") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "marker saved slot: true") != null);
 }
