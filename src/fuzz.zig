@@ -68,6 +68,7 @@ const templates = [_][]const u8{
     "stats before spawn",
     "attack",
     "attack goblin_0",
+    "attack skeleton_0",
     "end turn",
 };
 
@@ -128,6 +129,7 @@ pub fn run(allocator: std.mem.Allocator, cfg: Config) !Report {
 
             if (ctx.player_id != entity.invalid_id and countLiveMonsters(&w) == 0) {
                 _ = w.spawnMonster(.goblin, loc.Loc.init(50, 49), "goblin_0") catch {};
+                _ = w.spawnMonster(.skeleton, loc.Loc.init(49, 50), "skeleton_0") catch {};
             }
 
             assertInvariants(&w, ctx.player_id) catch |inv_err| {
@@ -207,7 +209,8 @@ fn countLiveMonsters(w: *const world.World) usize {
 pub fn assertInvariants(w: *world.World, player_id: entity.EntityId) !void {
     var on_map: usize = 0;
     for (w.store.entities.items) |*ent| {
-        if (ent.current_hp > ent.max_hp) return error.HpAboveMax;
+        if (ent.max_hp > 0 and ent.current_hp > ent.max_hp) return error.HpAboveMax;
+        if (ent.conditions.has(.dead) and ent.current_hp != 0) return error.DeadWithPositiveHp;
         on_map += 1;
         const list = w.tile_map.cells.get(ent.loc) orelse return error.EntityNotOnMap;
         var found = false;
@@ -231,7 +234,9 @@ pub fn assertInvariants(w: *world.World, player_id: entity.EntityId) !void {
 
     if (w.combat != null) {
         if (combat.activeTurn(w)) |active| {
-            if (w.store.get(active) == null) return error.InvalidTurnOwner;
+            const owner = w.store.get(active) orelse return error.InvalidTurnOwner;
+            if (owner.char.status != .fighting) return error.InvalidFightingStatus;
+            if (owner.current_hp == 0 or owner.conditions.has(.dead)) return error.DeadTurnOwner;
         }
     }
 }

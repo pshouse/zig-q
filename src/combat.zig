@@ -21,6 +21,12 @@ pub fn isInCombat(w: *const world.World) bool {
     return w.combat != null;
 }
 
+/// Phase gating: true when entity status is `.fighting` (set by enter/end combat).
+pub fn isFighting(w: *const world.World, id: entity.EntityId) bool {
+    const ent = w.store.get(id) orelse return false;
+    return ent.char.status == .fighting;
+}
+
 pub fn activeTurn(w: *const world.World) ?entity.EntityId {
     const combat = w.combat orelse return null;
     if (combat.participants.items.len == 0) return null;
@@ -39,11 +45,15 @@ fn isAdjacent(a: loc.Loc, b: loc.Loc) bool {
     return adx + ady == 1;
 }
 
+pub fn monsterKind(ent: *const entity.Entity) ?monsters.Kind {
+    if (!ent.is_monster) return null;
+    if (std.mem.eql(u8, ent.char.name, "goblin")) return .goblin;
+    if (std.mem.eql(u8, ent.char.name, "skeleton")) return .skeleton;
+    return null;
+}
+
 pub fn targetAc(ent: *const entity.Entity) u32 {
-    if (ent.is_monster) {
-        if (std.mem.eql(u8, ent.char.name, "goblin")) return monsters.armorClass(.goblin);
-        if (std.mem.eql(u8, ent.char.name, "skeleton")) return monsters.armorClass(.skeleton);
-    }
+    if (monsterKind(ent)) |kind| return monsters.armorClass(kind);
     return character.armorClass(ent.char);
 }
 
@@ -335,4 +345,81 @@ test "melee reduces target hp" {
     const before = w.store.get(goblin_id).?.current_hp;
     try performAttack(&w, player_id, goblin_id, fbs.writer());
     try std.testing.expect(w.store.get(goblin_id).?.current_hp <= before);
+}
+
+test "end turn advances initiative" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    const goblin_id = try w.spawnMonster(.goblin, loc.Loc.init(50, 49), "goblin_0");
+    try enterCombat(&w, player_id, goblin_id);
+
+    var buf: [512]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    try endTurn(&w, player_id, fbs.writer());
+    const out = fbs.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, out, "turn:") != null or std.mem.indexOf(u8, out, "attack ") != null);
+}
+
+test "performAttack prone target shows +2 mod in output" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    const goblin_id = try w.spawnMonster(.goblin, loc.Loc.init(50, 49), "goblin_0");
+    const player = w.store.get(player_id).?;
+    for (player.char.attributes.items) |*attr| {
+        if (std.mem.eql(u8, attr.abbr, "STR")) attr.stat = 14;
+    }
+    w.store.get(goblin_id).?.conditions.add(.prone);
+    try enterCombat(&w, player_id, goblin_id);
+
+    var buf: [256]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    try performAttack(&w, player_id, goblin_id, fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "mod=4") != null);
+}
+
+test "performAttack blinded attacker consumes two d20 rolls" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    const goblin_id = try w.spawnMonster(.goblin, loc.Loc.init(50, 49), "goblin_0");
+    w.store.get(player_id).?.conditions.add(.blinded);
+    try enterCombat(&w, player_id, goblin_id);
+
+    const offset_before = w.rng.offset;
+    var buf: [256]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    try performAttack(&w, player_id, goblin_id, fbs.writer());
+    try std.testing.expect(w.rng.offset >= offset_before + 2);
+}
+
+test "combat end restores exploring status" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    const goblin_id = try w.spawnMonster(.goblin, loc.Loc.init(50, 49), "goblin_0");
+    for (w.store.get(player_id).?.char.attributes.items) |*attr| {
+        if (std.mem.eql(u8, attr.abbr, "STR")) attr.stat = 18;
+    }
+    w.store.get(goblin_id).?.current_hp = 1;
+    try enterCombat(&w, player_id, goblin_id);
+
+    var buf: [512]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    var attempts: u8 = 0;
+    while (w.combat != null and attempts < 30) : (attempts += 1) {
+        try performAttack(&w, player_id, goblin_id, fbs.writer());
+    }
+    try std.testing.expect(w.combat == null);
+    try std.testing.expect(w.store.get(player_id).?.char.status == .exploring);
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "is slain") != null);
 }

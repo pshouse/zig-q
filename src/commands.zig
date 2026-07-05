@@ -137,7 +137,7 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                 try writer.print("no player spawned\n", .{});
                 return .continue_repl;
             }
-            if (combat.isInCombat(ctx.w)) {
+            if (combat.isFighting(ctx.w, ctx.player_id)) {
                 try writer.print("cannot move during combat\n", .{});
                 return .continue_repl;
             }
@@ -444,4 +444,91 @@ test "spawn after creation shows dwarf con bonus in stats" {
         }
     }
     return error.TestExpectedEqual;
+}
+
+fn combatTestCtx(allocator: std.mem.Allocator, w: *world.World) !Context {
+    var draft: session.CreationDraft = .{};
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    _ = try w.spawnMonster(.goblin, loc.Loc.init(50, 49), "goblin_0");
+    return .{
+        .allocator = allocator,
+        .w = w,
+        .draft = &draft,
+        .player_id = player_id,
+    };
+}
+
+test "attack via execute sets fighting status" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+
+    var ctx = try combatTestCtx(allocator, &w);
+    _ = try execute(&ctx, parseLine("attack goblin_0"), std.io.null_writer);
+    try std.testing.expect(combat.isFighting(&w, ctx.player_id));
+    try std.testing.expect(w.combat != null);
+}
+
+test "end turn via execute advances initiative" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+
+    var ctx = try combatTestCtx(allocator, &w);
+    _ = try execute(&ctx, parseLine("attack goblin_0"), std.io.null_writer);
+
+    var buf: [512]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("end turn"), fbs.writer());
+    const out = fbs.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, out, "turn:") != null or std.mem.indexOf(u8, out, "attack ") != null);
+}
+
+test "move blocked while fighting via execute" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+
+    var ctx = try combatTestCtx(allocator, &w);
+    _ = try execute(&ctx, parseLine("attack goblin_0"), std.io.null_writer);
+
+    var buf: [256]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("move east"), fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "cannot move during combat") != null);
+}
+
+test "kill via execute restores exploring status" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+
+    var ctx = try combatTestCtx(allocator, &w);
+    const goblin_id = blk: {
+        for (w.store.entities.items) |*ent| {
+            if (ent.is_monster) break :blk ent.id;
+        }
+        return error.TestExpectedEqual;
+    };
+    for (w.store.get(ctx.player_id).?.char.attributes.items) |*attr| {
+        if (std.mem.eql(u8, attr.abbr, "STR")) attr.stat = 18;
+    }
+    w.store.get(goblin_id).?.current_hp = 1;
+    try combat.enterCombat(&w, ctx.player_id, goblin_id);
+
+    var buf: [4096]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    var attempts: u8 = 0;
+    while (w.combat != null and attempts < 30) : (attempts += 1) {
+        const active = combat.activeTurn(&w) orelse break;
+        if (active == ctx.player_id) {
+            _ = try execute(&ctx, parseLine("attack goblin_0"), fbs.writer());
+        } else {
+            _ = try execute(&ctx, parseLine("end turn"), fbs.writer());
+        }
+    }
+    const goblin = w.store.get(goblin_id).?;
+    try std.testing.expect(w.combat == null);
+    try std.testing.expect(w.store.get(ctx.player_id).?.char.status == .exploring);
+    try std.testing.expect(goblin.current_hp == 0 or goblin.conditions.has(.dead));
 }

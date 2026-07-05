@@ -68,3 +68,27 @@ test "goblin block stats" {
     try std.testing.expectEqual(@as(u32, 7), b.max_hp);
     try std.testing.expectEqual(@as(u32, 15), b.ac);
 }
+
+test "skeleton block stats" {
+    const b = block(.skeleton);
+    try std.testing.expectEqual(@as(u32, 13), b.max_hp);
+    try std.testing.expectEqual(@as(u32, 13), b.ac);
+}
+
+test "spawnMonster skeleton uses skeleton ac in combat" {
+    const allocator = std.testing.allocator;
+    var w = try @import("world.zig").World.init(allocator, 42);
+    defer w.deinit();
+
+    const player_id = try w.spawnTestPlayer(@import("loc.zig").Loc.init(49, 49));
+    const skel_id = try w.spawnMonster(.skeleton, @import("loc.zig").Loc.init(50, 49), "skeleton_0");
+    const skel = w.store.get(skel_id).?;
+    try std.testing.expect(skel.is_monster);
+    try std.testing.expectEqual(@as(u32, 13), @import("combat.zig").targetAc(skel));
+
+    try @import("combat.zig").enterCombat(&w, player_id, skel_id);
+    var buf: [256]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    try @import("combat.zig").performAttack(&w, player_id, skel_id, fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "vs AC 13") != null);
+}

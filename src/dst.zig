@@ -134,6 +134,19 @@ pub const brawl_scenario = Scenario{
         .{ .command = "end turn" },
         .{ .command = "attack goblin_0" },
         .{ .command = "end turn" },
+        .{ .spawn_monster = .{ .kind = .skeleton, .name = "skeleton_0", .x = 50, .y = 49 } },
+        .{ .command = "attack skeleton_0" },
+        .{ .command = "end turn" },
+        .{ .command = "attack skeleton_0" },
+        .{ .command = "end turn" },
+        .{ .command = "attack skeleton_0" },
+        .{ .command = "end turn" },
+        .{ .command = "attack skeleton_0" },
+        .{ .command = "end turn" },
+        .{ .command = "attack skeleton_0" },
+        .{ .command = "end turn" },
+        .{ .command = "attack skeleton_0" },
+        .{ .command = "end turn" },
         .{ .command = "stats" },
         .{ .command = "exit" },
     },
@@ -374,6 +387,8 @@ test "dst brawl scenario is byte-identical across runs" {
     const out_b = fbs_b.getWritten();
     try std.testing.expect(out_a.len > 0);
     try std.testing.expect(std.mem.indexOf(u8, out_a, "attack ") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "skeleton_0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "vs AC 13") != null);
     try std.testing.expect(std.mem.indexOf(u8, out_a, "HP:") != null);
     try std.testing.expectEqualSlices(u8, out_a, out_b);
 }
