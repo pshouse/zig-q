@@ -113,4 +113,21 @@ pub fn build(b: *std.Build) void {
     const evidence_v08_run = b.addRunArtifact(evidence_v08_exe);
     const evidence_v08_step = b.step("evidence-v08", "Emit v0.8 save/load verification transcript");
     evidence_v08_step.dependOn(&evidence_v08_run.step);
+
+    const evidence_v09_exe = b.addExecutable(.{
+        .name = "zig-q-evidence-v09",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/evidence_v09_main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zig_q", .module = zig_q_mod },
+            },
+        }),
+    });
+    b.installArtifact(evidence_v09_exe);
+
+    const evidence_v09_run = b.addRunArtifact(evidence_v09_exe);
+    const evidence_v09_step = b.step("evidence-v09", "Emit v0.9 generator/descend verification transcript");
+    evidence_v09_step.dependOn(&evidence_v09_run.step);
 }

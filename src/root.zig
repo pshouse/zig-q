@@ -30,6 +30,7 @@ pub const evidence_v07 = @import("evidence_v07.zig");
 pub const save_state = @import("save_state.zig");
 pub const sqlite_store = @import("sqlite_store.zig");
 pub const evidence_v08 = @import("evidence_v08.zig");
+pub const evidence_v09 = @import("evidence_v09.zig");
 pub const scenario_file = @import("scenario_file.zig");
 
 test {
@@ -62,5 +63,6 @@ test {
     _ = @import("save_state.zig");
     _ = @import("sqlite_store.zig");
     _ = @import("evidence_v08.zig");
+    _ = @import("evidence_v09.zig");
     _ = @import("scenario_file.zig");
 }
