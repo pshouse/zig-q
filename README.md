@@ -114,7 +114,7 @@ zig build run -- --harvest transcripts/session-1783208416-seed42.txt
 
 Each `> command` line becomes one output line (seed header included). The harvested script is wired into the `playthrough` DST scenario and a REPL determinism test.
 
-Roguelike shorthands observed in recorded sessions (`l`, `m n`, `move nw`, `;` chains) are documented in [ROADMAP.md](ROADMAP.md) backlog — not expanded by the engine yet.
+Roguelike shorthands from recorded sessions (`l`, `m n`, `move nw`, `move w w`, `;` chains) are expanded by `executeLine` before command parsing — see [ROADMAP.md](ROADMAP.md).
 
 ## Fuzz harness
 

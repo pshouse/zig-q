@@ -141,6 +141,113 @@ fn rejectCreationAfterSpawn(ctx: *const Context, writer: anytype, verb: []const 
     return true;
 }
 
+pub fn freeExpanded(allocator: std.mem.Allocator, parts: []const []const u8) void {
+    for (parts) |part| allocator.free(part);
+    allocator.free(parts);
+}
+
+fn appendMove(allocator: std.mem.Allocator, list: *std.ArrayList([]const u8), dir: movement.Direction) !void {
+    const cmd = try std.fmt.allocPrint(allocator, "move {s}", .{movement.Direction.token(dir)});
+    try list.append(allocator, cmd);
+}
+
+fn expandMoveTail(allocator: std.mem.Allocator, tail: []const u8, list: *std.ArrayList([]const u8)) !void {
+    var tokens: [8][]const u8 = undefined;
+    var count: usize = 0;
+
+    var iter = std.mem.splitScalar(u8, tail, ' ');
+    while (iter.next()) |raw| {
+        const tok = std.mem.trim(u8, raw, " \t");
+        if (tok.len == 0) continue;
+        if (count >= tokens.len) return error.TooManyMoveSteps;
+        tokens[count] = tok;
+        count += 1;
+    }
+    if (count == 0) return error.InvalidMoveShorthand;
+
+    if (count == 1) {
+        const tok = tokens[0];
+        if (movement.parseCompound(tok)) |pair| {
+            try appendMove(allocator, list, pair[0]);
+            try appendMove(allocator, list, pair[1]);
+            return;
+        }
+        if (movement.Direction.parse(tok)) |dir| {
+            try appendMove(allocator, list, dir);
+            return;
+        }
+        return error.InvalidMoveShorthand;
+    }
+
+    for (tokens[0..count]) |tok| {
+        if (movement.Direction.parse(tok)) |dir| {
+            try appendMove(allocator, list, dir);
+        } else {
+            return error.InvalidMoveShorthand;
+        }
+    }
+}
+
+fn expandSegment(allocator: std.mem.Allocator, segment: []const u8, list: *std.ArrayList([]const u8)) !void {
+    const trimmed = std.mem.trim(u8, segment, " \t\r\n");
+    if (trimmed.len == 0) return;
+
+    if (std.mem.eql(u8, trimmed, "l")) {
+        try list.append(allocator, try allocator.dupe(u8, "look"));
+        return;
+    }
+
+    if (std.mem.startsWith(u8, trimmed, "m ")) {
+        const dir_part = std.mem.trim(u8, trimmed[2..], " \t");
+        try list.append(allocator, try std.fmt.allocPrint(allocator, "move {s}", .{dir_part}));
+        return;
+    }
+
+    if (std.mem.startsWith(u8, trimmed, "move ")) {
+        const tail = std.mem.trim(u8, trimmed[5..], " \t");
+        expandMoveTail(allocator, tail, list) catch |err| switch (err) {
+            error.InvalidMoveShorthand, error.TooManyMoveSteps => {
+                try list.append(allocator, try allocator.dupe(u8, trimmed));
+            },
+            else => return err,
+        };
+        return;
+    }
+
+    try list.append(allocator, try allocator.dupe(u8, trimmed));
+}
+
+/// Split on `;` and expand roguelike shorthands to canonical command lines.
+pub fn expandInput(allocator: std.mem.Allocator, line: []const u8) ![]const []const u8 {
+    var list: std.ArrayList([]const u8) = .empty;
+    errdefer freeExpanded(allocator, list.items);
+
+    var segments = std.mem.splitScalar(u8, line, ';');
+    while (segments.next()) |segment| {
+        try expandSegment(allocator, segment, &list);
+    }
+
+    if (list.items.len == 0) {
+        try list.append(allocator, try allocator.dupe(u8, "help"));
+    }
+
+    return try list.toOwnedSlice(allocator);
+}
+
+/// Parse and execute one input line, expanding shorthands and `;` chains.
+pub fn executeLine(ctx: *Context, line: []const u8, writer: anytype) !Result {
+    const parts = try expandInput(ctx.allocator, line);
+    defer freeExpanded(ctx.allocator, parts);
+
+    var result: Result = .continue_repl;
+    for (parts) |part| {
+        const cmd = parseLine(part);
+        result = try execute(ctx, cmd, writer);
+        if (result == .exit_repl) return result;
+    }
+    return result;
+}
+
 pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
     switch (cmd) {
         .look => {
@@ -384,7 +491,8 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
         .help => {
             try writer.print(
                 \\creation: roll, assign <6 picks>, race <1-3>, class <1-3>, spawn, stats
-                \\explore:  look, time, move <north|south|east|west>, help, exit
+                \\explore:  look (l), time, move <n|s|e|w|nw|...>, m <dir>, help, exit
+                \\          chains: move w w   or   move w; move w
                 \\combat:   attack [target], end turn
                 \\persist:  save [slot], load <slot>
                 \\
@@ -401,6 +509,43 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
         },
     }
     return .continue_repl;
+}
+
+test "expandInput infers look shorthand" {
+    const allocator = std.testing.allocator;
+    const parts = try expandInput(allocator, "l");
+    defer freeExpanded(allocator, parts);
+    try std.testing.expectEqual(@as(usize, 1), parts.len);
+    try std.testing.expectEqualStrings("look", parts[0]);
+}
+
+test "expandInput infers move shorthand" {
+    const allocator = std.testing.allocator;
+    const parts = try expandInput(allocator, "m n");
+    defer freeExpanded(allocator, parts);
+    try std.testing.expectEqual(@as(usize, 1), parts.len);
+    try std.testing.expectEqualStrings("move n", parts[0]);
+}
+
+test "expandInput expands compound and repeated moves" {
+    const allocator = std.testing.allocator;
+    const nw = try expandInput(allocator, "move nw");
+    defer freeExpanded(allocator, nw);
+    try std.testing.expectEqual(@as(usize, 2), nw.len);
+    try std.testing.expectEqualStrings("move n", nw[0]);
+    try std.testing.expectEqualStrings("move w", nw[1]);
+
+    const ww = try expandInput(allocator, "move w w");
+    defer freeExpanded(allocator, ww);
+    try std.testing.expectEqual(@as(usize, 2), ww.len);
+    try std.testing.expectEqualStrings("move w", ww[0]);
+    try std.testing.expectEqualStrings("move w", ww[1]);
+
+    const chain = try expandInput(allocator, "move w; move w");
+    defer freeExpanded(allocator, chain);
+    try std.testing.expectEqual(@as(usize, 2), chain.len);
+    try std.testing.expectEqualStrings("move w", chain[0]);
+    try std.testing.expectEqualStrings("move w", chain[1]);
 }
 
 test "parse and execute move changes position" {

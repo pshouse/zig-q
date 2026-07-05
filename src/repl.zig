@@ -113,8 +113,7 @@ pub fn runRepl(
 
         if (recording) |*rec| try rec.logInput(line);
 
-        const cmd = commands.parseLine(line);
-        const result = try commands.execute(&ctx, cmd, &out);
+        const result = try commands.executeLine(&ctx, line, &out);
         switch (result) {
             .continue_repl => {},
             .exit_repl => {
@@ -170,8 +169,7 @@ pub fn runReplScript(
     for (script) |line| {
         try out.print("> {s}\n", .{line});
 
-        const cmd = commands.parseLine(line);
-        const result = try commands.execute(&ctx, cmd, &out);
+        const result = try commands.executeLine(&ctx, line, &out);
         switch (result) {
             .continue_repl => {},
             .exit_repl => {
