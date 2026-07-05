@@ -100,6 +100,30 @@ pub fn livingParticipants(w: *world.World) usize {
     return n;
 }
 
+fn hasAdjacentHostile(w: *const world.World, player_id: entity.EntityId) bool {
+    const player = w.store.get(player_id) orelse return false;
+    for (w.store.entities.items) |ent| {
+        if (!ent.is_monster) continue;
+        if (!isAlive(&ent)) continue;
+        if (isAdjacent(player.loc, ent.loc)) return true;
+    }
+    return false;
+}
+
+fn appendParticipant(list: *std.ArrayList(entity.EntityId), allocator: std.mem.Allocator, id: entity.EntityId) !void {
+    for (list.items) |existing| {
+        if (existing == id) return;
+    }
+    try list.append(allocator, id);
+}
+
+fn maybeEndCombat(w: *world.World) void {
+    const combat_state = w.combat orelse return;
+    if (livingParticipants(w) <= 1 or !hasAdjacentHostile(w, combat_state.player_id)) {
+        endCombat(w);
+    }
+}
+
 fn nameMatches(ent: *const entity.Entity, name: []const u8, allow_prefix: bool) bool {
     if (std.mem.eql(u8, ent.name, name)) return true;
     if (std.mem.eql(u8, ent.char.name, name)) return true;
@@ -197,11 +221,22 @@ pub fn enterCombat(w: *world.World, player_id: entity.EntityId, enemy_id: entity
         w.allocator.destroy(combat_ptr);
     }
 
-    try combat_ptr.participants.append(w.allocator, player_id);
-    try combat_ptr.participants.append(w.allocator, enemy_id);
+    try appendParticipant(&combat_ptr.participants, w.allocator, player_id);
+    try appendParticipant(&combat_ptr.participants, w.allocator, enemy_id);
+
+    const player = w.store.get(player_id) orelse return error.AttackerNotFound;
+    for (w.store.entities.items) |*ent| {
+        if (!ent.is_monster) continue;
+        if (!isAlive(ent)) continue;
+        if (!isAdjacent(player.loc, ent.loc)) continue;
+        try appendParticipant(&combat_ptr.participants, w.allocator, ent.id);
+        ent.char.status = .fighting;
+    }
 
     if (w.store.get(player_id)) |p| p.char.status = .fighting;
-    if (w.store.get(enemy_id)) |e| e.char.status = .fighting;
+    if (w.store.get(enemy_id)) |e| {
+        if (isAlive(e)) e.char.status = .fighting;
+    }
 
     w.combat = combat_ptr;
 }
@@ -260,7 +295,7 @@ pub fn performAttack(
         try writer.print("hit damage={} hp={}/{}\n", .{ dmg, target.current_hp, target.max_hp });
         if (!isAlive(target)) {
             try writer.print("{s} is slain\n", .{target.name});
-            if (livingParticipants(w) <= 1) endCombat(w);
+            maybeEndCombat(w);
         }
     } else {
         try writer.print("miss\n", .{});
@@ -281,6 +316,7 @@ fn processMonsterTurns(w: *world.World, writer: anytype) !void {
             continue;
         }
         try performAttack(w, active, combat.player_id, writer);
+        if (!isInCombat(w)) return;
         if (livingParticipants(w) <= 1) return;
         advanceTurn(w);
     }
@@ -387,6 +423,45 @@ test "end turn advances initiative" {
     try endTurn(&w, player_id, fbs.writer());
     const out = fbs.getWritten();
     try std.testing.expect(std.mem.indexOf(u8, out, "turn:") != null or std.mem.indexOf(u8, out, "attack ") != null);
+}
+
+test "slaying last adjacent foe ends combat while distant monsters remain" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    const goblin_adj = try w.spawnMonster(.goblin, loc.Loc.init(50, 49), "goblin_0");
+    _ = try w.spawnMonster(.goblin, loc.Loc.init(52, 49), "goblin_1");
+    for (w.store.get(player_id).?.char.attributes.items) |*attr| {
+        if (std.mem.eql(u8, attr.abbr, "STR")) attr.stat = 18;
+    }
+    try enterCombat(&w, player_id, goblin_adj);
+
+    var buf: [512]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    var attempts: u8 = 0;
+    while (w.store.get(goblin_adj).?.current_hp > 0 and attempts < 30) : (attempts += 1) {
+        try performAttack(&w, player_id, goblin_adj, fbs.writer());
+    }
+    try std.testing.expect(w.store.get(goblin_adj).?.current_hp == 0);
+    try std.testing.expect(w.combat == null);
+    try std.testing.expect(w.store.get(player_id).?.char.status == .exploring);
+    try std.testing.expect(w.store.get(goblin_adj).?.current_hp == 0);
+}
+
+test "player can move on their turn during combat" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    const goblin_id = try w.spawnMonster(.goblin, loc.Loc.init(50, 49), "goblin_0");
+    try enterCombat(&w, player_id, goblin_id);
+    try std.testing.expect(activeTurn(&w) == player_id);
+
+    const moved = try @import("movement.zig").moveEntity(&w, player_id, .west);
+    try std.testing.expectEqual(loc.Loc.init(49, 48), moved);
+    try std.testing.expect(isInCombat(&w));
 }
 
 test "combat end restores exploring status" {

@@ -279,8 +279,14 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                 return .continue_repl;
             }
             if (combat.isInCombat(ctx.w) and combat.isFighting(ctx.w, ctx.player_id)) {
-                try writer.print("cannot move during combat\n", .{});
-                return .continue_repl;
+                const active = combat.activeTurn(ctx.w) orelse {
+                    try writer.print("cannot move during combat\n", .{});
+                    return .continue_repl;
+                };
+                if (active != ctx.player_id) {
+                    try writer.print("cannot move during combat\n", .{});
+                    return .continue_repl;
+                }
             }
             const new_loc = movement.moveEntity(ctx.w, ctx.player_id, dir) catch |err| switch (err) {
                 error.Blocked => {
@@ -387,6 +393,7 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                 error.NoTarget => {
                     try writer.print("no valid attack target", .{});
                     try combat.formatTargetHints(ctx.w, ctx.player_id, writer);
+                    if (combat.isInCombat(ctx.w)) try writer.writeAll("; move closer on your turn");
                     try writer.writeAll("\n");
                     return .continue_repl;
                 },
@@ -749,7 +756,7 @@ test "end turn via execute advances initiative" {
     try std.testing.expect(std.mem.indexOf(u8, out, "turn:") != null or std.mem.indexOf(u8, out, "attack ") != null);
 }
 
-test "move blocked while fighting via execute" {
+test "move allowed on player turn during combat via execute" {
     const allocator = std.testing.allocator;
     var w = try world.World.init(allocator, 42);
     defer w.deinit();
@@ -759,8 +766,8 @@ test "move blocked while fighting via execute" {
 
     var buf: [256]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
-    _ = try execute(&ctx, parseLine("move east"), fbs.writer());
-    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "cannot move during combat") != null);
+    _ = try execute(&ctx, parseLine("move west"), fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "moved to") != null);
 }
 
 test "prone target via execute shows +2 mod in output" {
