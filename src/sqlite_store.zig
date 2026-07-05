@@ -54,11 +54,23 @@ pub fn initSchema(db: ?*c.sqlite3) !void {
     );
 }
 
+pub fn deleteDb(path: []const u8) void {
+    const cwd = std.fs.cwd();
+    cwd.deleteFile(path) catch {};
+    inline for (.{ "-wal", "-journal", "-shm" }) |suffix| {
+        var buf: [512]u8 = undefined;
+        if (std.fmt.bufPrint(&buf, "{s}{s}", .{ path, suffix })) |sidecar| {
+            cwd.deleteFile(sidecar) catch {};
+        } else |_| {}
+    }
+}
+
 pub fn open(allocator: std.mem.Allocator, path: []const u8) !?*c.sqlite3 {
     const zpath = try allocator.dupeZ(u8, path);
     defer allocator.free(zpath);
     var db: ?*c.sqlite3 = null;
     try check(c.sqlite3_open(zpath.ptr, &db), db, "sqlite3_open");
+    errdefer close(db);
     try initSchema(db);
     return db;
 }
@@ -149,7 +161,7 @@ pub fn loadSlot(
 test "sqlite save load roundtrip" {
     const allocator = std.testing.allocator;
     const path = "zig-q-test.sqlite";
-    defer std.fs.cwd().deleteFile(path) catch {};
+    defer deleteDb(path);
 
     var w = try world.World.init(allocator, 42);
     defer w.deinit();

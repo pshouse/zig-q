@@ -214,7 +214,7 @@ pub const Harness = struct {
         try writer.print("dst scenario={s} seed={}\n", .{ scenario.name, scenario.seed });
 
         if (std.mem.eql(u8, scenario.name, "save_roundtrip")) {
-            std.fs.cwd().deleteFile(self.save_path) catch {};
+            @import("sqlite_store.zig").deleteDb(self.save_path);
         }
 
         if (self.w.seed != scenario.seed) {

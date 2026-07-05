@@ -8,7 +8,7 @@ const sqlite_store = @import("sqlite_store.zig");
 
 pub fn run(allocator: std.mem.Allocator, writer: anytype) !void {
     const path = "zig-q-evidence-v08.sqlite";
-    std.fs.cwd().deleteFile(path) catch {};
+    sqlite_store.deleteDb(path);
 
     try writer.writeAll("=== evidence: save/load roundtrip (execute path) ===\n");
 

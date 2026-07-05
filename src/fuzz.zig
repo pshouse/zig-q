@@ -104,7 +104,7 @@ pub fn run(allocator: std.mem.Allocator, cfg: Config) !Report {
         _ = session.draftRoll(&w, &draft);
 
         const fuzz_db = cfg.db_path;
-        std.fs.cwd().deleteFile(fuzz_db) catch {};
+        sqlite_store.deleteDb(fuzz_db);
 
         var ctx = commands.Context{
             .allocator = a,
