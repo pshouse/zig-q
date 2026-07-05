@@ -375,8 +375,7 @@ pub fn runNamedScenario(allocator: std.mem.Allocator, name: []const u8, seed: u6
 
 pub fn runScenarioFile(allocator: std.mem.Allocator, path: []const u8, seed: u64, writer: anytype) !void {
     const scenario = try @import("scenario_file.zig").loadScenario(allocator, path, seed);
-    defer allocator.free(@constCast(scenario.name));
-    defer allocator.free(scenario.steps);
+    defer @import("scenario_file.zig").freeScenario(allocator, scenario);
 
     var harness = try Harness.init(allocator, scenario.seed);
     defer harness.deinit();

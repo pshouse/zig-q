@@ -34,6 +34,7 @@ pub const Command = union(enum) {
     save_usage,
     load_slot: u32,
     load_usage,
+    help_descend,
     unknown: []const u8,
 };
 
@@ -57,6 +58,7 @@ pub fn parseLine(line: []const u8) Command {
     if (std.mem.eql(u8, trimmed, "look")) return .look;
     if (std.mem.eql(u8, trimmed, "time")) return .time;
     if (std.mem.eql(u8, trimmed, "help")) return .help;
+    if (std.mem.eql(u8, trimmed, "help descend")) return .help_descend;
     if (std.mem.eql(u8, trimmed, "exit")) return .exit;
     if (std.mem.eql(u8, trimmed, "roll")) return .roll;
     if (std.mem.eql(u8, trimmed, "spawn")) return .spawn;
@@ -527,6 +529,9 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                 \\
             , .{});
         },
+        .help_descend => {
+            try writer.print("descend: use on stairs (+) or > tile to go to the next floor\n", .{});
+        },
         .exit => return .exit_repl,
         .unknown => |text| {
             try writer.print("unknown command: {s}\n", .{text});
@@ -794,6 +799,19 @@ test "blinded attacker via execute uses two rng rolls" {
     _ = try execute(&ctx, parseLine("attack goblin_0"), fbs.writer());
     try std.testing.expect(w.rng.offset >= offset_before + 2);
     try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "attack ") != null);
+}
+
+test "help descend via execute documents descend" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    var draft: session.CreationDraft = .{};
+    var ctx = Context{ .allocator = allocator, .w = &w, .draft = &draft };
+    var buf: [256]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, .help_descend, fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "descend:") != null);
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "stairs") != null);
 }
 
 test "bare load shows usage via execute" {

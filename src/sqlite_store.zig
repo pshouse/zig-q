@@ -185,3 +185,41 @@ test "sqlite save load roundtrip" {
     defer after.deinit(allocator);
     try save_state.expectEqual(&before, &after);
 }
+
+test "sqlite save load roundtrip preserves floor 2 after descend" {
+    const allocator = std.testing.allocator;
+    const path = "zig-q-floor2-test.sqlite";
+    defer deleteDb(path);
+
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+
+    var draft = @import("session.zig").CreationDraft{};
+    _ = @import("session.zig").draftRoll(&w, &draft);
+    try @import("session.zig").draftAssign(&draft, .{ 6, 5, 4, 3, 2, 1 });
+    try @import("session.zig").draftChooseRace(&draft, 2);
+    try @import("session.zig").draftChooseClass(&draft, 1);
+    const char = try @import("session.zig").draftBuildCharacter(allocator, &w, &draft, "George");
+    w.stageCharacter(char);
+    const player_id = try w.spawnStagedPlayer(@import("loc.zig").Loc.init(49, 53), "entity_0");
+    try w.descend(player_id);
+    try std.testing.expectEqual(@as(u32, 2), w.floor_index);
+
+    var save_buf: [256]u8 = undefined;
+    var save_stream = std.io.fixedBufferStream(&save_buf);
+    try saveSlot(allocator, path, 1, &w, player_id, save_stream.writer());
+
+    var before = try save_state.capture(allocator, &w, player_id);
+    defer before.deinit(allocator);
+
+    var load_buf: [256]u8 = undefined;
+    var load_stream = std.io.fixedBufferStream(&load_buf);
+    var loaded = try loadSlot(allocator, path, 1, load_stream.writer());
+    defer loaded.world.deinit();
+    try std.testing.expectEqual(@as(u32, 2), loaded.world.floor_index);
+
+    var after = try save_state.capture(allocator, &loaded.world, loaded.player_id);
+    defer after.deinit(allocator);
+    try save_state.expectEqual(&before, &after);
+}
