@@ -206,6 +206,20 @@ test "sqlite save load roundtrip preserves floor 2 after descend" {
     try w.descend(player_id);
     try std.testing.expectEqual(@as(u32, 2), w.floor_index);
 
+    var monster_count: usize = 0;
+    for (w.store.entities.items) |ent| {
+        if (ent.is_monster) monster_count += 1;
+    }
+    var layout_map = @import("terrain.zig").TerrainMap.init(allocator);
+    defer layout_map.deinit();
+    const gen = try @import("dungeon.zig").generateFloor(&layout_map, 42, w.floor_index);
+    @import("evidence_format.zig").printDescendEvidence(
+        w.floor_index,
+        gen.layout_hash,
+        gen.walkable_count,
+        monster_count,
+    );
+
     var save_buf: [256]u8 = undefined;
     var save_stream = std.io.fixedBufferStream(&save_buf);
     try saveSlot(allocator, path, 1, &w, player_id, save_stream.writer());

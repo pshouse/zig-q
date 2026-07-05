@@ -239,6 +239,7 @@ test "generated floor is deterministic for same seed" {
     try std.testing.expectEqual(ga.layout_hash, gb.layout_hash);
     try std.testing.expectEqual(ga.spawn.x, gb.spawn.x);
     try std.testing.expectEqual(ga.spawn.y, gb.spawn.y);
+    @import("evidence_format.zig").printLayoutEvidence(42, 2, ga);
 }
 
 test "generated floor differs across floor index" {

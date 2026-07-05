@@ -9,6 +9,7 @@ const character = @import("character.zig");
 const combat = @import("combat.zig");
 const save_state = @import("save_state.zig");
 const sqlite_store = @import("sqlite_store.zig");
+const help_text = @import("help_text.zig");
 
 pub const Command = union(enum) {
     look,
@@ -49,6 +50,7 @@ pub const Context = struct {
     draft: *session.CreationDraft,
     player_id: entity.EntityId = entity.invalid_id,
     save_path: []const u8 = sqlite_store.default_path,
+    help_profile: help_text.Profile = .repl,
 };
 
 pub fn parseLine(line: []const u8) Command {
@@ -515,19 +517,7 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
             , .{});
         },
         .help => {
-            try writer.print(
-                \\creation: roll, assign <6 picks>, race <1-3>, class <1-3>, spawn, stats
-                \\explore:  look (l), time, move <n|s|e|w|nw|...>, m <dir>, help, exit
-                \\          chains: move w w   or   move w; move w
-                \\combat:   attack [target], end turn
-                \\persist:  save [slot], load <slot>
-                \\
-                \\example: assign 6 5 4 3 2 1
-                \\         race 2
-                \\         class 1
-                \\         spawn
-                \\
-            , .{});
+            try help_text.writeMainHelp(writer, ctx.help_profile);
         },
         .help_descend => {
             try writer.print("descend: use on stairs (+) or > tile to go to the next floor\n", .{});
@@ -812,6 +802,35 @@ test "help descend via execute documents descend" {
     _ = try execute(&ctx, .help_descend, fbs.writer());
     try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "descend:") != null);
     try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "stairs") != null);
+}
+
+test "repl help via execute lists descend" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    var draft: session.CreationDraft = .{};
+    var ctx = Context{ .allocator = allocator, .w = &w, .draft = &draft };
+    var buf: [512]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, .help, fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "descend") != null);
+}
+
+test "dst_v08 help via execute matches golden" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    var draft: session.CreationDraft = .{};
+    var ctx = Context{
+        .allocator = allocator,
+        .w = &w,
+        .draft = &draft,
+        .help_profile = .dst_v08,
+    };
+    var buf: [512]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, .help, fbs.writer());
+    try std.testing.expectEqualStrings(help_text.dst_v08_golden, fbs.getWritten());
 }
 
 test "bare load shows usage via execute" {

@@ -6,6 +6,7 @@ const world = @import("world.zig");
 const loc = @import("loc.zig");
 const session = @import("session.zig");
 const commands = @import("commands.zig");
+const evidence_format = @import("evidence_format.zig");
 
 fn countMonsters(w: *world.World) usize {
     var n: usize = 0;
@@ -21,12 +22,10 @@ pub fn run(allocator: std.mem.Allocator, writer: anytype) !void {
     var map = terrain.TerrainMap.init(allocator);
     defer map.deinit();
     const gen = try dungeon.generateFloor(&map, 42, 2);
-    try writer.print("floor_index=2 seed=42 layout_hash={} walkable_count={} spawn=({},{})", .{
-        gen.layout_hash,
-        gen.walkable_count,
-        gen.spawn.x,
-        gen.spawn.y,
-    });
+    var layout_buf: [256]u8 = undefined;
+    const layout_line = try evidence_format.formatLayoutEvidence(&layout_buf, 42, 2, gen);
+    try writer.writeAll(layout_line);
+    try writer.print(" spawn=({},{})", .{ gen.spawn.x, gen.spawn.y });
     if (gen.stairs_down) |stairs| {
         try writer.print(" stairs=({},{})", .{ stairs.x, stairs.y });
     }
@@ -78,12 +77,16 @@ pub fn run(allocator: std.mem.Allocator, writer: anytype) !void {
     var verify_map = terrain.TerrainMap.init(allocator);
     defer verify_map.deinit();
     const regen = try dungeon.generateFloor(&verify_map, 42, w.floor_index);
-    try writer.print("post_descend floor_index={} layout_hash={} walkable_count={} monsters={}\n", .{
+    var descend_buf: [256]u8 = undefined;
+    const descend_line = try evidence_format.formatDescendEvidence(
+        &descend_buf,
         w.floor_index,
         regen.layout_hash,
         regen.walkable_count,
         countMonsters(&w),
-    });
+    );
+    try writer.writeAll(descend_line);
+    try writer.writeAll("\n");
 }
 
 test "evidence v09 generator and descend output" {

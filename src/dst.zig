@@ -330,6 +330,7 @@ pub const Harness = struct {
                     .draft = &self.draft,
                     .player_id = self.player_id,
                     .save_path = self.save_path,
+                    .help_profile = .dst_v08,
                 };
                 const result = try commands.executeLine(&ctx, line, writer);
                 self.player_id = ctx.player_id;
