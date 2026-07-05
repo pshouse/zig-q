@@ -77,6 +77,7 @@ const templates = [_][]const u8{
     "save 1",
     "load 1",
     "load 2",
+    "descend",
 };
 
 pub fn run(allocator: std.mem.Allocator, cfg: Config) !Report {
@@ -233,7 +234,16 @@ fn countLiveMonsters(w: *const world.World) usize {
     return n;
 }
 
+pub const max_floor_depth: u32 = 5;
+
 pub fn assertInvariants(w: *world.World, player_id: entity.EntityId) !void {
+    if (w.floor_index > max_floor_depth) return error.FloorDepthExceeded;
+
+    var players: usize = 0;
+    for (w.store.entities.items) |ent| {
+        if (!ent.is_monster) players += 1;
+    }
+    if (players > 1) return error.TooManyPlayers;
     var on_map: usize = 0;
     for (w.store.entities.items) |*ent| {
         // HP must remain within [0, max_hp] (u32 guarantees >= 0; upper bound explicit).

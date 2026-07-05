@@ -66,4 +66,18 @@ pub const EntityStore = struct {
     pub fn count(self: *const EntityStore) usize {
         return self.entities.items.len;
     }
+
+    pub fn remove(self: *EntityStore, allocator: std.mem.Allocator, id: EntityId) void {
+        var i: usize = 0;
+        while (i < self.entities.items.len) : (i += 1) {
+            if (self.entities.items[i].id != id) continue;
+            const ent = self.entities.items[i];
+            if (ent.heap_char_name) allocator.free(ent.char.name);
+            ent.char.attributes.deinit(allocator);
+            allocator.destroy(ent.char);
+            allocator.free(ent.name);
+            _ = self.entities.swapRemove(i);
+            return;
+        }
+    }
 };

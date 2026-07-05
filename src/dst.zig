@@ -173,6 +173,27 @@ pub const save_roundtrip_scenario = Scenario{
     },
 };
 
+pub const descend_crawl_scenario = Scenario{
+    .name = "descend_crawl",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 },
+        .{ .choose_class = 1 },
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 53 } },
+        .{ .command = "move west" },
+        .{ .command = "look" },
+        .{ .command = "move east" },
+        .{ .command = "descend" },
+        .{ .command = "look" },
+        .{ .command = "stats" },
+        .{ .command = "exit" },
+    },
+};
+
 pub const crawl_start_scenario = Scenario{
     .name = "crawl_start",
     .seed = 42,
@@ -339,6 +360,8 @@ pub fn scenarioByName(name: []const u8, seed: u64) ?Scenario {
         return Scenario{ .name = "save_roundtrip", .seed = seed, .steps = save_roundtrip_scenario.steps };
     if (std.mem.eql(u8, name, "playthrough"))
         return Scenario{ .name = "playthrough", .seed = seed, .steps = playthrough_scenario.steps };
+    if (std.mem.eql(u8, name, "descend_crawl"))
+        return Scenario{ .name = "descend_crawl", .seed = seed, .steps = descend_crawl_scenario.steps };
     return null;
 }
 
@@ -346,6 +369,16 @@ pub fn runNamedScenario(allocator: std.mem.Allocator, name: []const u8, seed: u6
     const scenario = scenarioByName(name, seed) orelse return error.UnknownScenario;
 
     var harness = try Harness.init(allocator, seed);
+    defer harness.deinit();
+    try harness.runScenario(scenario, writer);
+}
+
+pub fn runScenarioFile(allocator: std.mem.Allocator, path: []const u8, seed: u64, writer: anytype) !void {
+    const scenario = try @import("scenario_file.zig").loadScenario(allocator, path, seed);
+    defer allocator.free(@constCast(scenario.name));
+    defer allocator.free(scenario.steps);
+
+    var harness = try Harness.init(allocator, scenario.seed);
     defer harness.deinit();
     try harness.runScenario(scenario, writer);
 }
@@ -398,6 +431,23 @@ test "dst playthrough scenario is byte-identical across runs" {
     try std.testing.expect(out_a.len > 0);
     try std.testing.expect(std.mem.indexOf(u8, out_a, "dragonborn") != null);
     try std.testing.expect(std.mem.indexOf(u8, out_a, "look floor=1") != null);
+    try std.testing.expectEqualSlices(u8, out_a, out_b);
+}
+
+test "dst descend_crawl scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    var buf_a: [65536]u8 = undefined;
+    var buf_b: [65536]u8 = undefined;
+    var fbs_a = std.io.fixedBufferStream(&buf_a);
+    var fbs_b = std.io.fixedBufferStream(&buf_b);
+
+    try runNamedScenario(allocator, "descend_crawl", 42, fbs_a.writer());
+    try runNamedScenario(allocator, "descend_crawl", 42, fbs_b.writer());
+
+    const out_a = fbs_a.getWritten();
+    const out_b = fbs_b.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "descended to floor 2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "look floor=2") != null);
     try std.testing.expectEqualSlices(u8, out_a, out_b);
 }
 

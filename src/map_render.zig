@@ -20,7 +20,7 @@ pub fn renderViewport(w: *const world.World, center: loc.Loc, radius: u8, writer
                 try writer.print("@", .{});
             } else if (w.has_dungeon) {
                 const t = w.terrain.get(tile) orelse terrain.Tile.floor;
-                if (t == .wall or t == .door) {
+                if (t == .wall or t == .door or t == .stairs) {
                     try writer.print("{c}", .{t.renderChar()});
                 } else if (count > 0) {
                     try writer.print("*", .{});

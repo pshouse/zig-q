@@ -5,9 +5,14 @@ pub const Tile = enum {
     floor,
     wall,
     door,
+    stairs,
 
     pub fn isWalkable(self: Tile) bool {
-        return self == .floor or self == .door;
+        return self == .floor or self == .door or self == .stairs;
+    }
+
+    pub fn isDescendTrigger(self: Tile) bool {
+        return self == .door or self == .stairs;
     }
 
     pub fn renderChar(self: Tile) u8 {
@@ -15,6 +20,7 @@ pub const Tile = enum {
             .floor => '.',
             .wall => '#',
             .door => '+',
+            .stairs => '>',
         };
     }
 };

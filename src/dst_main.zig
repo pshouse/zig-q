@@ -14,5 +14,9 @@ pub fn main() !void {
     const seed: u64 = if (args.len >= 3) try std.fmt.parseInt(u64, args[2], 10) else zig_q.dst.default_scenario.seed;
 
     const stdout = io_out.stdoutWriter();
-    try zig_q.dst.runNamedScenario(allocator, scenario, seed, stdout);
+    if (std.mem.startsWith(u8, scenario, "@")) {
+        try zig_q.dst.runScenarioFile(allocator, scenario[1..], seed, stdout);
+    } else {
+        try zig_q.dst.runNamedScenario(allocator, scenario, seed, stdout);
+    }
 }

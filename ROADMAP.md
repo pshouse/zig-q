@@ -2,7 +2,7 @@
 
 **Product:** deterministic, scriptable **dungeon crawl** engine — create a character, descend floors, fight monsters, persist progress. No dialogue trees.
 
-**Current release:** `0.8.0` (SQLite save/load, DST `save_roundtrip`).
+**Current release:** `0.9.0` (seeded floor generation, `descend`, data-driven scenarios).
 
 ---
 
@@ -38,19 +38,19 @@
 
 ---
 
-## v0.9 — Dungeon generation & scenarios
+## v0.9 — Dungeon generation & scenarios (shipped)
 
 **Theme:** Seed-fixed floors; authored crawl scripts.
 
 | Deliver | Notes |
 |---------|--------|
-| Room + corridor generator | seeded; placed monsters and loot tables |
-| Stairs down | `descend` → floor N+1, new layout |
-| Scenario files | data-driven steps (extends DST) |
-| Transcript → regression | tool extracts `> cmd` lines into DST/REPL tests |
-| **Fuzz** | random descend depth cap; invariant: one player, valid floor index |
+| Room + corridor generator | seeded from `(seed, floor_index)`; deterministic monster placement |
+| Stairs down | `descend` on door (floor 1) or `>` stairs (floor 2+); regen terrain on save/load |
+| Scenario files | `scenarios/*.txt` loaded via `zig build dst -- @path seed` |
+| DST `descend_crawl` | creation, floor-1 explore, descend, floor-2 look/stats |
+| **Fuzz** | `descend` templates; floor depth cap 5; one player invariant |
 
-**Non-goals:** dialogue nodes, shop UI, overworld map.
+Terrain regenerates from seed on load (documented regen-only persistence for layout).
 
 ---
 
@@ -108,3 +108,5 @@ DST `playthrough` runs without `unknown command` for these inputs. Harvested tra
 | 0.5 | Transcripts, fuzz harness, creation UX hints |
 | 0.6 | Session phases, dungeon tiles, HP/AC sheet, DST crawl_start |
 | 0.7 | Turn combat, monsters, attack/end turn, DST brawl |
+| 0.8 | SQLite save/load, DST save_roundtrip |
+| 0.9 | Seeded floor generation, descend, scenario files |

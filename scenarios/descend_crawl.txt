@@ -1,0 +1,16 @@
+# name=descend_crawl_file
+# seed=42
+load_floor 1
+creation_roll
+assign_stats 6 5 4 3 2 1
+choose_race 2
+choose_class 1
+creation_finish George
+spawn entity_0 49 53
+command move west
+command look
+command move east
+command descend
+command look
+command stats
+command exit

@@ -308,6 +308,35 @@ pub fn expectEqual(a: *const WorldSave, b: *const WorldSave) !void {
     }
 }
 
+test "capture apply roundtrip preserves multi-floor state" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+
+    var draft = @import("session.zig").CreationDraft{};
+    _ = @import("session.zig").draftRoll(&w, &draft);
+    try @import("session.zig").draftAssign(&draft, .{ 6, 5, 4, 3, 2, 1 });
+    try @import("session.zig").draftChooseRace(&draft, 2);
+    try @import("session.zig").draftChooseClass(&draft, 1);
+    const char = try @import("session.zig").draftBuildCharacter(allocator, &w, &draft, "George");
+    w.stageCharacter(char);
+    const player_id = try w.spawnStagedPlayer(loc.Loc.init(49, 53), "entity_0");
+    try w.descend(player_id);
+
+    var before = try capture(allocator, &w, player_id);
+    defer before.deinit(allocator);
+    try std.testing.expectEqual(@as(u32, 2), before.floor_index);
+
+    var restored = try apply(allocator, &before);
+    defer restored.deinit();
+    try std.testing.expectEqual(@as(u32, 2), restored.floor_index);
+
+    var after = try capture(allocator, &restored, player_id);
+    defer after.deinit(allocator);
+    try expectEqual(&before, &after);
+}
+
 test "capture apply roundtrip preserves crawl state" {
     const allocator = std.testing.allocator;
     var w = try world.World.init(allocator, 42);

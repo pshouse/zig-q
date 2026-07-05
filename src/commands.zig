@@ -28,6 +28,7 @@ pub const Command = union(enum) {
     attack,
     attack_target: []const u8,
     end_turn,
+    descend,
     save,
     save_slot: u32,
     save_usage,
@@ -62,6 +63,7 @@ pub fn parseLine(line: []const u8) Command {
     if (std.mem.eql(u8, trimmed, "stats")) return .stats;
     if (std.mem.eql(u8, trimmed, "attack")) return .attack;
     if (std.mem.eql(u8, trimmed, "end turn")) return .end_turn;
+    if (std.mem.eql(u8, trimmed, "descend")) return .descend;
     if (std.mem.eql(u8, trimmed, "save")) return .save;
 
     if (std.mem.startsWith(u8, trimmed, "save ")) {
@@ -341,6 +343,10 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
             , .{});
         },
         .spawn => {
+            if (isSpawned(ctx)) {
+                try writer.print("character already spawned\n", .{});
+                return .continue_repl;
+            }
             const char = session.draftBuildCharacter(ctx.allocator, ctx.w, ctx.draft, "George") catch |err| switch (err) {
                 error.IncompleteDraft => {
                     try writer.print("complete creation first (roll, assign, race, class)\n", .{});
@@ -406,6 +412,24 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                 },
                 else => |e| return e,
             };
+        },
+        .descend => {
+            if (!isSpawned(ctx)) {
+                try writer.print("no player spawned\n", .{});
+                return .continue_repl;
+            }
+            ctx.w.descend(ctx.player_id) catch |err| switch (err) {
+                error.NotOnStairs => {
+                    try writer.print("not on stairs\n", .{});
+                    return .continue_repl;
+                },
+                error.InCombat => {
+                    try writer.print("cannot descend during combat\n", .{});
+                    return .continue_repl;
+                },
+                else => |e| return e,
+            };
+            try writer.print("descended to floor {}\n", .{ctx.w.floor_index});
         },
         .end_turn => {
             if (!isSpawned(ctx)) {

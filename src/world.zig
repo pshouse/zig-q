@@ -19,6 +19,7 @@ pub const World = struct {
     tile_map: map.TileMap,
     terrain: terrain.TerrainMap,
     floor_index: u32 = 0,
+    floor_spawn: loc.Loc = loc.Loc.init(49, 49),
     has_dungeon: bool = false,
     races: std.ArrayList(types.Race),
     game_clock: clock.Clock,
@@ -56,11 +57,71 @@ pub const World = struct {
 
     pub fn loadFloor(self: *World, index: u32) !void {
         switch (index) {
-            1 => try dungeon.loadFloor1(&self.terrain),
-            else => return error.UnknownFloor,
+            1 => {
+                try dungeon.loadFloor1(&self.terrain);
+                self.floor_spawn = loc.Loc.init(49, 49);
+            },
+            else => {
+                const gen = try dungeon.generateFloor(&self.terrain, self.seed, index);
+                self.floor_spawn = gen.spawn;
+            },
         }
         self.floor_index = index;
         self.has_dungeon = true;
+    }
+
+    pub fn placeFloorMonsters(self: *World) !void {
+        if (self.floor_index < 2) return;
+        const plan = dungeon.planMonsterSpawns(self.seed, self.floor_index, self.floor_spawn);
+        var i: usize = 0;
+        while (i < plan.count) : (i += 1) {
+            const spawn = plan.spawns[i];
+            if (!self.terrain.isWalkable(spawn.position)) continue;
+            _ = try self.spawnMonster(spawn.kind, spawn.position, spawn.name);
+        }
+    }
+
+    pub fn removeAllMonsters(self: *World) void {
+        var to_remove: [32]entity.EntityId = undefined;
+        var n: usize = 0;
+        for (self.store.entities.items) |ent| {
+            if (ent.is_monster and n < to_remove.len) {
+                to_remove[n] = ent.id;
+                n += 1;
+            }
+        }
+        var i: usize = 0;
+        while (i < n) : (i += 1) {
+            const id = to_remove[i];
+            if (self.store.get(id)) |ent| {
+                self.tile_map.remove(ent.loc, id);
+            }
+            self.store.remove(self.allocator, id);
+        }
+    }
+
+    pub fn relocatePlayer(self: *World, player_id: entity.EntityId, position: loc.Loc) !void {
+        const ent = self.store.get(player_id) orelse return error.EntityNotFound;
+        self.tile_map.remove(ent.loc, player_id);
+        ent.loc = position;
+        try self.tile_map.place(position, player_id);
+    }
+
+    pub fn descend(self: *World, player_id: entity.EntityId) !void {
+        const ent = self.store.get(player_id) orelse return error.EntityNotFound;
+        const tile = self.terrain.get(ent.loc) orelse return error.NotOnStairs;
+        if (!tile.isDescendTrigger()) return error.NotOnStairs;
+        if (combat.isInCombat(self)) return error.InCombat;
+        if (ent.char.status == .fighting) return error.InCombat;
+
+        combat.endCombat(self);
+        self.removeAllMonsters();
+
+        const next_floor = self.floor_index + 1;
+        try self.loadFloor(next_floor);
+        try self.relocatePlayer(player_id, self.floor_spawn);
+        try self.placeFloorMonsters();
+        self.tick();
     }
 
     fn destroyCharacter(self: *World, char: *types.Character) void {
