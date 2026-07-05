@@ -70,4 +70,21 @@ pub fn build(b: *std.Build) void {
     if (b.args) |args| fuzz_run.addArgs(args);
     const fuzz_step = b.step("fuzz", "Run deterministic REPL fuzz harness");
     fuzz_step.dependOn(&fuzz_run.step);
+
+    const evidence_exe = b.addExecutable(.{
+        .name = "zig-q-evidence",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/evidence_main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zig_q", .module = zig_q_mod },
+            },
+        }),
+    });
+    b.installArtifact(evidence_exe);
+
+    const evidence_run = b.addRunArtifact(evidence_exe);
+    const evidence_step = b.step("evidence", "Emit v0.7 combat verification transcript");
+    evidence_step.dependOn(&evidence_run.step);
 }

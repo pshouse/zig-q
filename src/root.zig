@@ -26,6 +26,7 @@ pub const transcript = @import("transcript.zig");
 pub const fuzz = @import("fuzz.zig");
 pub const version = @import("version.zig");
 pub const dst = @import("dst.zig");
+pub const evidence_v07 = @import("evidence_v07.zig");
 
 test {
     std.testing.refAllDecls(@This());
@@ -53,4 +54,5 @@ test {
     _ = @import("fuzz.zig");
     _ = @import("version.zig");
     _ = @import("dst.zig");
+    _ = @import("evidence_v07.zig");
 }

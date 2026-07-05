@@ -137,7 +137,7 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                 try writer.print("no player spawned\n", .{});
                 return .continue_repl;
             }
-            if (combat.isFighting(ctx.w, ctx.player_id)) {
+            if (combat.isInCombat(ctx.w) and combat.isFighting(ctx.w, ctx.player_id)) {
                 try writer.print("cannot move during combat\n", .{});
                 return .continue_repl;
             }
@@ -496,6 +496,45 @@ test "move blocked while fighting via execute" {
     var fbs = std.io.fixedBufferStream(&buf);
     _ = try execute(&ctx, parseLine("move east"), fbs.writer());
     try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "cannot move during combat") != null);
+}
+
+test "prone target via execute shows +2 mod in output" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+
+    var ctx = try combatTestCtx(allocator, &w);
+    for (w.store.get(ctx.player_id).?.char.attributes.items) |*attr| {
+        if (std.mem.eql(u8, attr.abbr, "STR")) attr.stat = 14;
+    }
+    const goblin_id = blk: {
+        for (w.store.entities.items) |*ent| {
+            if (ent.is_monster) break :blk ent.id;
+        }
+        return error.TestExpectedEqual;
+    };
+    w.store.get(goblin_id).?.conditions.add(.prone);
+
+    var buf: [256]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("attack goblin_0"), fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "mod=4") != null);
+}
+
+test "blinded attacker via execute uses two rng rolls" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+
+    var ctx = try combatTestCtx(allocator, &w);
+    w.store.get(ctx.player_id).?.conditions.add(.blinded);
+    const offset_before = w.rng.offset;
+
+    var buf: [256]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("attack goblin_0"), fbs.writer());
+    try std.testing.expect(w.rng.offset >= offset_before + 2);
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "attack ") != null);
 }
 
 test "kill via execute restores exploring status" {

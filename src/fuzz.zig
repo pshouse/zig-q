@@ -209,8 +209,10 @@ fn countLiveMonsters(w: *const world.World) usize {
 pub fn assertInvariants(w: *world.World, player_id: entity.EntityId) !void {
     var on_map: usize = 0;
     for (w.store.entities.items) |*ent| {
+        // HP must remain within [0, max_hp] (u32 guarantees >= 0; upper bound explicit).
         if (ent.max_hp > 0 and ent.current_hp > ent.max_hp) return error.HpAboveMax;
         if (ent.conditions.has(.dead) and ent.current_hp != 0) return error.DeadWithPositiveHp;
+        if (!ent.conditions.has(.dead) and ent.max_hp > 0 and ent.current_hp == 0) return error.AliveWithZeroHp;
         on_map += 1;
         const list = w.tile_map.cells.get(ent.loc) orelse return error.EntityNotOnMap;
         var found = false;
@@ -232,7 +234,7 @@ pub fn assertInvariants(w: *world.World, player_id: entity.EntityId) !void {
         }
     }
 
-    if (w.combat != null) {
+    if (combat.isInCombat(w)) {
         if (combat.activeTurn(w)) |active| {
             const owner = w.store.get(active) orelse return error.InvalidTurnOwner;
             if (owner.char.status != .fighting) return error.InvalidFightingStatus;
@@ -305,6 +307,25 @@ test "parse fuzz does not crash on arbitrary bytes" {
         for (buf[0..len]) |*b| b.* = pickChar(&fuzz_rng);
         _ = commands.parseLine(buf[0..len]);
     }
+}
+
+test "invariants reject hp outside zero max range" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    const id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    const ent = w.store.get(id).?;
+    ent.max_hp = 10;
+    ent.current_hp = 11;
+    try std.testing.expectError(error.HpAboveMax, assertInvariants(&w, id));
+
+    ent.current_hp = 10;
+    ent.conditions.add(.dead);
+    try std.testing.expectError(error.DeadWithPositiveHp, assertInvariants(&w, id));
+
+    ent.current_hp = 0;
+    ent.conditions = @import("types.zig").ConditionSet.initEmpty();
+    try std.testing.expectError(error.AliveWithZeroHp, assertInvariants(&w, id));
 }
 
 test "invariants hold for known creation script" {

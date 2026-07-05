@@ -236,18 +236,18 @@ pub fn attack(
     target_name: ?[]const u8,
     writer: anytype,
 ) !void {
-    if (w.combat != null) {
+    if (isInCombat(w)) {
         const active = activeTurn(w) orelse return error.NoActiveTurn;
         if (active != attacker_id) return error.NotYourTurn;
     }
 
     const target = findTarget(w, attacker_id, target_name) orelse return error.NoTarget;
-    if (w.combat == null) try enterCombat(w, attacker_id, target.id);
+    if (!isInCombat(w)) try enterCombat(w, attacker_id, target.id);
     try performAttack(w, attacker_id, target.id, writer);
 }
 
 pub fn endTurn(w: *world.World, actor_id: entity.EntityId, writer: anytype) !void {
-    if (w.combat == null) return error.NotInCombat;
+    if (!isInCombat(w)) return error.NotInCombat;
     const active = activeTurn(w) orelse return error.NoActiveTurn;
     if (active != actor_id) return error.NotYourTurn;
 
@@ -260,7 +260,7 @@ pub fn endTurn(w: *world.World, actor_id: entity.EntityId, writer: anytype) !voi
 
     try processMonsterTurns(w, writer);
 
-    if (w.combat != null) {
+    if (isInCombat(w)) {
         if (activeTurn(w)) |next| {
             if (w.store.get(next)) |ent| {
                 try writer.print("turn: {s}\n", .{ent.name});
@@ -269,66 +269,6 @@ pub fn endTurn(w: *world.World, actor_id: entity.EntityId, writer: anytype) !voi
     } else {
         try writer.print("combat ended\n", .{});
     }
-}
-
-test "blinded attacker rolls twice" {
-    var w = try world.World.init(std.testing.allocator, 42);
-    defer w.deinit();
-    const id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
-    const ent = w.store.get(id).?;
-    ent.conditions.add(.blinded);
-
-    const offset_before = w.rng.offset;
-    _ = attackRoll(&w, ent);
-    try std.testing.expect(w.rng.offset == offset_before + 2);
-}
-
-test "prone target grants +2 attack bonus" {
-    const allocator = std.testing.allocator;
-    var attacker_char = types.Character{
-        .name = "a",
-        .attributes = try types.defaultAttributes(allocator),
-        .race = .{ .name = "human", .speed = 30, .attr_bonuses = .empty },
-        .class = .{ .name = "fighter", .hit_die = 10 },
-    };
-    defer attacker_char.attributes.deinit(allocator);
-    for (attacker_char.attributes.items) |*attr| {
-        if (std.mem.eql(u8, attr.abbr, "STR")) attr.stat = 14;
-    }
-
-    var target_char = types.Character{
-        .name = "t",
-        .attributes = try types.defaultAttributes(allocator),
-        .race = .{ .name = "human", .speed = 30, .attr_bonuses = .empty },
-        .class = .{ .name = "fighter", .hit_die = 10 },
-    };
-    defer target_char.attributes.deinit(allocator);
-
-    var attacker_name: [4]u8 = .{ 'a', 0, 0, 0 };
-    var target_name: [4]u8 = .{ 't', 0, 0, 0 };
-    const attacker = entity.Entity{
-        .id = 0,
-        .name = attacker_name[0..1],
-        .loc = loc.Loc.init(0, 0),
-        .char = &attacker_char,
-        .conditions = types.ConditionSet.initEmpty(),
-        .current_hp = 10,
-        .max_hp = 10,
-        .damage_die = 8,
-    };
-    var target_ent = entity.Entity{
-        .id = 1,
-        .name = target_name[0..1],
-        .loc = loc.Loc.init(0, 1),
-        .char = &target_char,
-        .conditions = types.ConditionSet.initEmpty(),
-        .current_hp = 10,
-        .max_hp = 10,
-        .damage_die = 8,
-    };
-    target_ent.conditions.add(.prone);
-
-    try std.testing.expectEqual(@as(i32, 4), attackModifier(&attacker, &target_ent));
 }
 
 test "melee reduces target hp" {
@@ -361,43 +301,6 @@ test "end turn advances initiative" {
     try endTurn(&w, player_id, fbs.writer());
     const out = fbs.getWritten();
     try std.testing.expect(std.mem.indexOf(u8, out, "turn:") != null or std.mem.indexOf(u8, out, "attack ") != null);
-}
-
-test "performAttack prone target shows +2 mod in output" {
-    const allocator = std.testing.allocator;
-    var w = try world.World.init(allocator, 42);
-    defer w.deinit();
-
-    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
-    const goblin_id = try w.spawnMonster(.goblin, loc.Loc.init(50, 49), "goblin_0");
-    const player = w.store.get(player_id).?;
-    for (player.char.attributes.items) |*attr| {
-        if (std.mem.eql(u8, attr.abbr, "STR")) attr.stat = 14;
-    }
-    w.store.get(goblin_id).?.conditions.add(.prone);
-    try enterCombat(&w, player_id, goblin_id);
-
-    var buf: [256]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
-    try performAttack(&w, player_id, goblin_id, fbs.writer());
-    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "mod=4") != null);
-}
-
-test "performAttack blinded attacker consumes two d20 rolls" {
-    const allocator = std.testing.allocator;
-    var w = try world.World.init(allocator, 42);
-    defer w.deinit();
-
-    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
-    const goblin_id = try w.spawnMonster(.goblin, loc.Loc.init(50, 49), "goblin_0");
-    w.store.get(player_id).?.conditions.add(.blinded);
-    try enterCombat(&w, player_id, goblin_id);
-
-    const offset_before = w.rng.offset;
-    var buf: [256]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
-    try performAttack(&w, player_id, goblin_id, fbs.writer());
-    try std.testing.expect(w.rng.offset >= offset_before + 2);
 }
 
 test "combat end restores exploring status" {
