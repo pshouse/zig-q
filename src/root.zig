@@ -27,6 +27,9 @@ pub const fuzz = @import("fuzz.zig");
 pub const version = @import("version.zig");
 pub const dst = @import("dst.zig");
 pub const evidence_v07 = @import("evidence_v07.zig");
+pub const save_state = @import("save_state.zig");
+pub const sqlite_store = @import("sqlite_store.zig");
+pub const evidence_v08 = @import("evidence_v08.zig");
 
 test {
     std.testing.refAllDecls(@This());
@@ -55,4 +58,7 @@ test {
     _ = @import("version.zig");
     _ = @import("dst.zig");
     _ = @import("evidence_v07.zig");
+    _ = @import("save_state.zig");
+    _ = @import("sqlite_store.zig");
+    _ = @import("evidence_v08.zig");
 }

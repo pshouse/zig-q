@@ -4,3 +4,6 @@ zig-out/
 transcripts/
 terminals/
 42
+*.sqlite
+deps/sqlite3/sqlite-amalgamation.zip
+deps/sqlite3/extracted/

@@ -7,6 +7,8 @@ const map_render = @import("map_render.zig");
 const session = @import("session.zig");
 const character = @import("character.zig");
 const combat = @import("combat.zig");
+const save_state = @import("save_state.zig");
+const sqlite_store = @import("sqlite_store.zig");
 
 pub const Command = union(enum) {
     look,
@@ -26,6 +28,11 @@ pub const Command = union(enum) {
     attack,
     attack_target: []const u8,
     end_turn,
+    save,
+    save_slot: u32,
+    load,
+    load_slot: u32,
+    load_usage,
     unknown: []const u8,
 };
 
@@ -39,6 +46,7 @@ pub const Context = struct {
     w: *world.World,
     draft: *session.CreationDraft,
     player_id: entity.EntityId = entity.invalid_id,
+    save_path: []const u8 = sqlite_store.default_path,
 };
 
 pub fn parseLine(line: []const u8) Command {
@@ -54,6 +62,22 @@ pub fn parseLine(line: []const u8) Command {
     if (std.mem.eql(u8, trimmed, "stats")) return .stats;
     if (std.mem.eql(u8, trimmed, "attack")) return .attack;
     if (std.mem.eql(u8, trimmed, "end turn")) return .end_turn;
+    if (std.mem.eql(u8, trimmed, "save")) return .save;
+    if (std.mem.eql(u8, trimmed, "load")) return .load;
+
+    if (std.mem.startsWith(u8, trimmed, "save ")) {
+        const arg = std.mem.trim(u8, trimmed[5..], " \t");
+        if (arg.len > 0) {
+            if (std.fmt.parseInt(u32, arg, 10) catch null) |slot| return .{ .save_slot = slot };
+        }
+    }
+
+    if (std.mem.startsWith(u8, trimmed, "load ")) {
+        const arg = std.mem.trim(u8, trimmed[5..], " \t");
+        if (arg.len == 0) return .load_usage;
+        if (std.fmt.parseInt(u32, arg, 10) catch null) |slot| return .{ .load_slot = slot };
+        return .load_usage;
+    }
 
     if (std.mem.startsWith(u8, trimmed, "attack ")) {
         const arg = std.mem.trim(u8, trimmed[7..], " \t");
@@ -292,11 +316,95 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                 else => |e| return e,
             };
         },
+        .save => {
+            const save_slot: u32 = 1;
+            if (!isSpawned(ctx)) {
+                try writer.print("no player spawned\n", .{});
+                return .continue_repl;
+            }
+            if (save_slot < 1 or save_slot > 9) {
+                try writer.print("invalid save slot (1-9)\n", .{});
+                return .continue_repl;
+            }
+            sqlite_store.saveSlot(ctx.allocator, ctx.save_path, save_slot, ctx.w, ctx.player_id, writer) catch |err| switch (err) {
+                error.SqliteError => {
+                    try writer.print("save failed\n", .{});
+                    return .continue_repl;
+                },
+                else => |e| return e,
+            };
+        },
+        .save_slot => |save_slot| {
+            if (!isSpawned(ctx)) {
+                try writer.print("no player spawned\n", .{});
+                return .continue_repl;
+            }
+            if (save_slot < 1 or save_slot > 9) {
+                try writer.print("invalid save slot (1-9)\n", .{});
+                return .continue_repl;
+            }
+            sqlite_store.saveSlot(ctx.allocator, ctx.save_path, save_slot, ctx.w, ctx.player_id, writer) catch |err| switch (err) {
+                error.SqliteError => {
+                    try writer.print("save failed\n", .{});
+                    return .continue_repl;
+                },
+                else => |e| return e,
+            };
+        },
+        .load => {
+            const load_slot: u32 = 1;
+            if (load_slot < 1 or load_slot > 9) {
+                try writer.print("invalid load slot (1-9)\n", .{});
+                return .continue_repl;
+            }
+            const loaded = sqlite_store.loadSlot(ctx.allocator, ctx.save_path, load_slot, writer) catch |err| switch (err) {
+                error.SaveSlotEmpty => {
+                    try writer.print("no save in slot {}\n", .{load_slot});
+                    return .continue_repl;
+                },
+                error.SqliteError, error.UnsupportedSchema => {
+                    try writer.print("load failed\n", .{});
+                    return .continue_repl;
+                },
+                else => |e| return e,
+            };
+            save_state.replaceWorld(ctx.w, loaded.world);
+            ctx.player_id = loaded.player_id;
+            ctx.draft.* = .{};
+        },
+        .load_slot => |load_slot| {
+            if (load_slot < 1 or load_slot > 9) {
+                try writer.print("invalid load slot (1-9)\n", .{});
+                return .continue_repl;
+            }
+            const loaded = sqlite_store.loadSlot(ctx.allocator, ctx.save_path, load_slot, writer) catch |err| switch (err) {
+                error.SaveSlotEmpty => {
+                    try writer.print("no save in slot {}\n", .{load_slot});
+                    return .continue_repl;
+                },
+                error.SqliteError, error.UnsupportedSchema => {
+                    try writer.print("load failed\n", .{});
+                    return .continue_repl;
+                },
+                else => |e| return e,
+            };
+            save_state.replaceWorld(ctx.w, loaded.world);
+            ctx.player_id = loaded.player_id;
+            ctx.draft.* = .{};
+        },
+        .load_usage => {
+            try writer.print(
+                \\usage: load <1-9>
+                \\       example: load 1
+                \\
+            , .{});
+        },
         .help => {
             try writer.print(
                 \\creation: roll, assign <6 picks>, race <1-3>, class <1-3>, spawn, stats
                 \\explore:  look, time, move <north|south|east|west>, help, exit
                 \\combat:   attack [target], end turn
+                \\persist:  save [slot], load <slot>
                 \\
                 \\example: assign 6 5 4 3 2 1
                 \\         race 2
@@ -535,6 +643,45 @@ test "blinded attacker via execute uses two rng rolls" {
     _ = try execute(&ctx, parseLine("attack goblin_0"), fbs.writer());
     try std.testing.expect(w.rng.offset >= offset_before + 2);
     try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "attack ") != null);
+}
+
+test "save load via execute preserves crawl snapshot" {
+    const allocator = std.testing.allocator;
+    const path = "zig-q-cmd-test.sqlite";
+    defer std.fs.cwd().deleteFile(path) catch {};
+
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+
+    var draft: session.CreationDraft = .{};
+    _ = session.draftRoll(&w, &draft);
+    try session.draftAssign(&draft, .{ 6, 5, 4, 3, 2, 1 });
+    try session.draftChooseRace(&draft, 2);
+    try session.draftChooseClass(&draft, 1);
+
+    var ctx = Context{
+        .allocator = allocator,
+        .w = &w,
+        .draft = &draft,
+        .save_path = path,
+    };
+    _ = try execute(&ctx, .spawn, std.io.null_writer);
+    _ = try execute(&ctx, parseLine("move east"), std.io.null_writer);
+
+    var before = try save_state.capture(allocator, &w, ctx.player_id);
+    defer before.deinit(allocator);
+
+    var buf: [512]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, .save, fbs.writer());
+    _ = try execute(&ctx, parseLine("load 1"), fbs.writer());
+
+    var after = try save_state.capture(allocator, &w, ctx.player_id);
+    defer after.deinit(allocator);
+    try save_state.expectEqual(&before, &after);
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "saved slot") != null);
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "loaded slot") != null);
 }
 
 test "kill via execute restores exploring status" {

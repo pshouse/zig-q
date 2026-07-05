@@ -2,7 +2,7 @@
 
 **Product:** deterministic, scriptable **dungeon crawl** engine — create a character, descend floors, fight monsters, persist progress. No dialogue trees.
 
-**Current release:** `0.7.0` (turn-based combat, goblin/skeleton monsters, DST `brawl`).
+**Current release:** `0.8.0` (SQLite save/load, DST `save_roundtrip`).
 
 ---
 
@@ -32,19 +32,9 @@
 
 ---
 
-## v0.8 — SQLite persistence
+## v0.8 — SQLite persistence (shipped)
 
 **Theme:** Save the crawl; resume later.
-
-| Deliver | Notes |
-|---------|--------|
-| `zig-q.sqlite` schema | `schema_version`, `save_slot`, world blob or normalized rows |
-| Persist | seed, rng offset, floor, entities, HP, map cell state, clock |
-| REPL | `save`, `load [slot]` |
-| DST `save_roundtrip` | play → save → load → continue; transcript tail identical |
-| **Fuzz** | save/load between random command bursts; invariant: snapshot ≡ restored world |
-
-**Non-goals:** dialogue flags, quest journal, cloud sync.
 
 ---
 

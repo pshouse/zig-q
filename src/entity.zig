@@ -16,6 +16,7 @@ pub const Entity = struct {
     max_hp: u32 = 0,
     damage_die: u8 = 0,
     is_monster: bool = false,
+    heap_char_name: bool = false,
 };
 
 pub const EntityStore = struct {
@@ -27,6 +28,7 @@ pub const EntityStore = struct {
 
     pub fn deinit(self: *EntityStore, allocator: std.mem.Allocator) void {
         for (self.entities.items) |*ent| {
+            if (ent.heap_char_name) allocator.free(ent.char.name);
             ent.char.attributes.deinit(allocator);
             allocator.destroy(ent.char);
             allocator.free(ent.name);

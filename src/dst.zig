@@ -152,6 +152,27 @@ pub const brawl_scenario = Scenario{
     },
 };
 
+pub const save_roundtrip_scenario = Scenario{
+    .name = "save_roundtrip",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 },
+        .{ .choose_class = 1 },
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .command = "move east" },
+        .{ .command = "save" },
+        .{ .command = "load 1" },
+        .{ .command = "look" },
+        .{ .command = "stats" },
+        .{ .command = "move north" },
+        .{ .command = "exit" },
+    },
+};
+
 pub const crawl_start_scenario = Scenario{
     .name = "crawl_start",
     .seed = 42,
@@ -176,6 +197,7 @@ pub const Harness = struct {
     draft: session.CreationDraft = .{},
     player_id: u32 = std.math.maxInt(u32),
     last_pool: session.StatPool = undefined,
+    save_path: []const u8 = @import("sqlite_store.zig").dst_path,
 
     pub fn init(allocator: std.mem.Allocator, seed: u64) !Harness {
         return .{
@@ -190,6 +212,10 @@ pub const Harness = struct {
 
     pub fn runScenario(self: *Harness, scenario: Scenario, writer: anytype) !void {
         try writer.print("dst scenario={s} seed={}\n", .{ scenario.name, scenario.seed });
+
+        if (std.mem.eql(u8, scenario.name, "save_roundtrip")) {
+            std.fs.cwd().deleteFile(self.save_path) catch {};
+        }
 
         if (self.w.seed != scenario.seed) {
             self.deinit();
@@ -282,6 +308,7 @@ pub const Harness = struct {
                     .w = &self.w,
                     .draft = &self.draft,
                     .player_id = self.player_id,
+                    .save_path = self.save_path,
                 };
                 const cmd = commands.parseLine(line);
                 const result = try commands.execute(&ctx, cmd, writer);
@@ -309,6 +336,8 @@ pub fn scenarioByName(name: []const u8, seed: u64) ?Scenario {
         return Scenario{ .name = "crawl_start", .seed = seed, .steps = crawl_start_scenario.steps };
     if (std.mem.eql(u8, name, "brawl"))
         return Scenario{ .name = "brawl", .seed = seed, .steps = brawl_scenario.steps };
+    if (std.mem.eql(u8, name, "save_roundtrip"))
+        return Scenario{ .name = "save_roundtrip", .seed = seed, .steps = save_roundtrip_scenario.steps };
     if (std.mem.eql(u8, name, "playthrough"))
         return Scenario{ .name = "playthrough", .seed = seed, .steps = playthrough_scenario.steps };
     return null;
@@ -370,6 +399,25 @@ test "dst playthrough scenario is byte-identical across runs" {
     try std.testing.expect(out_a.len > 0);
     try std.testing.expect(std.mem.indexOf(u8, out_a, "dragonborn") != null);
     try std.testing.expect(std.mem.indexOf(u8, out_a, "look floor=1") != null);
+    try std.testing.expectEqualSlices(u8, out_a, out_b);
+}
+
+test "dst save_roundtrip scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    var buf_a: [65536]u8 = undefined;
+    var buf_b: [65536]u8 = undefined;
+    var fbs_a = std.io.fixedBufferStream(&buf_a);
+    var fbs_b = std.io.fixedBufferStream(&buf_b);
+
+    try runNamedScenario(allocator, "save_roundtrip", 42, fbs_a.writer());
+    try runNamedScenario(allocator, "save_roundtrip", 42, fbs_b.writer());
+
+    const out_a = fbs_a.getWritten();
+    const out_b = fbs_b.getWritten();
+    try std.testing.expect(out_a.len > 0);
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "saved slot") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "loaded slot") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "moved to") != null);
     try std.testing.expectEqualSlices(u8, out_a, out_b);
 }
 

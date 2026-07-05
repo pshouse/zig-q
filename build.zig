@@ -8,6 +8,15 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
+    });
+    zig_q_mod.addIncludePath(b.path("deps/sqlite3"));
+    zig_q_mod.addCSourceFiles(.{
+        .files = &.{"deps/sqlite3/sqlite3.c"},
+        .flags = &.{
+            "-DSQLITE_THREADSAFE=0",
+            "-DSQLITE_OMIT_LOAD_EXTENSION",
+        },
     });
 
     const exe = b.addExecutable(.{
@@ -87,4 +96,21 @@ pub fn build(b: *std.Build) void {
     const evidence_run = b.addRunArtifact(evidence_exe);
     const evidence_step = b.step("evidence", "Emit v0.7 combat verification transcript");
     evidence_step.dependOn(&evidence_run.step);
+
+    const evidence_v08_exe = b.addExecutable(.{
+        .name = "zig-q-evidence-v08",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/evidence_v08_main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zig_q", .module = zig_q_mod },
+            },
+        }),
+    });
+    b.installArtifact(evidence_v08_exe);
+
+    const evidence_v08_run = b.addRunArtifact(evidence_v08_exe);
+    const evidence_v08_step = b.step("evidence-v08", "Emit v0.8 save/load verification transcript");
+    evidence_v08_step.dependOn(&evidence_v08_run.step);
 }

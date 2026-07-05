@@ -1,8 +1,10 @@
 # zig-q
 
-A Zig prototype for deterministic **dungeon crawl** simulation: character creation, dungeon tiles, level-1 combat sheet (HP/AC), combat (planned), and SQLite persistence (planned).
+A Zig prototype for deterministic **dungeon crawl** simulation: character creation, dungeon tiles, level-1 combat sheet (HP/AC), turn-based combat, and SQLite save/load.
 
-**Requires Zig 0.15+** (tested on 0.15.2). **Version:** `0.7.0` — see [ROADMAP.md](ROADMAP.md) for v0.8→v1.0.
+**Requires Zig 0.15+** (tested on 0.15.2). **Version:** `0.8.0` — see [ROADMAP.md](ROADMAP.md) for v0.9→v1.0.
+
+SQLite is bundled via the amalgamation in `deps/sqlite3/` (no system SQLite install required).
 
 ```bash
 zig build run -- --version
@@ -51,6 +53,8 @@ The REPL loads **floor 1** dungeon tiles, rolls six stats on start, then accepts
 
 **Combat commands:** `attack [target]`, `end turn` (melee d20 + STR mod vs AC; monsters counter on their turn)
 
+**Persistence commands:** `save [slot]`, `load <slot>` (slots 1–9; default save slot 1; database file `zig-q.sqlite` in the working directory)
+
 Races: 1=dragonborn, 2=dwarf (+2 CON), 3=elf (+2 DEX). Classes: 1=barbarian, 2=fighter, 3=bard.
 
 Piped crawl script (PowerShell):
@@ -86,6 +90,8 @@ zig build dst -- playthrough
 zig build dst -- playthrough 42
 zig build dst -- brawl
 zig build dst -- brawl 42
+zig build dst -- save_roundtrip
+zig build dst -- save_roundtrip 42
 ```
 
 - **bootstrap** — stat rolls, spawn, ticks, map render, look (v0.2 compat path)
@@ -93,6 +99,7 @@ zig build dst -- brawl 42
 - **create** — roll, assign picks, choose dwarf/barbarian, spawn, stats, exit
 - **crawl_start** — floor 1 dungeon, creation, spawn, look, wall block, stats
 - **brawl** — floor 1, creation, spawn, goblin fight, attack/end turn, stats
+- **save_roundtrip** — floor 1 crawl, save/load slot 1, continue with look/stats/move
 - **playthrough** — harvested from `transcripts/session-1783208416-seed42.txt` (dragonborn crawl)
 
 Two consecutive runs with the same scenario and seed produce byte-identical transcripts.

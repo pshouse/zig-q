@@ -7,12 +7,15 @@ const commands = @import("commands.zig");
 const combat = @import("combat.zig");
 const loc = @import("loc.zig");
 const transcript = @import("transcript.zig");
+const save_state = @import("save_state.zig");
+const sqlite_store = @import("sqlite_store.zig");
 
 pub const Config = struct {
     seed: u64 = 0,
     iterations: u32 = 10_000,
     max_commands: u8 = 32,
     world_seed: u64 = 42,
+    db_path: []const u8 = "zig-q-fuzz.sqlite",
 };
 
 pub const Failure = struct {
@@ -70,6 +73,10 @@ const templates = [_][]const u8{
     "attack goblin_0",
     "attack skeleton_0",
     "end turn",
+    "save",
+    "save 1",
+    "load 1",
+    "load 2",
 };
 
 pub fn run(allocator: std.mem.Allocator, cfg: Config) !Report {
@@ -96,34 +103,29 @@ pub fn run(allocator: std.mem.Allocator, cfg: Config) !Report {
         var draft: session.CreationDraft = .{};
         _ = session.draftRoll(&w, &draft);
 
+        const fuzz_db = cfg.db_path;
+        std.fs.cwd().deleteFile(fuzz_db) catch {};
+
         var ctx = commands.Context{
             .allocator = a,
             .w = &w,
             .draft = &draft,
+            .save_path = fuzz_db,
         };
 
-        var out_buf: [8192]u8 = undefined;
-        var out_stream = std.io.fixedBufferStream(&out_buf);
-        var out = transcript.Output(@TypeOf(out_stream.writer())){
-            .stdout = out_stream.writer(),
-            .session = null,
-        };
-
-        try out.print("zig-q repl version={s} seed={}\n", .{ @import("version.zig").semver, cfg.world_seed });
-        try session.formatStatPool(draft.pool, &out);
+        var null_out: [1]u8 = undefined;
+        var null_stream = std.io.fixedBufferStream(&null_out);
 
         var step: u32 = 0;
         while (step < cfg.max_commands) : (step += 1) {
             const line = try generateLine(a, &fuzz_rng);
             try script_lines.append(allocator, try allocator.dupe(u8, line));
 
-            try out.print("> {s}\n", .{line});
             const cmd = commands.parseLine(line);
-            const result = commands.execute(&ctx, cmd, &out) catch |err| {
+            const result = commands.execute(&ctx, cmd, null_stream.writer()) catch {
                 assertInvariants(&w, ctx.player_id) catch |inv_err| {
                     return failureReport(cfg.iterations, iteration, step, inv_err, &script_lines);
                 };
-                try out.print("fuzz tolerated error: {s}\n", .{@errorName(err)});
                 continue;
             };
 
@@ -135,6 +137,12 @@ pub fn run(allocator: std.mem.Allocator, cfg: Config) !Report {
             assertInvariants(&w, ctx.player_id) catch |inv_err| {
                 return failureReport(cfg.iterations, iteration, step, inv_err, &script_lines);
             };
+
+            if (ctx.player_id != entity.invalid_id and (std.mem.eql(u8, line, "save") or std.mem.startsWith(u8, line, "save "))) {
+                verifySaveRoundtrip(a, fuzz_db, &w, ctx.player_id) catch |inv_err| {
+                    return failureReport(cfg.iterations, iteration, step, inv_err, &script_lines);
+                };
+            }
 
             switch (result) {
                 .continue_repl => {},
@@ -196,6 +204,27 @@ pub fn runOne(
         try assertInvariants(&w, ctx.player_id);
         if (result == .exit_repl) return;
     }
+}
+
+fn verifySaveRoundtrip(
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    w: *const world.World,
+    player_id: entity.EntityId,
+) !void {
+    var before = try save_state.capture(allocator, w, player_id);
+    defer before.deinit(allocator);
+
+    var null_buf: [1]u8 = undefined;
+    var null_stream = std.io.fixedBufferStream(&null_buf);
+    try sqlite_store.saveSlot(allocator, path, 1, w, player_id, null_stream.writer());
+
+    var loaded = try sqlite_store.loadSlot(allocator, path, 1, null_stream.writer());
+    defer loaded.world.deinit();
+
+    var after = try save_state.capture(allocator, &loaded.world, loaded.player_id);
+    defer after.deinit(allocator);
+    try save_state.expectEqual(&before, &after);
 }
 
 fn countLiveMonsters(w: *const world.World) usize {
@@ -294,7 +323,11 @@ fn pickChar(fuzz_rng: *rng.SeededRng) u8 {
 }
 
 test "fuzz harness survives seeded iterations" {
-    const r = try run(std.testing.allocator, .{ .seed = 7, .iterations = 200 });
+    const r = try run(std.testing.allocator, .{
+        .seed = 7,
+        .iterations = 200,
+        .db_path = "zig-q-fuzz-test.sqlite",
+    });
     try std.testing.expect(r.passed());
 }
 
