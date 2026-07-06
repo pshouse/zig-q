@@ -2,7 +2,7 @@
 
 **Product:** deterministic, scriptable **dungeon crawl** engine — create a character, descend floors, fight monsters, persist progress. No dialogue trees.
 
-**Current release:** `1.0.0` (stable crawl engine, public API, reference crawl regression).
+**Current release:** `1.4.0` (foundation, gear, living dungeon AI, survival clock).
 
 ---
 

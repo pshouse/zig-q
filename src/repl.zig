@@ -79,6 +79,7 @@ pub fn runRepl(
         .allocator = allocator,
         .w = &w,
         .draft = &draft,
+        .help_profile = .repl_v11,
     };
 
     var recording: ?transcript.Session = null;
@@ -143,6 +144,7 @@ pub fn runReplScript(
         .allocator = allocator,
         .w = &w,
         .draft = &draft,
+        .help_profile = .repl_v11,
     };
 
     var recording: ?transcript.Session = null;

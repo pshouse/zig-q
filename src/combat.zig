@@ -6,6 +6,9 @@ const character = @import("character.zig");
 const monsters = @import("monsters.zig");
 const dice = @import("dice.zig");
 const types = @import("types.zig");
+const conditions = @import("conditions.zig");
+const inventory = @import("inventory.zig");
+const items = @import("items.zig");
 
 pub const CombatState = struct {
     participants: std.ArrayList(entity.EntityId),
@@ -34,7 +37,7 @@ pub fn activeTurn(w: *const world.World) ?entity.EntityId {
 }
 
 fn isAlive(ent: *const entity.Entity) bool {
-    return !ent.conditions.has(.dead) and ent.current_hp > 0;
+    return !conditions.isDead(ent);
 }
 
 fn isAdjacent(a: loc.Loc, b: loc.Loc) bool {
@@ -54,11 +57,12 @@ pub fn monsterKind(ent: *const entity.Entity) ?monsters.Kind {
 
 pub fn targetAc(ent: *const entity.Entity) u32 {
     if (monsterKind(ent)) |kind| return monsters.armorClass(kind);
+    if (!ent.is_monster) return inventory.State.playerAc(&ent.inventory, ent);
     return character.armorClass(ent.char);
 }
 
 pub fn attackRoll(w: *world.World, attacker: *const entity.Entity) u8 {
-    if (attacker.conditions.has(.blinded) or attacker.conditions.has(.prone)) {
+    if (conditions.attackDisadvantage(attacker)) {
         const a = w.rng.rollDie(20);
         const b = w.rng.rollDie(20);
         return @min(a, b);
@@ -68,22 +72,26 @@ pub fn attackRoll(w: *world.World, attacker: *const entity.Entity) u8 {
 
 pub fn attackModifier(attacker: *const entity.Entity, target: *const entity.Entity) i32 {
     var mod = character.abilityModifier(character.statByAbbr(attacker.char, "STR"));
-    if (target.conditions.has(.prone)) mod += 2;
+    mod += conditions.attackAdvantageVs(target);
     return mod;
 }
 
 fn rollDamage(w: *world.World, attacker: *const entity.Entity) i32 {
     var buf: [1]u8 = undefined;
     const mod = character.abilityModifier(character.statByAbbr(attacker.char, "STR"));
-    const die = if (attacker.damage_die > 0) attacker.damage_die else attacker.char.class.hit_die;
+    const die = inventory.State.weaponDamageDie(&attacker.inventory, attacker);
     const result = dice.roll(&w.rng, .{ .n = 1, .sides = die, .modifier = mod }, &buf);
     return @max(result.sum, 0);
 }
 
+fn weaponTrait(attacker: *const entity.Entity) items.Trait {
+    if (attacker.inventory.weapon) |wid| return items.def(wid).trait;
+    return .none;
+}
+
 fn applyDamage(ent: *entity.Entity, amount: u32) void {
     if (amount >= ent.current_hp) {
-        ent.current_hp = 0;
-        ent.conditions.add(.dead);
+        conditions.markDead(ent);
     } else {
         ent.current_hp -= amount;
     }
@@ -293,13 +301,23 @@ pub fn performAttack(
         const dmg = rollDamage(w, attacker);
         applyDamage(target, @intCast(dmg));
         try writer.print("hit damage={} hp={}/{}\n", .{ dmg, target.current_hp, target.max_hp });
+        if (roll == 20 and weaponTrait(attacker) == .trip) {
+            conditions.apply(target, .prone);
+            try writer.print("{s} is knocked prone\n", .{target.name});
+        }
         if (!isAlive(target)) {
             try writer.print("{s} is slain\n", .{target.name});
+            if (target.is_monster) {
+                w.spawnCorpse(target.name, target.loc) catch {};
+            } else if (w.combat) |c| {
+                if (target.id == c.player_id) w.markPlayerDead(c.player_id);
+            }
             maybeEndCombat(w);
         }
     } else {
         try writer.print("miss\n", .{});
     }
+    w.tickAction(1);
 }
 
 fn processMonsterTurns(w: *world.World, writer: anytype) !void {

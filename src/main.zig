@@ -13,7 +13,22 @@ pub fn main() !void {
     const stdout = io_out.stdoutWriter();
 
     if (args.len >= 2 and std.mem.eql(u8, args[1], "--version")) {
-        try stdout.print("{s}\n", .{zig_q.version.semver});
+        var cli_override: ?[]const u8 = null;
+        var i: usize = 2;
+        while (i < args.len) : (i += 1) {
+            if (std.mem.eql(u8, args[i], "--semver")) {
+                if (i + 1 >= args.len) {
+                    try stdout.print("usage: --version [--semver <version>]\n", .{});
+                    return;
+                }
+                cli_override = args[i + 1];
+                i += 1;
+            } else {
+                try stdout.print("usage: --version [--semver <version>]\n", .{});
+                return;
+            }
+        }
+        try stdout.print("{s}\n", .{zig_q.version.cliVersion(cli_override)});
         return;
     }
 
@@ -53,7 +68,8 @@ pub fn main() !void {
         try stdout.print(
             \\zig-q {s}
             \\Usage:
-            \\  zig build run -- --version                 Print semver and exit
+            \\  zig build run -- --version [--semver <version>]
+            \\                                           Print semver and exit
             \\  zig build run -- --demo [seed]             Non-interactive demo (default seed 42)
             \\  zig build run -- --repl [seed] [--record [path]] [--semver <version>]
             \\  zig build run -- --repl --record [seed]    Same; numeric after --record is seed

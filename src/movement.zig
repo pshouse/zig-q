@@ -50,7 +50,12 @@ pub fn moveEntity(w: *world.World, id: entity.EntityId, dir: Direction) !loc.Loc
     const ent = w.store.get(id) orelse return error.EntityNotFound;
     const old_loc = ent.loc;
     const new_loc = step(old_loc, dir) orelse return error.Blocked;
-    if (w.has_dungeon and !w.terrain.isWalkable(new_loc)) return error.Blocked;
+    if (w.has_dungeon) {
+        if (w.terrain.get(new_loc)) |tile| {
+            if (!tile.isWalkable()) return error.Blocked;
+            if (tile == .door and w.doors.blocksAt(&w.terrain, new_loc)) return error.Blocked;
+        }
+    }
     if (w.tile_map.isBlockedFor(new_loc, id)) return error.Blocked;
 
     w.tile_map.remove(old_loc, id);

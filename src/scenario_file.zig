@@ -126,7 +126,7 @@ test "runScenarioFile executes reference_crawl steps" {
     const allocator = std.testing.allocator;
     var buf: [131072]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
-    try dst.runScenarioFile(allocator, "scenarios/reference_crawl.txt", 42, fbs.writer());
+    try dst.runScenarioFile(allocator, "scenarios/reference_crawl.txt", 42, fbs.writer(), null);
     const out = fbs.getWritten();
     try std.testing.expect(std.mem.indexOf(u8, out, "descended to floor 3") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "saved slot") != null);
@@ -136,7 +136,7 @@ test "runScenarioFile executes descend_crawl steps" {
     const allocator = std.testing.allocator;
     var buf: [65536]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
-    try dst.runScenarioFile(allocator, "scenarios/descend_crawl.txt", 42, fbs.writer());
+    try dst.runScenarioFile(allocator, "scenarios/descend_crawl.txt", 42, fbs.writer(), null);
     const out = fbs.getWritten();
     try std.testing.expect(std.mem.indexOf(u8, out, "descended to floor 2") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "look floor=2") != null);

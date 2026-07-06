@@ -45,9 +45,23 @@ pub const sqlite_store = @import("sqlite_store.zig");
 pub const evidence_v08 = @import("evidence_v08.zig");
 pub const evidence_v09 = @import("evidence_v09.zig");
 pub const evidence_v10 = @import("evidence_v10.zig");
+pub const evidence_v11 = @import("evidence_v11.zig");
+pub const evidence_v12 = @import("evidence_v12.zig");
+pub const evidence_v13 = @import("evidence_v13.zig");
+pub const pathfinding = @import("pathfinding.zig");
+pub const doors = @import("doors.zig");
+pub const evidence_v14 = @import("evidence_v14.zig");
+pub const wave_gate = @import("wave_gate.zig");
 pub const help_text = @import("help_text.zig");
 pub const evidence_format = @import("evidence_format.zig");
 pub const scenario_file = @import("scenario_file.zig");
+pub const conditions = @import("conditions.zig");
+pub const perception = @import("perception.zig");
+pub const world_objects = @import("world_objects.zig");
+pub const explore = @import("explore.zig");
+pub const items = @import("items.zig");
+pub const inventory = @import("inventory.zig");
+pub const survival = @import("survival.zig");
 
 test {
     std.testing.refAllDecls(@This());
@@ -81,7 +95,21 @@ test {
     _ = @import("evidence_v08.zig");
     _ = @import("evidence_v09.zig");
     _ = @import("evidence_v10.zig");
+    _ = @import("evidence_v11.zig");
+    _ = @import("evidence_v12.zig");
+    _ = @import("evidence_v13.zig");
+    _ = @import("pathfinding.zig");
+    _ = @import("doors.zig");
+    _ = @import("evidence_v14.zig");
+    _ = @import("wave_gate.zig");
     _ = @import("help_text.zig");
     _ = @import("evidence_format.zig");
     _ = @import("scenario_file.zig");
+    _ = @import("conditions.zig");
+    _ = @import("perception.zig");
+    _ = @import("world_objects.zig");
+    _ = @import("explore.zig");
+    _ = @import("items.zig");
+    _ = @import("inventory.zig");
+    _ = @import("survival.zig");
 }

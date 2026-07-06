@@ -2,7 +2,7 @@
 
 A Zig prototype for deterministic **dungeon crawl** simulation: character creation, dungeon tiles, level-1 combat sheet (HP/AC), turn-based combat, and SQLite save/load.
 
-**Requires Zig 0.15+** (tested on 0.15.2). **Version:** `1.0.0` — stable deterministic crawl engine release.
+**Requires Zig 0.15+** (tested on 0.15.2). **Version:** `1.4.0` — deterministic dungeon crawl through survival clock (see ROADMAP.md).
 
 SQLite is bundled via the amalgamation in `deps/sqlite3/` (no system SQLite install required).
 
@@ -164,3 +164,13 @@ src/
 ```bash
 zig build run -- --help
 ```
+
+## Version history
+
+| Version | Theme |
+|---------|--------|
+| **1.4.0** | Survival clock: hunger, fatigue, exhaustion, food/rest/sleep, poison DoT |
+| **1.3.0** | Living dungeon: monster AI, doors, step-traps, pathfinding |
+| **1.2.0** | Mundane gear: inventory, weapons, armour, encumbrance, corpse loot |
+| **1.1.0** | Foundation: save v2, LOS, conditions registry, permadeath, ambush handoff |
+| **1.0.0** | Stable crawl engine, public API, `reference_crawl` regression |

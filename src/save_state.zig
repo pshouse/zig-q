@@ -7,8 +7,13 @@ const combat = @import("combat.zig");
 const monsters = @import("monsters.zig");
 const character = @import("character.zig");
 const dungeon = @import("dungeon.zig");
+const conditions = @import("conditions.zig");
+const world_objects = @import("world_objects.zig");
+const inventory = @import("inventory.zig");
+const doors = @import("doors.zig");
 
-pub const schema_version: u32 = 1;
+pub const schema_version: u32 = 2;
+pub const schema_version_v1: u32 = 1;
 
 pub const EntitySave = struct {
     id: entity.EntityId,
@@ -27,10 +32,15 @@ pub const EntitySave = struct {
     wis: u64,
     cha: u64,
     conditions_bits: u32,
+    exhaustion_level: u3 = 0,
+    hunger: u16 = 100,
+    fatigue: u16 = 0,
+    sleeping: bool = false,
     current_hp: u32,
     max_hp: u32,
     damage_die: u8,
     is_monster: bool,
+    gear: inventory.GearSave = .{ .bag = &.{} },
 };
 
 pub const MapCellSave = struct {
@@ -63,6 +73,9 @@ pub const WorldSave = struct {
     entities: []EntitySave,
     map_cells: []MapCellSave,
     combat: ?CombatSave,
+    floor_objects: []world_objects.ObjectSave = &.{},
+    door_states: []doors.DoorSave = &.{},
+    player_dead: bool = false,
 
     pub fn deinit(self: *WorldSave, allocator: std.mem.Allocator) void {
         for (self.entities) |ent| {
@@ -70,11 +83,15 @@ pub const WorldSave = struct {
             allocator.free(ent.char_name);
             allocator.free(ent.race_name);
             allocator.free(ent.class_name);
+            allocator.free(ent.gear.bag);
         }
         allocator.free(self.entities);
         for (self.map_cells) |cell| allocator.free(cell.entity_ids);
         allocator.free(self.map_cells);
         if (self.combat) |c| allocator.free(c.participants);
+        for (self.floor_objects) |obj| allocator.free(obj.label);
+        allocator.free(self.floor_objects);
+        allocator.free(self.door_states);
     }
 };
 
@@ -133,11 +150,16 @@ pub fn capture(allocator: std.mem.Allocator, w: *const world.World, player_id: e
             .int_stat = statByAbbr(&char, "INT"),
             .wis = statByAbbr(&char, "WIS"),
             .cha = statByAbbr(&char, "CHA"),
-            .conditions_bits = conditionsToBits(ent.conditions),
+            .conditions_bits = conditions.toBits(&ent),
+            .exhaustion_level = ent.exhaustion_level,
+            .hunger = ent.hunger,
+            .fatigue = ent.fatigue,
+            .sleeping = ent.sleeping,
             .current_hp = ent.current_hp,
             .max_hp = ent.max_hp,
             .damage_die = ent.damage_die,
             .is_monster = ent.is_monster,
+            .gear = try inventory.toSave(allocator, &ent.inventory),
         });
     }
 
@@ -169,6 +191,32 @@ pub fn capture(allocator: std.mem.Allocator, w: *const world.World, player_id: e
         };
     }
 
+    var obj_list: std.ArrayList(world_objects.ObjectSave) = .empty;
+    errdefer {
+        for (obj_list.items) |obj| allocator.free(obj.label);
+        obj_list.deinit(allocator);
+    }
+    for (w.floor_objects.objects.items) |obj| {
+        try obj_list.append(allocator, .{
+            .kind = obj.kind,
+            .x = obj.x,
+            .y = obj.y,
+            .label = try allocator.dupe(u8, obj.label),
+            .item = obj.item,
+        });
+    }
+
+    var door_list: std.ArrayList(doors.DoorSave) = .empty;
+    errdefer door_list.deinit(allocator);
+    var door_it = w.doors.states.iterator();
+    while (door_it.next()) |entry| {
+        try door_list.append(allocator, .{
+            .x = entry.key_ptr.x,
+            .y = entry.key_ptr.y,
+            .state = entry.value_ptr.*,
+        });
+    }
+
     return .{
         .schema_version = schema_version,
         .seed = w.seed,
@@ -187,6 +235,9 @@ pub fn capture(allocator: std.mem.Allocator, w: *const world.World, player_id: e
         .entities = try entities.toOwnedSlice(allocator),
         .map_cells = try cells.toOwnedSlice(allocator),
         .combat = combat_save,
+        .floor_objects = try obj_list.toOwnedSlice(allocator),
+        .door_states = try door_list.toOwnedSlice(allocator),
+        .player_dead = w.player_dead,
     };
 }
 
@@ -249,17 +300,30 @@ pub fn apply(allocator: std.mem.Allocator, save: *const WorldSave) !world.World 
         ent.heap_char_name = true;
         ent.loc = position;
         ent.movement = ent_save.movement;
-        ent.conditions = bitsToConditions(ent_save.conditions_bits);
+        ent.conditions = conditions.fromBits(ent_save.conditions_bits);
+        ent.exhaustion_level = ent_save.exhaustion_level;
+        ent.hunger = ent_save.hunger;
+        ent.fatigue = ent_save.fatigue;
+        ent.sleeping = ent_save.sleeping;
         ent.current_hp = ent_save.current_hp;
         ent.max_hp = ent_save.max_hp;
         ent.damage_die = ent_save.damage_die;
         ent.is_monster = ent_save.is_monster;
+        ent.inventory = try inventory.fromSave(allocator, ent_save.gear);
     }
 
     for (save.map_cells) |cell| {
         for (cell.entity_ids) |id| {
             try w.tile_map.place(loc.Loc.init(cell.x, cell.y), id);
         }
+    }
+
+    w.player_dead = save.player_dead;
+    for (save.floor_objects) |obj| {
+        try w.floor_objects.addItem(w.allocator, obj.kind, loc.Loc.init(obj.x, obj.y), obj.label, obj.item);
+    }
+    for (save.door_states) |door| {
+        try w.doors.set(loc.Loc.init(door.x, door.y), door.state);
     }
 
     if (save.combat) |c| {
@@ -275,6 +339,45 @@ pub fn apply(allocator: std.mem.Allocator, save: *const WorldSave) !world.World 
     }
 
     return w;
+}
+
+pub fn migrateV1ToV2(save: *WorldSave, allocator: std.mem.Allocator) !void {
+    if (save.schema_version != schema_version_v1) return;
+    save.schema_version = schema_version;
+    save.floor_objects = try allocator.alloc(world_objects.ObjectSave, 0);
+    save.player_dead = false;
+    for (save.entities) |*ent| {
+        ent.exhaustion_level = 0;
+        ent.hunger = 100;
+        ent.fatigue = 0;
+        ent.sleeping = false;
+    }
+}
+
+test "migrate v1 save adds v2 defaults" {
+    const allocator = std.testing.allocator;
+    var save = WorldSave{
+        .schema_version = schema_version_v1,
+        .seed = 42,
+        .rng_state = 1,
+        .rng_offset = 0,
+        .floor_index = 1,
+        .has_dungeon = true,
+        .clock_ticks = 0,
+        .clock_time_of_day = 0,
+        .clock_seconds_per_day = 120,
+        .clock_update_rate = 5,
+        .clock_time_multiplier = 1,
+        .next_entity_id = 1,
+        .player_id = 0,
+        .entities = &.{},
+        .map_cells = &.{},
+        .combat = null,
+    };
+    try migrateV1ToV2(&save, allocator);
+    try std.testing.expectEqual(schema_version, save.schema_version);
+    try std.testing.expectEqual(@as(usize, 0), save.floor_objects.len);
+    try std.testing.expect(!save.player_dead);
 }
 
 pub fn replaceWorld(dst: *world.World, src: world.World) void {

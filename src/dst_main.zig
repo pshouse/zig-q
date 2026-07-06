@@ -10,13 +10,23 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
 
-    const scenario = if (args.len >= 2) args[1] else "bootstrap";
-    const seed: u64 = if (args.len >= 3) try std.fmt.parseInt(u64, args[2], 10) else zig_q.dst.default_scenario.seed;
-
+    const cli = try zig_q.dst.parseDstCli(args[1..]);
     const stdout = io_out.stdoutWriter();
-    if (std.mem.startsWith(u8, scenario, "@")) {
-        try zig_q.dst.runScenarioFile(allocator, scenario[1..], seed, stdout);
+    if (std.mem.startsWith(u8, cli.scenarioOrDefault(), "@")) {
+        try zig_q.dst.runScenarioFile(
+            allocator,
+            cli.scenarioOrDefault()[1..],
+            cli.seedOrDefault(),
+            stdout,
+            cli.semver,
+        );
     } else {
-        try zig_q.dst.runNamedScenario(allocator, scenario, seed, stdout);
+        try zig_q.dst.runNamedScenario(
+            allocator,
+            cli.scenarioOrDefault(),
+            cli.seedOrDefault(),
+            stdout,
+            cli.semver,
+        );
     }
 }

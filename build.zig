@@ -38,8 +38,10 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_exe.step);
 
     const test_exe = b.addTest(.{
+        .name = "test",
         .root_module = zig_q_mod,
     });
+    b.installArtifact(test_exe);
     const test_run = b.addRunArtifact(test_exe);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&test_run.step);
@@ -148,7 +150,143 @@ pub fn build(b: *std.Build) void {
     const evidence_v10_step = b.step("evidence-v10", "Emit v1.0 reference-crawl verification transcript");
     evidence_v10_step.dependOn(&evidence_v10_run.step);
 
+    const evidence_v11_exe = b.addExecutable(.{
+        .name = "zig-q-evidence-v11",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/evidence_v11_main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zig_q", .module = zig_q_mod },
+            },
+        }),
+    });
+    b.installArtifact(evidence_v11_exe);
+
+    const evidence_v11_run = b.addRunArtifact(evidence_v11_exe);
+    const evidence_v11_step = b.step("evidence-v11", "Emit v1.1 foundation verification transcript");
+    evidence_v11_step.dependOn(&evidence_v11_run.step);
+
+    const migration_v11_exe = b.addExecutable(.{
+        .name = "zig-q-migration-v11",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/migration_v11_main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zig_q", .module = zig_q_mod },
+            },
+        }),
+    });
+    b.installArtifact(migration_v11_exe);
+
+    const migration_v11_run = b.addRunArtifact(migration_v11_exe);
+    const migration_v11_step = b.step("migration-v11", "Emit v1.0→v1.1 save migration transcript");
+    migration_v11_step.dependOn(&migration_v11_run.step);
+
+    const evidence_v12_exe = b.addExecutable(.{
+        .name = "zig-q-evidence-v12",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/evidence_v12_main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zig_q", .module = zig_q_mod },
+            },
+        }),
+    });
+    b.installArtifact(evidence_v12_exe);
+
+    const evidence_v12_run = b.addRunArtifact(evidence_v12_exe);
+    const evidence_v12_step = b.step("evidence-v12", "Emit v1.2 mundane-gear verification transcript");
+    evidence_v12_step.dependOn(&evidence_v12_run.step);
+
+    const evidence_v13_exe = b.addExecutable(.{
+        .name = "zig-q-evidence-v13",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/evidence_v13_main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zig_q", .module = zig_q_mod },
+            },
+        }),
+    });
+    b.installArtifact(evidence_v13_exe);
+
+    const evidence_v13_run = b.addRunArtifact(evidence_v13_exe);
+    const evidence_v13_step = b.step("evidence-v13", "Emit v1.3 living-dungeon verification transcript");
+    evidence_v13_step.dependOn(&evidence_v13_run.step);
+
+    const evidence_v14_exe = b.addExecutable(.{
+        .name = "zig-q-evidence-v14",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/evidence_v14_main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zig_q", .module = zig_q_mod },
+            },
+        }),
+    });
+    b.installArtifact(evidence_v14_exe);
+
+    const evidence_v14_run = b.addRunArtifact(evidence_v14_exe);
+    const evidence_v14_step = b.step("evidence-v14", "Emit v1.4 survival-clock verification transcript");
+    evidence_v14_step.dependOn(&evidence_v14_run.step);
+
+    const wave_gate_exe = b.addExecutable(.{
+        .name = "zig-q-wave-gate",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/wave_gate_main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zig_q", .module = zig_q_mod },
+            },
+        }),
+    });
+    b.installArtifact(wave_gate_exe);
+
+    const gate_scratch = "C:\\Users\\admin\\AppData\\Local\\Temp\\grok-goal-ed9bbd58ab86\\implementer";
+
+    inline for (.{ 11, 12, 13, 14 }) |wave| {
+        const prefix = b.fmt("v{d}", .{wave});
+        const build_log = b.fmt("{s}\\{s}_build.log", .{ gate_scratch, prefix });
+
+        // Plan step 1: top-level `zig build` shell redirect (raw, no post-processing).
+        const build_capture = b.addSystemCommand(&.{
+            "cmd", "/c",
+            b.fmt(
+                "if not exist {s} mkdir {s} && zig build 1>{s} 2>&1",
+                .{ gate_scratch, gate_scratch, build_log },
+            ),
+        });
+        build_capture.setCwd(b.path("."));
+        build_capture.step.name = b.fmt("gate-v{d}-build", .{wave});
+
+        const build_step = b.step(
+            b.fmt("gate-v{d}-build", .{wave}),
+            b.fmt("Per-wave zig build capture to {s}_build.log", .{prefix}),
+        );
+        build_step.dependOn(&build_capture.step);
+
+        // Plan steps 2–8: wave-gate verifies build log then runs real zig build subcommands.
+        const gate_run = b.addRunArtifact(wave_gate_exe);
+        gate_run.addArg(b.fmt("{d}", .{wave}));
+        gate_run.addArg("--skip-build");
+        gate_run.step.dependOn(build_step);
+        gate_run.step.dependOn(b.getInstallStep());
+
+        const gate_step = b.step(
+            b.fmt("gate-v{d}", .{wave}),
+            b.fmt("Run v1.{d} release gate captures (steps 2–8)", .{wave - 10}),
+        );
+        gate_step.dependOn(&gate_run.step);
+    }
+
     const consumer_test_exe = b.addTest(.{
+        .name = "zig-q-consumer-test",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/consumer_test.zig"),
             .target = target,
@@ -158,6 +296,7 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
+    b.installArtifact(consumer_test_exe);
     const consumer_test_run = b.addRunArtifact(consumer_test_exe);
     const consumer_test_step = b.step("consumer-test", "Run public zig_q API integration tests");
     consumer_test_step.dependOn(&consumer_test_run.step);

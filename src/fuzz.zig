@@ -5,6 +5,7 @@ const entity = @import("entity.zig");
 const session = @import("session.zig");
 const commands = @import("commands.zig");
 const combat = @import("combat.zig");
+const conditions = @import("conditions.zig");
 const loc = @import("loc.zig");
 const transcript = @import("transcript.zig");
 const save_state = @import("save_state.zig");
@@ -78,6 +79,12 @@ const templates = [_][]const u8{
     "load 1",
     "load 2",
     "descend",
+    "wait",
+    "conditions",
+    "open north",
+    "open south",
+    "close north",
+    "use antidote",
 };
 
 pub fn run(allocator: std.mem.Allocator, cfg: Config) !Report {
@@ -117,13 +124,14 @@ pub fn run(allocator: std.mem.Allocator, cfg: Config) !Report {
         var null_out: [1]u8 = undefined;
         var null_stream = std.io.fixedBufferStream(&null_out);
 
+        var osc_tracker: OscillationTracker = .{};
         var step: u32 = 0;
         while (step < cfg.max_commands) : (step += 1) {
             const line = try generateLine(a, &fuzz_rng);
             try script_lines.append(allocator, try allocator.dupe(u8, line));
 
             const result = commands.executeLine(&ctx, line, null_stream.writer()) catch {
-                assertInvariants(&w, ctx.player_id) catch |inv_err| {
+                assertInvariantsTracked(&w, ctx.player_id, &osc_tracker) catch |inv_err| {
                     return failureReport(cfg.iterations, iteration, step, inv_err, &script_lines);
                 };
                 continue;
@@ -134,7 +142,7 @@ pub fn run(allocator: std.mem.Allocator, cfg: Config) !Report {
                 _ = w.spawnMonster(.skeleton, loc.Loc.init(49, 50), "skeleton_0") catch {};
             }
 
-            assertInvariants(&w, ctx.player_id) catch |inv_err| {
+            assertInvariantsTracked(&w, ctx.player_id, &osc_tracker) catch |inv_err| {
                 return failureReport(cfg.iterations, iteration, step, inv_err, &script_lines);
             };
 
@@ -236,7 +244,60 @@ fn countLiveMonsters(w: *const world.World) usize {
 
 pub const max_floor_depth: u32 = 5;
 
+const OscillationTracker = struct {
+    entries: [32]struct {
+        id: entity.EntityId,
+        ring: [4]loc.Loc,
+        len: u8,
+    } = undefined,
+    count: u8 = 0,
+
+    fn find(self: *OscillationTracker, id: entity.EntityId) *@TypeOf(self.entries[0]) {
+        var i: u8 = 0;
+        while (i < self.count) : (i += 1) {
+            if (self.entries[i].id == id) return &self.entries[i];
+        }
+        const slot = &self.entries[self.count];
+        slot.* = .{ .id = id, .ring = undefined, .len = 0 };
+        self.count += 1;
+        return slot;
+    }
+
+    pub fn record(self: *OscillationTracker, id: entity.EntityId, at: loc.Loc) !void {
+        const slot = self.find(id);
+        if (slot.len > 0 and slot.ring[(slot.len - 1) % 4].x == at.x and slot.ring[(slot.len - 1) % 4].y == at.y) return;
+        slot.ring[slot.len % 4] = at;
+        slot.len +%= 1;
+        if (slot.len >= 4) {
+            const a = slot.ring[(slot.len - 4) % 4];
+            const b = slot.ring[(slot.len - 3) % 4];
+            const c = slot.ring[(slot.len - 2) % 4];
+            const d = slot.ring[(slot.len - 1) % 4];
+            if (a.x == c.x and a.y == c.y and b.x == d.x and b.y == d.y and
+                (a.x != b.x or a.y != b.y))
+            {
+                return error.PathOscillation;
+            }
+        }
+    }
+};
+
+fn trackMonsterPositions(w: *world.World, tracker: *OscillationTracker) !void {
+    for (w.store.entities.items) |ent| {
+        if (!ent.is_monster or ent.conditions.has(.dead) or ent.current_hp == 0) continue;
+        try tracker.record(ent.id, ent.loc);
+    }
+}
+
 pub fn assertInvariants(w: *world.World, player_id: entity.EntityId) !void {
+    return assertInvariantsTracked(w, player_id, null);
+}
+
+pub fn assertInvariantsTracked(
+    w: *world.World,
+    player_id: entity.EntityId,
+    tracker: ?*OscillationTracker,
+) !void {
     if (w.floor_index > max_floor_depth) return error.FloorDepthExceeded;
 
     var players: usize = 0;
@@ -265,6 +326,14 @@ pub fn assertInvariants(w: *world.World, player_id: entity.EntityId) !void {
     if (player_id != entity.invalid_id and w.store.get(player_id) == null)
         return error.MissingPlayer;
 
+    if (w.isPlayerDead()) {
+        if (combat.isInCombat(w)) return error.DeadPlayerInCombat;
+        if (player_id != entity.invalid_id) {
+            const player = w.store.get(player_id) orelse return error.MissingPlayer;
+            if (!conditions.isDead(player)) return error.DeadFlagMismatch;
+        }
+    }
+
     if (w.has_dungeon) {
         for (w.store.entities.items) |ent| {
             if (!w.terrain.isWalkable(ent.loc)) return error.EntityInWall;
@@ -278,6 +347,8 @@ pub fn assertInvariants(w: *world.World, player_id: entity.EntityId) !void {
             if (owner.current_hp == 0 or owner.conditions.has(.dead)) return error.DeadTurnOwner;
         }
     }
+
+    if (tracker) |t| try trackMonsterPositions(w, t);
 }
 
 fn generateLine(allocator: std.mem.Allocator, fuzz_rng: *rng.SeededRng) ![]const u8 {

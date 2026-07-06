@@ -10,6 +10,10 @@ const dungeon = @import("dungeon.zig");
 const character = @import("character.zig");
 const combat = @import("combat.zig");
 const monsters = @import("monsters.zig");
+const world_objects = @import("world_objects.zig");
+const conditions = @import("conditions.zig");
+const doors = @import("doors.zig");
+const survival = @import("survival.zig");
 
 pub const World = struct {
     allocator: std.mem.Allocator,
@@ -27,6 +31,9 @@ pub const World = struct {
     next_entity_id: entity.EntityId,
     staged_character: ?*types.Character = null,
     combat: ?*combat.CombatState = null,
+    floor_objects: world_objects.Store = .init(),
+    doors: doors.Store = undefined,
+    player_dead: bool = false,
 
     pub fn init(allocator: std.mem.Allocator, seed: u64) !World {
         var races = try types.defaultRaces(allocator);
@@ -43,6 +50,7 @@ pub const World = struct {
             .game_clock = clock.Clock.init(0.45, 120.0, 5.0, 1.0),
             .next_entity_id = 0,
             .staged_character = null,
+            .doors = doors.Store.init(allocator),
         };
     }
 
@@ -53,7 +61,27 @@ pub const World = struct {
         self.store.deinit(self.allocator);
         self.tile_map.deinit();
         self.terrain.deinit();
+        self.floor_objects.deinit(self.allocator);
+        self.doors.deinit();
         types.deinitRaceList(self.allocator, &self.races);
+    }
+
+    pub fn isPlayerDead(self: *const World) bool {
+        return self.player_dead;
+    }
+
+    pub fn markPlayerDead(self: *World, player_id: entity.EntityId) void {
+        self.player_dead = true;
+        if (self.store.get(player_id)) |ent| conditions.markDead(ent);
+        combat.endCombat(self);
+    }
+
+    pub fn spawnCorpse(self: *World, name: []const u8, position: loc.Loc) !void {
+        const loot: ?@import("items.zig").Id = if (std.mem.startsWith(u8, name, "goblin"))
+            .short_sword
+        else
+            null;
+        try self.floor_objects.addItem(self.allocator, .corpse, position, name, loot);
     }
 
     pub fn loadFloor(self: *World, index: u32) !void {
@@ -122,7 +150,26 @@ pub const World = struct {
         try self.loadFloor(next_floor);
         try self.relocatePlayer(player_id, self.floor_spawn);
         try self.placeFloorMonsters();
+        try self.placeFloorLoot();
         self.tick();
+    }
+
+    pub fn placeFloorLoot(self: *World) !void {
+        if (self.floor_index < 2) return;
+        const plan = dungeon.planFloorLoot(self.seed, self.floor_index, self.floor_spawn, &self.terrain);
+        var i: usize = 0;
+        while (i < plan.count) : (i += 1) {
+            const spawn = plan.spawns[i];
+            if (!self.terrain.isWalkable(spawn.position)) continue;
+            if (self.tile_map.entityCountAt(spawn.position) > 0) continue;
+            try self.floor_objects.addItem(
+                self.allocator,
+                .item,
+                spawn.position,
+                @import("items.zig").idTag(spawn.item),
+                spawn.item,
+            );
+        }
     }
 
     fn destroyCharacter(self: *World, char: *types.Character) void {
@@ -158,6 +205,7 @@ pub const World = struct {
         if (self.store.get(id)) |ent| {
             ent.loc = position;
             initEntityCombat(ent);
+            survival.initEntity(ent);
         }
         return id;
     }
@@ -171,6 +219,8 @@ pub const World = struct {
             ent.max_hp = b.max_hp;
             ent.current_hp = b.max_hp;
             ent.damage_die = b.damage_die;
+            ent.ai_origin = position;
+            ent.ai_patrol_phase = @truncate(id);
         }
         return id;
     }
@@ -190,6 +240,14 @@ pub const World = struct {
 
     pub fn tick(self: *World) void {
         self.game_clock.tick();
+        for (self.store.entities.items) |*ent| {
+            survival.onTick(self, ent);
+        }
+    }
+
+    pub fn tickAction(self: *World, count: u32) void {
+        var i: u32 = 0;
+        while (i < count) : (i += 1) self.tick();
     }
 
     pub fn snapshot(self: *const World) Snapshot {

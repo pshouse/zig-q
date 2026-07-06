@@ -1,6 +1,8 @@
 const std = @import("std");
 const types = @import("types.zig");
 const loc = @import("loc.zig");
+const inventory = @import("inventory.zig");
+const movement = @import("movement.zig");
 
 pub const EntityId = u32;
 pub const invalid_id: EntityId = std.math.maxInt(EntityId);
@@ -12,11 +14,19 @@ pub const Entity = struct {
     movement: u8 = 30,
     char: *types.Character,
     conditions: types.ConditionSet,
+    exhaustion_level: u3 = 0,
+    hunger: u16 = 100,
+    fatigue: u16 = 0,
+    sleeping: bool = false,
     current_hp: u32 = 0,
     max_hp: u32 = 0,
     damage_die: u8 = 0,
     is_monster: bool = false,
     heap_char_name: bool = false,
+    inventory: inventory.State = .init(),
+    ai_origin: loc.Loc = loc.Loc.init(0, 0),
+    ai_patrol_phase: u8 = 0,
+    last_move_dir: ?movement.Direction = null,
 };
 
 pub const EntityStore = struct {
@@ -31,6 +41,7 @@ pub const EntityStore = struct {
             if (ent.heap_char_name) allocator.free(ent.char.name);
             ent.char.attributes.deinit(allocator);
             allocator.destroy(ent.char);
+            ent.inventory.deinit(allocator);
             allocator.free(ent.name);
         }
         self.entities.deinit(allocator);
@@ -71,10 +82,11 @@ pub const EntityStore = struct {
         var i: usize = 0;
         while (i < self.entities.items.len) : (i += 1) {
             if (self.entities.items[i].id != id) continue;
-            const ent = self.entities.items[i];
+            const ent = &self.entities.items[i];
             if (ent.heap_char_name) allocator.free(ent.char.name);
             ent.char.attributes.deinit(allocator);
             allocator.destroy(ent.char);
+            ent.inventory.deinit(allocator);
             allocator.free(ent.name);
             _ = self.entities.swapRemove(i);
             return;

@@ -139,9 +139,12 @@ pub fn loadSlot(
     });
     defer parsed.deinit();
 
-    if (parsed.value.schema_version != save_state.schema_version) return error.UnsupportedSchema;
-
     var owned = parsed.value;
+    if (owned.schema_version == save_state.schema_version_v1) {
+        try save_state.migrateV1ToV2(&owned, allocator);
+    } else if (owned.schema_version != save_state.schema_version) {
+        return error.UnsupportedSchema;
+    }
     // parsed owns strings; transfer by moving into apply before deinit
     const restored = try save_state.apply(allocator, &owned);
 

@@ -3,6 +3,8 @@ const loc = @import("loc.zig");
 const world = @import("world.zig");
 const entity = @import("entity.zig");
 const terrain = @import("terrain.zig");
+const conditions = @import("conditions.zig");
+const perception = @import("perception.zig");
 
 
 pub fn renderViewport(w: *const world.World, center: loc.Loc, radius: u8, writer: anytype) !void {
@@ -65,8 +67,9 @@ pub fn formatVisibleEntities(
     var listed = false;
     for (w.store.entities.items) |ent| {
         if (ent.id == viewer_id) continue;
-        if (ent.current_hp == 0 or ent.conditions.has(.dead)) continue;
+        if (conditions.isDead(&ent)) continue;
         if (!inViewport(center, radius, ent.loc)) continue;
+        if (w.has_dungeon and !perception.hasLineOfSight(&w.terrain, center, ent.loc)) continue;
         if (!listed) {
             try writer.writeAll("visible:\n");
             listed = true;
@@ -89,7 +92,7 @@ pub fn renderLook(
     writer: anytype,
 ) !void {
     const ent = w.store.get(player_id) orelse return error.EntityNotFound;
-    if (ent.conditions.has(.blinded)) {
+    if (conditions.blocksLook(ent)) {
         try writer.print("You cannot see in this condition.\n", .{});
         return;
     }

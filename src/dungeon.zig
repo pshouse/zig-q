@@ -3,6 +3,7 @@ const loc = @import("loc.zig");
 const terrain = @import("terrain.zig");
 const rng = @import("rng.zig");
 const monsters = @import("monsters.zig");
+const items = @import("items.zig");
 
 const TileEntry = struct {
     x: u64,
@@ -246,6 +247,42 @@ pub fn planMonsterSpawns(world_seed: u64, floor_index: u32, spawn: loc.Loc) Mons
         count += 1;
     }
 
+    return .{ .spawns = list, .count = count };
+}
+
+pub const LootSpawn = struct {
+    item: items.Id,
+    position: loc.Loc,
+};
+
+pub const LootPlan = struct {
+    spawns: [4]LootSpawn,
+    count: usize,
+};
+
+pub fn planFloorLoot(
+    world_seed: u64,
+    floor_index: u32,
+    spawn: loc.Loc,
+    map: *const terrain.TerrainMap,
+) LootPlan {
+    var floor_rng = floorRng(world_seed, floor_index);
+    _ = floor_rng.nextU8();
+    _ = floor_rng.nextU8();
+    _ = floor_rng.nextU8();
+
+    var list: [4]LootSpawn = undefined;
+    var count: usize = 0;
+    const candidates = [_]items.Id{ .bandage, .antidote, .leather_armour };
+    var c: usize = 0;
+    while (c < candidates.len and count < list.len) : (c += 1) {
+        const offset_x: i64 = @intCast((floor_rng.nextU8() % 4) + 1);
+        const offset_y: i64 = @as(i64, @intCast(floor_rng.nextU8() % 4)) - 2;
+        const pos = offsetLoc(spawn, offset_x, offset_y);
+        if (!map.isWalkable(pos)) continue;
+        list[count] = .{ .item = candidates[c], .position = pos };
+        count += 1;
+    }
     return .{ .spawns = list, .count = count };
 }
 

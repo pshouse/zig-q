@@ -12,6 +12,12 @@ const sqlite_store = @import("sqlite_store.zig");
 const help_text = @import("help_text.zig");
 const dungeon = @import("dungeon.zig");
 const evidence_format = @import("evidence_format.zig");
+const conditions = @import("conditions.zig");
+const explore = @import("explore.zig");
+const items = @import("items.zig");
+const inventory = @import("inventory.zig");
+const world_objects = @import("world_objects.zig");
+const survival = @import("survival.zig");
 
 pub const Command = union(enum) {
     look,
@@ -38,6 +44,20 @@ pub const Command = union(enum) {
     load_slot: u32,
     load_usage,
     help_descend,
+    wait,
+    conditions_cmd,
+    inventory_cmd,
+    get_item: ?[]const u8,
+    drop_item: []const u8,
+    examine_item: []const u8,
+    equip_item: []const u8,
+    food,
+    food_item: []const u8,
+    rest,
+    sleep,
+    open_dir: movement.Direction,
+    close_dir: movement.Direction,
+    use_item: []const u8,
     unknown: []const u8,
 };
 
@@ -52,7 +72,7 @@ pub const Context = struct {
     draft: *session.CreationDraft,
     player_id: entity.EntityId = entity.invalid_id,
     save_path: []const u8 = sqlite_store.default_path,
-    help_profile: help_text.Profile = .repl,
+    help_profile: help_text.Profile = .repl_v11,
     look_list_nearby: bool = true,
 };
 
@@ -71,6 +91,38 @@ pub fn parseLine(line: []const u8) Command {
     if (std.mem.eql(u8, trimmed, "attack")) return .attack;
     if (std.mem.eql(u8, trimmed, "end turn")) return .end_turn;
     if (std.mem.eql(u8, trimmed, "descend")) return .descend;
+    if (std.mem.eql(u8, trimmed, "wait")) return .wait;
+    if (std.mem.eql(u8, trimmed, "food")) return .food;
+    if (std.mem.eql(u8, trimmed, "rest")) return .rest;
+    if (std.mem.eql(u8, trimmed, "sleep")) return .sleep;
+    if (std.mem.eql(u8, trimmed, "conditions")) return .conditions_cmd;
+    if (std.mem.eql(u8, trimmed, "inventory")) return .inventory_cmd;
+    if (std.mem.eql(u8, trimmed, "get")) return .{ .get_item = null };
+    if (std.mem.eql(u8, trimmed, "get from corpse")) return .{ .get_item = "corpse" };
+    if (std.mem.startsWith(u8, trimmed, "get ")) {
+        const arg = std.mem.trim(u8, trimmed[4..], " \t");
+        if (arg.len > 0) return .{ .get_item = arg };
+    }
+    if (std.mem.startsWith(u8, trimmed, "drop ")) {
+        const arg = std.mem.trim(u8, trimmed[5..], " \t");
+        if (arg.len > 0) return .{ .drop_item = arg };
+    }
+    if (std.mem.startsWith(u8, trimmed, "examine ")) {
+        const arg = std.mem.trim(u8, trimmed[8..], " \t");
+        if (arg.len > 0) return .{ .examine_item = arg };
+    }
+    if (std.mem.startsWith(u8, trimmed, "equip ")) {
+        const arg = std.mem.trim(u8, trimmed[6..], " \t");
+        if (arg.len > 0) return .{ .equip_item = arg };
+    }
+    if (std.mem.startsWith(u8, trimmed, "eat ")) {
+        const arg = std.mem.trim(u8, trimmed[4..], " \t");
+        if (arg.len > 0) return .{ .food_item = arg };
+    }
+    if (std.mem.startsWith(u8, trimmed, "food ")) {
+        const arg = std.mem.trim(u8, trimmed[5..], " \t");
+        if (arg.len > 0) return .{ .food_item = arg };
+    }
     if (std.mem.eql(u8, trimmed, "save")) return .save;
 
     if (std.mem.startsWith(u8, trimmed, "save ")) {
@@ -97,6 +149,19 @@ pub fn parseLine(line: []const u8) Command {
     if (std.mem.startsWith(u8, trimmed, "move ")) {
         const arg = std.mem.trim(u8, trimmed[5..], " \t");
         if (movement.Direction.parse(arg)) |dir| return .{ .move = dir };
+    }
+
+    if (std.mem.startsWith(u8, trimmed, "open ")) {
+        const arg = std.mem.trim(u8, trimmed[5..], " \t");
+        if (movement.Direction.parse(arg)) |dir| return .{ .open_dir = dir };
+    }
+    if (std.mem.startsWith(u8, trimmed, "close ")) {
+        const arg = std.mem.trim(u8, trimmed[6..], " \t");
+        if (movement.Direction.parse(arg)) |dir| return .{ .close_dir = dir };
+    }
+    if (std.mem.startsWith(u8, trimmed, "use ")) {
+        const arg = std.mem.trim(u8, trimmed[4..], " \t");
+        if (arg.len > 0) return .{ .use_item = arg };
     }
 
     if (std.mem.eql(u8, trimmed, "assign")) return .assign_usage;
@@ -140,8 +205,301 @@ fn parseOnePick(prefix: []const u8, trimmed: []const u8) ?usize {
     return std.fmt.parseInt(usize, arg, 10) catch null;
 }
 
+fn tileNearPlayer(w: *world.World, player_id: entity.EntityId, x: u64, y: u64) bool {
+    const player = w.store.get(player_id) orelse return false;
+    const dx = @as(i64, @intCast(player.loc.x)) - @as(i64, @intCast(x));
+    const dy = @as(i64, @intCast(player.loc.y)) - @as(i64, @intCast(y));
+    const adx: u64 = @intCast(if (dx < 0) -dx else dx);
+    const ady: u64 = @intCast(if (dy < 0) -dy else dy);
+    return adx + ady <= 1;
+}
+
+fn cmdInventory(ctx: *Context, writer: anytype) !Result {
+    const ent = ctx.w.store.get(ctx.player_id) orelse {
+        try writer.print("no player spawned\n", .{});
+        return .continue_repl;
+    };
+    try ent.inventory.format(writer);
+    return .continue_repl;
+}
+
+fn cmdGet(ctx: *Context, name: ?[]const u8, writer: anytype) !Result {
+    const ent = ctx.w.store.get(ctx.player_id) orelse {
+        try writer.print("no player spawned\n", .{});
+        return .continue_repl;
+    };
+    var picked: ?items.Id = null;
+    var remove_pos: ?loc.Loc = null;
+
+    if (name) |n| {
+        if (std.mem.eql(u8, n, "corpse")) {
+            for (ctx.w.floor_objects.objects.items) |*obj| {
+                if (obj.kind != .corpse) continue;
+                if (!tileNearPlayer(ctx.w, ctx.player_id, obj.x, obj.y)) continue;
+                if (obj.item) |loot| {
+                    picked = loot;
+                    remove_pos = loc.Loc.init(obj.x, obj.y);
+                    break;
+                }
+            }
+        } else if (items.parseId(n)) |id| {
+            picked = id;
+            for (ctx.w.floor_objects.objects.items) |*obj| {
+                if (obj.kind != .item and obj.kind != .corpse) continue;
+                if (obj.item != id) continue;
+                if (!tileNearPlayer(ctx.w, ctx.player_id, obj.x, obj.y)) continue;
+                remove_pos = loc.Loc.init(obj.x, obj.y);
+                break;
+            }
+        }
+    } else {
+        for (ctx.w.floor_objects.objects.items) |*obj| {
+            if (obj.kind != .item and obj.kind != .corpse) continue;
+            if (!tileNearPlayer(ctx.w, ctx.player_id, obj.x, obj.y)) continue;
+            if (obj.item) |loot| {
+                picked = loot;
+                remove_pos = loc.Loc.init(obj.x, obj.y);
+                break;
+            }
+        }
+    }
+
+    if (picked == null) {
+        try writer.print("nothing to pick up here\n", .{});
+        return .continue_repl;
+    }
+    try ent.inventory.add(ctx.allocator, picked.?, 1);
+    if (remove_pos) |pos| {
+        if (ctx.w.floor_objects.at(pos)) |obj| {
+            if (obj.kind == .corpse) {
+                obj.item = null;
+                ctx.w.floor_objects.removeAt(ctx.allocator, pos);
+            } else {
+                ctx.w.floor_objects.removeAt(ctx.allocator, pos);
+            }
+        }
+    }
+    try writer.print("picked up {s}\n", .{items.def(picked.?).name});
+    ctx.w.tickAction(1);
+    try finishExploreAction(ctx, writer);
+    return .continue_repl;
+}
+
+fn cmdDrop(ctx: *Context, name: []const u8, writer: anytype) !Result {
+    const ent = ctx.w.store.get(ctx.player_id) orelse {
+        try writer.print("no player spawned\n", .{});
+        return .continue_repl;
+    };
+    const id = items.parseId(name) orelse {
+        try writer.print("unknown item\n", .{});
+        return .continue_repl;
+    };
+    if (!ent.inventory.remove(id, 1)) {
+        try writer.print("you do not have that item\n", .{});
+        return .continue_repl;
+    }
+    try ctx.w.floor_objects.addItem(ctx.allocator, .item, ent.loc, items.idTag(id), id);
+    try writer.print("dropped {s}\n", .{items.def(id).name});
+    ctx.w.tickAction(1);
+    try finishExploreAction(ctx, writer);
+    return .continue_repl;
+}
+
+fn cmdExamine(_: *Context, name: []const u8, writer: anytype) !Result {
+    const id = items.parseId(name) orelse {
+        try writer.print("unknown item\n", .{});
+        return .continue_repl;
+    };
+    const d = items.def(id);
+    try writer.print("{s}: weight={} category={s}", .{ d.name, d.weight, @tagName(d.category) });
+    if (d.damage_die > 0) try writer.print(" damage=d{}", .{d.damage_die});
+    if (d.ac_bonus > 0) try writer.print(" ac_bonus={}", .{d.ac_bonus});
+    if (d.trait != .none) try writer.print(" trait={s}", .{@tagName(d.trait)});
+    try writer.writeAll("\n");
+    return .continue_repl;
+}
+
+fn cmdEquip(ctx: *Context, name: []const u8, writer: anytype) !Result {
+    const ent = ctx.w.store.get(ctx.player_id) orelse {
+        try writer.print("no player spawned\n", .{});
+        return .continue_repl;
+    };
+    const id = items.parseId(name) orelse {
+        try writer.print("unknown item\n", .{});
+        return .continue_repl;
+    };
+    if (!ent.inventory.has(id)) {
+        try writer.print("you do not have that item\n", .{});
+        return .continue_repl;
+    }
+    const d = items.def(id);
+    switch (d.category) {
+        .weapon => ent.inventory.weapon = id,
+        .armour => {
+            if (!inventory.State.classProficient(ent, id)) {
+                try writer.print("not proficient with {s}\n", .{d.name});
+                return .continue_repl;
+            }
+            ent.inventory.armour = id;
+        },
+        .shield => ent.inventory.shield = id,
+        .consumable => {
+            try writer.print("cannot equip consumable\n", .{});
+            return .continue_repl;
+        },
+    }
+    try writer.print("equipped {s}\n", .{d.name});
+    return .continue_repl;
+}
+
+fn cmdFood(ctx: *Context, name: ?[]const u8, writer: anytype) !Result {
+    const ent = ctx.w.store.get(ctx.player_id) orelse {
+        try writer.print("no player spawned\n", .{});
+        return .continue_repl;
+    };
+    var food_id: ?items.Id = null;
+    if (name) |n| {
+        food_id = items.parseId(n);
+    } else {
+        for (ent.inventory.bag.items) |stack| {
+            const d = items.def(stack.id);
+            if (d.category == .consumable and d.is_food) {
+                food_id = stack.id;
+                break;
+            }
+        }
+    }
+    const id = food_id orelse {
+        try writer.print("no food available\n", .{});
+        return .continue_repl;
+    };
+    const d = items.def(id);
+    if (!d.is_food) {
+        try writer.print("{s} is not food\n", .{d.name});
+        return .continue_repl;
+    }
+    if (!ent.inventory.has(id)) {
+        try writer.print("you do not have {s}\n", .{d.name});
+        return .continue_repl;
+    }
+    _ = ent.inventory.remove(id, 1);
+    _ = survival.eatFood(ent, id);
+    ctx.w.tickAction(1);
+    try writer.print("ate {s} hunger={}\n", .{ d.name, ent.hunger });
+    return .continue_repl;
+}
+
+fn cmdRest(ctx: *Context, writer: anytype) !Result {
+    const ent = ctx.w.store.get(ctx.player_id) orelse {
+        try writer.print("no player spawned\n", .{});
+        return .continue_repl;
+    };
+    if (combat.isInCombat(ctx.w)) {
+        try writer.print("cannot rest during combat\n", .{});
+        return .continue_repl;
+    }
+    if (conditions.blocksMove(ent)) {
+        try writer.print("cannot rest while incapacitated\n", .{});
+        return .continue_repl;
+    }
+    var i: u32 = 0;
+    while (i < survival.rest_ticks) : (i += 1) {
+        ctx.w.tickAction(1);
+        if (combat.isInCombat(ctx.w)) {
+            try writer.print("rest interrupted by combat\n", .{});
+            return .continue_repl;
+        }
+    }
+    if (ent.fatigue >= survival.fatigue_restore_rest) {
+        ent.fatigue -= survival.fatigue_restore_rest;
+    } else {
+        ent.fatigue = 0;
+    }
+    survival.syncExhaustion(ent);
+    try writer.print("rested (ticks={} fatigue={})\n", .{ ctx.w.game_clock.ticks, ent.fatigue });
+    return .continue_repl;
+}
+
+fn cmdSleep(ctx: *Context, writer: anytype) !Result {
+    const ent = ctx.w.store.get(ctx.player_id) orelse {
+        try writer.print("no player spawned\n", .{});
+        return .continue_repl;
+    };
+    if (combat.isInCombat(ctx.w)) {
+        try writer.print("cannot sleep during combat\n", .{});
+        return .continue_repl;
+    }
+    if (conditions.blocksMove(ent) and !ent.sleeping) {
+        try writer.print("cannot sleep while incapacitated\n", .{});
+        return .continue_repl;
+    }
+    ent.sleeping = true;
+    conditions.apply(ent, .unconscious);
+    try writer.print("sleeping (unconscious)\n", .{});
+    var i: u32 = 0;
+    while (i < survival.sleep_ticks) : (i += 1) {
+        ctx.w.tickAction(1);
+        if (combat.isInCombat(ctx.w)) {
+            ent.sleeping = false;
+            conditions.remove(ent, .unconscious);
+            survival.syncExhaustion(ent);
+            try writer.print("sleep interrupted by combat (interrupt rule: ambush ends sleep)\n", .{});
+            return .continue_repl;
+        }
+    }
+    ent.sleeping = false;
+    ent.fatigue = 0;
+    conditions.remove(ent, .unconscious);
+    survival.syncExhaustion(ent);
+    try writer.print("slept (ticks={} fatigue=0)\n", .{ ctx.w.game_clock.ticks });
+    return .continue_repl;
+}
+
 fn isSpawned(ctx: *const Context) bool {
     return ctx.player_id != entity.invalid_id;
+}
+
+fn finishExploreAction(ctx: *Context, writer: anytype) !void {
+    if (combat.isInCombat(ctx.w)) return;
+    if (try explore.afterPlayerExploreAction(ctx.w, ctx.player_id)) {
+        try writer.print("ambush combat started\n", .{});
+    }
+}
+
+fn finishExploreMove(ctx: *Context, writer: anytype) !void {
+    if (combat.isInCombat(ctx.w)) return;
+    if (ctx.w.floor_index == 1) {
+        try finishExploreAction(ctx, writer);
+    }
+}
+
+fn cmdUse(ctx: *Context, name: []const u8, writer: anytype) !Result {
+    const ent = ctx.w.store.get(ctx.player_id) orelse {
+        try writer.print("no player spawned\n", .{});
+        return .continue_repl;
+    };
+    const id = items.parseId(name) orelse {
+        try writer.print("unknown item\n", .{});
+        return .continue_repl;
+    };
+    if (!ent.inventory.has(id)) {
+        try writer.print("you do not have that item\n", .{});
+        return .continue_repl;
+    }
+    if (id == .antidote) {
+        if (!conditions.has(ent, .poisoned)) {
+            try writer.print("you are not poisoned\n", .{});
+            return .continue_repl;
+        }
+        _ = ent.inventory.remove(id, 1);
+        conditions.remove(ent, .poisoned);
+        try writer.print("used antidote; poison cleared\n", .{});
+        ctx.w.tickAction(1);
+        try finishExploreAction(ctx, writer);
+        return .continue_repl;
+    }
+    try writer.print("cannot use {s} here\n", .{items.def(id).name});
+    return .continue_repl;
 }
 
 fn rejectCreationAfterSpawn(ctx: *const Context, writer: anytype, verb: []const u8) !bool {
@@ -258,6 +616,15 @@ pub fn executeLine(ctx: *Context, line: []const u8, writer: anytype) !Result {
 }
 
 pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
+    if (ctx.w.isPlayerDead()) {
+        switch (cmd) {
+            .exit, .stats, .conditions_cmd, .inventory_cmd, .examine_item => {},
+            else => {
+                try writer.print("you are dead (permadeath)\n", .{});
+                return .continue_repl;
+            },
+        }
+    }
     switch (cmd) {
         .look => {
             const ent = ctx.w.store.get(ctx.player_id) orelse {
@@ -268,10 +635,14 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
             try map_render.renderLook(ctx.w, ctx.player_id, ctx.look_list_nearby, writer);
         },
         .time => {
-            try writer.print("time ticks={} time_of_day={d:.4}\n", .{
+            try writer.print("time ticks={} time_of_day={d:.4} ", .{
                 ctx.w.game_clock.ticks,
                 ctx.w.game_clock.time_of_day,
             });
+            if (ctx.w.store.get(ctx.player_id)) |ent| {
+                try survival.formatMeters(ent, writer);
+            }
+            try writer.writeAll("\n");
         },
         .move => |dir| {
             if (ctx.w.store.get(ctx.player_id) == null) {
@@ -288,6 +659,12 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                     return .continue_repl;
                 }
             }
+            if (ctx.w.store.get(ctx.player_id)) |ent| {
+                if (ent.inventory.blocksMove(ent)) {
+                    try writer.print("You are too encumbered to move.\n", .{});
+                    return .continue_repl;
+                }
+            }
             const new_loc = movement.moveEntity(ctx.w, ctx.player_id, dir) catch |err| switch (err) {
                 error.Blocked => {
                     try writer.print("You cannot move there.\n", .{});
@@ -296,7 +673,70 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                 else => |e| return e,
             };
             try writer.print("moved to ({},{})\n", .{ new_loc.x, new_loc.y });
+            if (explore.checkStepTraps(ctx.w, ctx.player_id)) {
+                try writer.print("trap triggered: poisoned\n", .{});
+            }
+            try finishExploreMove(ctx, writer);
         },
+        .wait => {
+            if (ctx.w.store.get(ctx.player_id) == null) {
+                try writer.print("no player spawned\n", .{});
+                return .continue_repl;
+            }
+            ctx.w.tickAction(1);
+            try writer.print("waited (ticks={})\n", .{ctx.w.game_clock.ticks});
+            try finishExploreAction(ctx, writer);
+        },
+        .open_dir => |dir| {
+            if (ctx.w.store.get(ctx.player_id) == null) {
+                try writer.print("no player spawned\n", .{});
+                return .continue_repl;
+            }
+            if (explore.tryOpenDoor(ctx.w, ctx.player_id, dir)) {
+                try writer.print("opened door to the {s}\n", .{movement.Direction.token(dir)});
+            } else |err| switch (err) {
+                error.NotADoor => try writer.print("no door there\n", .{}),
+                error.AlreadyOpen => try writer.print("door already open\n", .{}),
+                error.DoorLocked => try writer.print("door is locked\n", .{}),
+                else => |e| return e,
+            }
+            ctx.w.tickAction(1);
+            try finishExploreAction(ctx, writer);
+        },
+        .close_dir => |dir| {
+            if (ctx.w.store.get(ctx.player_id) == null) {
+                try writer.print("no player spawned\n", .{});
+                return .continue_repl;
+            }
+            if (explore.tryCloseDoor(ctx.w, ctx.player_id, dir)) {
+                try writer.print("closed door to the {s}\n", .{movement.Direction.token(dir)});
+            } else |err| switch (err) {
+                error.NotADoor => try writer.print("no door there\n", .{}),
+                error.AlreadyClosed => try writer.print("door already closed\n", .{}),
+                else => |e| return e,
+            }
+            ctx.w.tickAction(1);
+            try finishExploreAction(ctx, writer);
+        },
+        .use_item => |name| return cmdUse(ctx, name, writer),
+        .conditions_cmd => {
+            const ent = ctx.w.store.get(ctx.player_id) orelse {
+                try writer.print("no player spawned\n", .{});
+                return .continue_repl;
+            };
+            try writer.writeAll("conditions: ");
+            try conditions.formatList(ent, writer);
+            try writer.writeAll("\n");
+        },
+        .inventory_cmd => return cmdInventory(ctx, writer),
+        .get_item => |name| return cmdGet(ctx, name, writer),
+        .drop_item => |name| return cmdDrop(ctx, name, writer),
+        .examine_item => |name| return cmdExamine(ctx, name, writer),
+        .equip_item => |name| return cmdEquip(ctx, name, writer),
+        .food => return cmdFood(ctx, null, writer),
+        .food_item => |name| return cmdFood(ctx, name, writer),
+        .rest => return cmdRest(ctx, writer),
+        .sleep => return cmdSleep(ctx, writer),
         .roll => {
             if (try rejectCreationAfterSpawn(ctx, writer, "roll")) return .continue_repl;
             const pool = session.draftRoll(ctx.w, ctx.draft);
@@ -373,7 +813,29 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
         },
         .stats => {
             if (ctx.w.store.get(ctx.player_id)) |ent| {
-                try character.formatStats(ent.char, writer);
+                if (!ent.is_monster) {
+                    try writer.print("character {s} race={s} class={s}\n", .{
+                        ent.char.name,
+                        ent.char.race.name,
+                        ent.char.class.name,
+                    });
+                    for (ent.char.attributes.items) |attr| {
+                        try writer.print("{s}: {}\n", .{ attr.abbr, attr.stat });
+                    }
+                    try writer.print("HP: {}\n", .{ ent.current_hp });
+                    try writer.print("AC: {}\n", .{inventory.State.playerAc(&ent.inventory, ent)});
+                    try writer.print("movement: {}\n", .{inventory.State.effectiveMovement(&ent.inventory, ent)});
+                    const cap = inventory.State.carryCapacity(character.statByAbbr(ent.char, "STR"));
+                    try writer.print("encumbrance: {} of {}\n", .{ ent.inventory.totalWeight(), cap });
+                } else {
+                    try character.formatStats(ent.char, writer);
+                }
+                if (conditions.hasActive(ent)) {
+                    try writer.writeAll("conditions: ");
+                    try conditions.formatList(ent, writer);
+                    try writer.writeAll("\n");
+                }
+                if (ctx.w.isPlayerDead()) try writer.writeAll("status: dead (permadeath)\n");
             } else {
                 character.formatDraftStats(ctx.allocator, ctx.w, ctx.draft, writer) catch |err| switch (err) {
                     error.IncompleteDraft => {

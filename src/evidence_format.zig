@@ -1,6 +1,39 @@
-//! Shared numeric evidence lines for generator/descend verification.
+//! Shared evidence formatting and marker checks for verification transcripts.
 const std = @import("std");
 const dungeon = @import("dungeon.zig");
+const dst = @import("dst.zig");
+const version = @import("version.zig");
+
+pub fn runScenario(
+    allocator: std.mem.Allocator,
+    name: []const u8,
+    seed: u64,
+    buf: []u8,
+    gate: version.GateConfig,
+) ![]const u8 {
+    const semver = gate.semverForScenario(name);
+    var fbs = std.io.fixedBufferStream(buf);
+    try dst.runNamedScenario(allocator, name, seed, fbs.writer(), semver);
+    return fbs.getWritten();
+}
+
+pub fn marker(writer: anytype, label: []const u8, haystack: []const u8, needle: []const u8) !void {
+    const found = std.mem.indexOf(u8, haystack, needle) != null;
+    try writer.print("marker {s}: {}\n", .{ label, found });
+}
+
+pub fn markerAbsent(writer: anytype, label: []const u8, haystack: []const u8, needle: []const u8) !void {
+    const absent = std.mem.indexOf(u8, haystack, needle) == null;
+    try writer.print("marker {s}: {}\n", .{ label, absent });
+}
+
+pub fn expectMarkerTrue(haystack: []const u8, needle: []const u8) !void {
+    try std.testing.expect(std.mem.indexOf(u8, haystack, needle) != null);
+}
+
+pub fn expectMarkerLineTrue(haystack: []const u8, line_needle: []const u8) !void {
+    try std.testing.expect(std.mem.indexOf(u8, haystack, line_needle) != null);
+}
 
 pub fn formatLayoutEvidence(
     buf: []u8,
