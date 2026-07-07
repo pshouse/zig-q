@@ -56,7 +56,7 @@ pub fn moveEntity(w: *world.World, id: entity.EntityId, dir: Direction) !loc.Loc
             if (tile == .door and w.doors.blocksAt(&w.terrain, new_loc)) return error.Blocked;
         }
     }
-    if (w.tile_map.isBlockedFor(new_loc, id)) return error.Blocked;
+    if (w.isTileBlockedFor(new_loc, id)) return error.Blocked;
 
     w.tile_map.remove(old_loc, id);
     try w.tile_map.place(new_loc, id);
@@ -104,6 +104,34 @@ test "moveEntity rejects dungeon wall" {
 
     const id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
     try std.testing.expectError(error.Blocked, moveEntity(&w, id, .north));
+}
+
+test "moveEntity allows stepping onto corpse floor object" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+
+    const id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    try w.floor_objects.addItem(allocator, .corpse, loc.Loc.init(50, 49), "goblin_0", null);
+
+    const new_loc = try moveEntity(&w, id, .south);
+    try std.testing.expectEqual(loc.Loc.init(50, 49), new_loc);
+}
+
+test "moveEntity ignores dead entity still listed on tile map" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    const monster_id = try w.spawnMonster(@import("monsters.zig").Kind.goblin, loc.Loc.init(50, 49), "goblin_0");
+    const monster = w.store.get(monster_id).?;
+    @import("conditions.zig").markDead(monster);
+
+    const new_loc = try moveEntity(&w, player_id, .south);
+    try std.testing.expectEqual(loc.Loc.init(50, 49), new_loc);
 }
 
 test "moveEntity rejects blocked tile" {

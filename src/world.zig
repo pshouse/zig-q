@@ -240,6 +240,19 @@ pub const World = struct {
         return self.spawnPlayer(char, position, "entity_0");
     }
 
+    /// Living entities block movement; corpses (floor objects) and dead entities do not.
+    pub fn isTileBlockedFor(self: *const World, position: loc.Loc, mover_id: entity.EntityId) bool {
+        const list = self.tile_map.cells.get(position) orelse return false;
+        for (list.items) |eid| {
+            if (eid == mover_id) continue;
+            if (self.store.get(eid)) |ent| {
+                if (conditions.isDead(ent)) continue;
+            }
+            return true;
+        }
+        return false;
+    }
+
     pub fn tick(self: *World) void {
         self.game_clock.tick();
         for (self.store.entities.items) |*ent| {

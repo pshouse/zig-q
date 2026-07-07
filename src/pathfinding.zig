@@ -27,7 +27,7 @@ fn isPassableToward(
             if (tile == .door and w.doors.blocksAt(&w.terrain, at)) return false;
         }
     }
-    if (w.tile_map.isBlockedFor(at, mover_id)) return false;
+    if (w.isTileBlockedFor(at, mover_id)) return false;
     return true;
 }
 

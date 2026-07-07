@@ -310,6 +310,7 @@ pub fn performAttack(
             try writer.print("{s} is slain\n", .{target.name});
             if (target.is_monster) {
                 w.spawnCorpse(target.name, target.loc) catch {};
+                w.tile_map.remove(target.loc, target.id);
             } else if (w.combat) |c| {
                 if (target.id == c.player_id) w.markPlayerDead(c.player_id);
             }
