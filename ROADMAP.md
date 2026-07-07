@@ -247,6 +247,14 @@ DST `playthrough` runs without `unknown command` for these inputs. Harvested tra
 
 ---
 
+## Backlog (post-1.4)
+
+| Idea | Notes |
+|------|--------|
+| **Skeleton bones loot** | Skeleton corpses (`skeleton_*`) currently hold no item; goblins drop `short_sword`. Add mundane `bones` (light weight) lootable via `get from corpse` / `loot`. **Defer until a use exists** — junk-without-sink is poor UX. Candidate mundane sinks: trap bait (distraction), `rest` combo with `bandage`, future trade/shrine turn-in. Fits no-magic rules; no implement-before-use. |
+
+---
+
 ## Release gate (every v1.x)
 
 1. `zig build` / `zig build test` / `zig build consumer-test`
