@@ -1,9 +1,9 @@
-//! In-repo release gate runner for v1.1–v1.4 verification captures.
+//! In-repo release gate runner for v1.1–v1.5 verification captures.
 //! Invokes real `zig build` subcommands per plan verification steps.
 const std = @import("std");
 const version = @import("version.zig");
 
-pub const default_scratch = "C:\\Users\\admin\\AppData\\Local\\Temp\\grok-goal-ed9bbd58ab86\\implementer";
+pub const default_scratch = "C:\\Users\\admin\\AppData\\Local\\Temp\\grok-goal-1322f48c036d\\implementer";
 
 pub const WavePlan = struct {
     wave: u8,
@@ -74,6 +74,22 @@ pub const plans = [_]WavePlan{
         },
         .run_migration = false,
     },
+    .{
+        .wave = 15,
+        .prefix = "v15",
+        .evidence_step = "evidence-v15",
+        .new_scenarios = &.{
+            "heal_bandage", "trap_floor", "deep_floor", "reference_crawl",
+        },
+        .all_scenarios = &.{
+            "bootstrap", "explore", "create", "crawl_start", "playthrough", "brawl", "save_roundtrip",
+            "descend_crawl", "reference_crawl", "save_v2_roundtrip", "conditions_brawl", "los_peek",
+            "ambush", "permadeath", "loot_roundtrip", "geared_brawl", "corpse_loot", "encumbered",
+            "hunt", "flee", "trap_trigger", "door_route", "survive", "starve", "sleep_cycle",
+            "reference_survive", "heal_bandage", "trap_floor", "deep_floor",
+        },
+        .run_migration = false,
+    },
 };
 
 pub const Options = struct {
@@ -119,8 +135,12 @@ pub fn appendVerificationFooter(
     defer allocator.free(wave_footer_path);
     try writeCapture(wave_footer_path, footer);
 
-    if (summary.wave == 11) {
-        const header = try std.fmt.allocPrint(allocator, "=== zig-q 1.x gate verification ===\n", .{});
+    const verify_exists = std.fs.cwd().access(verify_path, .{}) == .{};
+    if (summary.wave == 11 or !verify_exists) {
+        const header = if (summary.wave == 11)
+            try std.fmt.allocPrint(allocator, "=== zig-q 1.x gate verification ===\n", .{})
+        else
+            try allocator.dupe(u8, "");
         defer allocator.free(header);
         const file = try std.fs.cwd().createFile(verify_path, .{});
         defer file.close();
@@ -135,10 +155,12 @@ pub fn appendVerificationFooter(
         try file.writeAll("\n");
     }
 
-    if (summary.wave == 14) {
+    if (summary.wave == 14 or summary.wave == 15) {
         var hash_match = true;
         var first_hash: ?[64]u8 = null;
-        const prefixes = [_][]const u8{ "v11", "v12", "v13", "v14" };
+        const prefixes_v14 = [_][]const u8{ "v11", "v12", "v13", "v14" };
+        const prefixes_v15 = [_][]const u8{ "v11", "v12", "v13", "v14", "v15" };
+        const prefixes: []const []const u8 = if (summary.wave == 15) &prefixes_v15 else &prefixes_v14;
         for (prefixes) |prefix| {
             const leaf = try std.fmt.allocPrint(allocator, "{s}_dst_reference_crawl_a.txt", .{prefix});
             defer allocator.free(leaf);
@@ -157,8 +179,9 @@ pub fn appendVerificationFooter(
                 first_hash = h;
             }
         }
+        const cross_label = if (summary.wave == 15) "v11==v12==v13==v14==v15" else "v11==v12==v13==v14";
         const cross = if (hash_match and first_hash != null)
-            try std.fmt.allocPrint(allocator, "cross_wave_reference: v11==v12==v13==v14 ref_hash={s}\n", .{first_hash.?[0..]})
+            try std.fmt.allocPrint(allocator, "cross_wave_reference: {s} ref_hash={s}\n", .{ cross_label, first_hash.?[0..] })
         else
             try std.fmt.allocPrint(allocator, "cross_wave_reference: MISMATCH\n", .{});
         defer allocator.free(cross);
@@ -543,9 +566,9 @@ pub fn runWave(
     };
 }
 
-test "planForWave covers v11-v14" {
+test "planForWave covers v11-v15" {
     try std.testing.expect(planForWave(11) != null);
-    try std.testing.expect(planForWave(14) != null);
+    try std.testing.expect(planForWave(15) != null);
     try std.testing.expect(planForWave(9) == null);
 }
 

@@ -685,6 +685,24 @@ fn cmdUse(ctx: *Context, name: []const u8, writer: anytype) !Result {
         try finishExploreAction(ctx, writer);
         return .continue_repl;
     }
+    if (id == .bandage) {
+        if (combat.isInCombat(ctx.w)) {
+            try writer.print("cannot use bandage during combat\n", .{});
+            return .continue_repl;
+        }
+        if (ent.current_hp >= ent.max_hp) {
+            try writer.print("you are not wounded\n", .{});
+            return .continue_repl;
+        }
+        _ = ent.inventory.remove(id, 1);
+        const room = ent.max_hp - ent.current_hp;
+        const applied = @min(items.bandage_heal, room);
+        ent.current_hp += applied;
+        try writer.print("used bandage; healed {} hp\n", .{applied});
+        try tickPlayerAction(ctx, 1, writer);
+        try finishExploreAction(ctx, writer);
+        return .continue_repl;
+    }
     try writer.print("cannot use {s} here\n", .{items.def(id).name});
     return .continue_repl;
 }
@@ -1578,6 +1596,27 @@ test "descend via execute from normal spawn reaches floor 2" {
         if (ent.is_monster) monster_count += 1;
     }
     evidence_format.printDescendEvidence(w.floor_index, gen.layout_hash, gen.walkable_count, monster_count);
+}
+
+test "use bandage via execute heals wounded player and consumes item" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+
+    var ctx = try descendTestCtx(allocator, &w);
+    const ent = w.store.get(ctx.player_id).?;
+    try ent.inventory.add(allocator, .bandage, 1);
+    const max_hp = ent.max_hp;
+    ent.current_hp = max_hp - 3;
+
+    var buf: [512]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("use bandage"), fbs.writer());
+    const out = fbs.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, out, "used bandage; healed") != null);
+    try std.testing.expectEqual(max_hp, ent.current_hp);
+    try std.testing.expect(!ent.inventory.has(.bandage));
 }
 
 test "descend blocked during combat via execute" {

@@ -84,6 +84,20 @@ pub fn floorRng(world_seed: u64, floor_index: u32) rng.SeededRng {
     return rng.SeededRng.init(floorSeed(world_seed, floor_index));
 }
 
+fn trapSeed(world_seed: u64, floor_index: u32) u64 {
+    return floorSeed(world_seed, floor_index) ^ 0xD1572A9B1E5F00D5;
+}
+
+pub fn trapRng(world_seed: u64, floor_index: u32) rng.SeededRng {
+    return rng.SeededRng.init(trapSeed(world_seed, floor_index));
+}
+
+/// Depth tier for generated floors (0 on floor 1–2 baseline).
+fn depthTier(floor_index: u32) u32 {
+    if (floor_index < 2) return 0;
+    return @min(floor_index - 2, 6);
+}
+
 pub const GeneratedFloor = struct {
     spawn: loc.Loc,
     stairs_down: ?loc.Loc,
@@ -219,7 +233,9 @@ pub fn planMonsterSpawns(world_seed: u64, floor_index: u32, spawn: loc.Loc) Mons
     var list: [4]MonsterSpawn = undefined;
     var count: usize = 0;
 
-    const goblin_count = 1 + (floor_rng.nextU8() % 2);
+    const tier = depthTier(floor_index);
+    const goblin_cap: u8 = @intCast(2 + tier / 2);
+    const goblin_count = 1 + (floor_rng.nextU8() % goblin_cap);
     var g: u8 = 0;
     while (g < goblin_count and count < list.len) : (g += 1) {
         const offset_x: i64 = @intCast((floor_rng.nextU8() % 3) + 1);
@@ -236,7 +252,9 @@ pub fn planMonsterSpawns(world_seed: u64, floor_index: u32, spawn: loc.Loc) Mons
         count += 1;
     }
 
-    if ((floor_rng.nextU8() % 2) == 0 and count < list.len) {
+    const skel_roll = floor_rng.nextU8();
+    const add_skeleton = (skel_roll % 2) == 0 or (tier >= 2 and (skel_roll % 4) == 0);
+    if (add_skeleton and count < list.len) {
         const offset_x: i64 = -@as(i64, @intCast((floor_rng.nextU8() % 2) + 1));
         const offset_y: i64 = @intCast(floor_rng.nextU8() % 2);
         list[count] = .{
@@ -256,7 +274,7 @@ pub const LootSpawn = struct {
 };
 
 pub const LootPlan = struct {
-    spawns: [4]LootSpawn,
+    spawns: [8]LootSpawn,
     count: usize,
 };
 
@@ -271,7 +289,7 @@ pub fn planFloorLoot(
     _ = floor_rng.nextU8();
     _ = floor_rng.nextU8();
 
-    var list: [4]LootSpawn = undefined;
+    var list: [8]LootSpawn = undefined;
     var count: usize = 0;
     const candidates = [_]items.Id{ .bandage, .antidote, .rations, .leather_armour };
     var c: usize = 0;
@@ -281,6 +299,61 @@ pub fn planFloorLoot(
         const pos = offsetLoc(spawn, offset_x, offset_y);
         if (!map.isWalkable(pos)) continue;
         list[count] = .{ .item = candidates[c], .position = pos };
+        count += 1;
+    }
+
+    const tier = depthTier(floor_index);
+    var extra: usize = 0;
+    while (extra < tier and count < list.len) : (extra += 1) {
+        const pick = floor_rng.nextU8() % @as(u8, @intCast(candidates.len));
+        const offset_x: i64 = @intCast((floor_rng.nextU8() % 5) + 2);
+        const offset_y: i64 = @as(i64, @intCast(floor_rng.nextU8() % 5)) - 2;
+        const pos = offsetLoc(spawn, offset_x, offset_y);
+        if (!map.isWalkable(pos)) continue;
+        list[count] = .{ .item = candidates[pick], .position = pos };
+        count += 1;
+    }
+    return .{ .spawns = list, .count = count };
+}
+
+pub const TrapSpawn = struct {
+    label: []const u8,
+    position: loc.Loc,
+};
+
+pub const TrapPlan = struct {
+    spawns: [4]TrapSpawn,
+    count: usize,
+};
+
+pub fn planTrapSpawns(
+    world_seed: u64,
+    floor_index: u32,
+    spawn: loc.Loc,
+    map: *const terrain.TerrainMap,
+) TrapPlan {
+    if (floor_index < 2) return .{ .spawns = undefined, .count = 0 };
+
+    var trap_rng = trapRng(world_seed, floor_index);
+    const tier = depthTier(floor_index);
+    const trap_cap: u8 = @intCast(1 + tier / 2);
+    const trap_count = 1 + (trap_rng.nextU8() % trap_cap);
+
+    var list: [4]TrapSpawn = undefined;
+    var count: usize = 0;
+    var attempt: u8 = 0;
+    while (count < trap_count and attempt < 32) : (attempt += 1) {
+        const offset_x: i64 = @intCast((trap_rng.nextU8() % 6) + 1);
+        const offset_y: i64 = @as(i64, @intCast(trap_rng.nextU8() % 6)) - 3;
+        const pos = offsetLoc(spawn, offset_x, offset_y);
+        if (!map.isWalkable(pos)) continue;
+        if (pos.x == spawn.x and pos.y == spawn.y) continue;
+        var dup: usize = 0;
+        while (dup < count) : (dup += 1) {
+            if (list[dup].position.x == pos.x and list[dup].position.y == pos.y) break;
+        }
+        if (dup < count) continue;
+        list[count] = .{ .label = "poison_trap", .position = pos };
         count += 1;
     }
     return .{ .spawns = list, .count = count };
@@ -359,4 +432,45 @@ test "monster spawn plan is deterministic" {
     try std.testing.expectEqual(a.count, b.count);
     try std.testing.expectEqualStrings(a.spawns[0].name, b.spawns[0].name);
     try std.testing.expectEqual(a.spawns[0].position.x, b.spawns[0].position.x);
+}
+
+test "deeper floors scale monster and loot counts on seed 42" {
+    const allocator = std.testing.allocator;
+    var map = terrain.TerrainMap.init(allocator);
+    defer map.deinit();
+
+    const gen2 = try generateFloor(&map, 42, 2);
+    const gen5 = try generateFloor(&map, 42, 5);
+    const monsters2 = planMonsterSpawns(42, 2, gen2.spawn);
+    const monsters5 = planMonsterSpawns(42, 5, gen5.spawn);
+    const loot2 = planFloorLoot(42, 2, gen2.spawn, &map);
+    const loot5 = planFloorLoot(42, 5, gen5.spawn, &map);
+
+    try std.testing.expect(monsters5.count > monsters2.count or loot5.count > loot2.count);
+    try std.testing.expect(loot5.count > loot2.count);
+}
+
+test "trap spawn plan is deterministic and places poison traps" {
+    const allocator = std.testing.allocator;
+    var map = terrain.TerrainMap.init(allocator);
+    defer map.deinit();
+    const gen = try generateFloor(&map, 42, 2);
+
+    const a = planTrapSpawns(42, 2, gen.spawn, &map);
+    const b = planTrapSpawns(42, 2, gen.spawn, &map);
+    try std.testing.expect(a.count > 0);
+    try std.testing.expectEqual(a.count, b.count);
+    try std.testing.expectEqualStrings("poison_trap", a.spawns[0].label);
+    try std.testing.expect(map.isWalkable(a.spawns[0].position));
+    try std.testing.expectEqual(@as(u64, 53), a.spawns[0].position.x);
+    try std.testing.expectEqual(@as(u64, 51), a.spawns[0].position.y);
+}
+
+test "floor 1 has no trap plan" {
+    const allocator = std.testing.allocator;
+    var map = terrain.TerrainMap.init(allocator);
+    defer map.deinit();
+    try loadFloor1(&map, .v09);
+    const plan = planTrapSpawns(42, 1, floor1_spawn, &map);
+    try std.testing.expectEqual(@as(usize, 0), plan.count);
 }

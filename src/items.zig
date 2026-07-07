@@ -18,6 +18,9 @@ pub const Category = enum {
     consumable,
 };
 
+/// Flat HP restored by `use bandage` when wounded (explore only).
+pub const bandage_heal: u16 = 5;
+
 pub const Trait = enum {
     none,
     trip,
