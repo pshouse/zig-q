@@ -5,7 +5,8 @@ const world = @import("world.zig");
 const conditions = @import("conditions.zig");
 const items = @import("items.zig");
 
-pub const hunger_full: u16 = 100;
+/// Peak hunger (starving). Zero means sated.
+pub const hunger_max: u16 = 100;
 pub const fatigue_max: u16 = 100;
 
 pub const rest_ticks: u32 = 6;
@@ -15,7 +16,7 @@ pub const hunger_restore_food: u16 = 50;
 pub const fatigue_restore_rest: u16 = 30;
 
 pub fn initEntity(ent: *entity.Entity) void {
-    ent.hunger = hunger_full;
+    ent.hunger = 0;
     ent.fatigue = 0;
 }
 
@@ -28,9 +29,9 @@ pub fn effectiveMaxHp(ent: *const entity.Entity) u32 {
 }
 
 fn starvationExhaustion(hunger: u16) u3 {
-    if (hunger == 0) return 3;
-    if (hunger < 10) return 2;
-    if (hunger < 25) return 1;
+    if (hunger >= hunger_max) return 3;
+    if (hunger >= 90) return 2;
+    if (hunger >= 75) return 1;
     return 0;
 }
 
@@ -48,8 +49,8 @@ pub fn computeExhaustion(ent: *const entity.Entity) u3 {
     const from_hunger = starvationExhaustion(ent.hunger);
     const from_fatigue = fatigueExhaustion(ent.fatigue);
     var level: u32 = @max(from_hunger, from_fatigue);
-    // Prolonged starvation while hungry=0 escalates toward level 6.
-    if (ent.hunger == 0) {
+    // Prolonged starvation at peak hunger escalates toward level 6.
+    if (ent.hunger >= hunger_max) {
         level +%= @min(@as(u32, ent.fatigue) / 30, 3);
     }
     return @intCast(@min(level, 6));
@@ -68,7 +69,7 @@ pub fn syncExhaustion(ent: *entity.Entity) void {
 pub fn onTick(w: *world.World, ent: *entity.Entity) void {
     if (conditions.isDead(ent)) return;
 
-    if (ent.hunger > 0) ent.hunger -= 1;
+    if (ent.hunger < hunger_max) ent.hunger += 1;
     if (ent.fatigue < fatigue_max) ent.fatigue += 1;
 
     if (conditions.has(ent, .poisoned) and ent.current_hp > 0) {
@@ -100,8 +101,11 @@ fn clampHpToEffectiveMax(ent: *entity.Entity) void {
 pub fn eatFood(ent: *entity.Entity, id: items.Id) bool {
     const d = items.def(id);
     if (d.category != .consumable or !d.is_food) return false;
-    ent.hunger +%= d.food_restore;
-    if (ent.hunger > hunger_full) ent.hunger = hunger_full;
+    if (ent.hunger <= d.food_restore) {
+        ent.hunger = 0;
+    } else {
+        ent.hunger -= d.food_restore;
+    }
     syncExhaustion(ent);
     return true;
 }
@@ -120,7 +124,7 @@ test "starvation raises exhaustion" {
     ent.exhaustion_level = 0;
     ent.current_hp = 10;
     ent.max_hp = 10;
-    ent.hunger = 0;
+    ent.hunger = hunger_max;
     ent.fatigue = 0;
     ent.sleeping = false;
     syncExhaustion(&ent);
@@ -133,16 +137,31 @@ test "prolonged starvation reaches exhaustion 6" {
     ent.exhaustion_level = 0;
     ent.current_hp = 10;
     ent.max_hp = 10;
-    ent.hunger = 0;
+    ent.hunger = hunger_max;
     ent.fatigue = 90;
     ent.sleeping = false;
     syncExhaustion(&ent);
     try std.testing.expectEqual(@as(u3, 6), conditions.exhaustionLevel(&ent));
 }
 
-test "food restores hunger" {
-    var hunger: u16 = 10;
-    hunger +%= items.def(.rations).food_restore;
-    if (hunger > hunger_full) hunger = hunger_full;
-    try std.testing.expect(hunger >= 50);
+test "food reduces hunger" {
+    var hunger: u16 = 60;
+    const restore = items.def(.rations).food_restore;
+    if (hunger <= restore) hunger = 0 else hunger -= restore;
+    try std.testing.expectEqual(@as(u16, 10), hunger);
+}
+
+test "ticks increase hunger" {
+    var ent: entity.Entity = undefined;
+    ent.conditions = @import("types.zig").ConditionSet.initEmpty();
+    ent.exhaustion_level = 0;
+    ent.current_hp = 10;
+    ent.max_hp = 10;
+    ent.hunger = 0;
+    ent.fatigue = 0;
+    ent.sleeping = false;
+    var w: world.World = undefined;
+    w.combat = null;
+    onTick(&w, &ent);
+    try std.testing.expectEqual(@as(u16, 1), ent.hunger);
 }

@@ -142,7 +142,11 @@ pub fn loadSlot(
     var owned = parsed.value;
     if (owned.schema_version == save_state.schema_version_v1) {
         try save_state.migrateV1ToV2(&owned, allocator);
-    } else if (owned.schema_version != save_state.schema_version) {
+    }
+    if (owned.schema_version == save_state.schema_version_v2) {
+        save_state.migrateV2ToV3(&owned);
+    }
+    if (owned.schema_version != save_state.schema_version) {
         return error.UnsupportedSchema;
     }
     // parsed owns strings; transfer by moving into apply before deinit

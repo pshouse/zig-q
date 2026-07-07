@@ -15,7 +15,7 @@ pub const Entity = struct {
     char: *types.Character,
     conditions: types.ConditionSet,
     exhaustion_level: u3 = 0,
-    hunger: u16 = 100,
+    hunger: u16 = 0,
     fatigue: u16 = 0,
     sleeping: bool = false,
     current_hp: u32 = 0,

@@ -11,9 +11,11 @@ const conditions = @import("conditions.zig");
 const world_objects = @import("world_objects.zig");
 const inventory = @import("inventory.zig");
 const doors = @import("doors.zig");
+const survival = @import("survival.zig");
 
-pub const schema_version: u32 = 2;
+pub const schema_version: u32 = 3;
 pub const schema_version_v1: u32 = 1;
+pub const schema_version_v2: u32 = 2;
 
 pub const EntitySave = struct {
     id: entity.EntityId,
@@ -33,7 +35,7 @@ pub const EntitySave = struct {
     cha: u64,
     conditions_bits: u32,
     exhaustion_level: u3 = 0,
-    hunger: u16 = 100,
+    hunger: u16 = 0,
     fatigue: u16 = 0,
     sleeping: bool = false,
     current_hp: u32,
@@ -343,7 +345,7 @@ pub fn apply(allocator: std.mem.Allocator, save: *const WorldSave) !world.World 
 
 pub fn migrateV1ToV2(save: *WorldSave, allocator: std.mem.Allocator) !void {
     if (save.schema_version != schema_version_v1) return;
-    save.schema_version = schema_version;
+    save.schema_version = schema_version_v2;
     save.floor_objects = try allocator.alloc(world_objects.ObjectSave, 0);
     save.player_dead = false;
     for (save.entities) |*ent| {
@@ -352,6 +354,62 @@ pub fn migrateV1ToV2(save: *WorldSave, allocator: std.mem.Allocator) !void {
         ent.fatigue = 0;
         ent.sleeping = false;
     }
+}
+
+pub fn migrateV2ToV3(save: *WorldSave) void {
+    if (save.schema_version != schema_version_v2) return;
+    save.schema_version = schema_version;
+    for (save.entities) |*ent| {
+        ent.hunger = survival.hunger_max -% ent.hunger;
+    }
+}
+
+test "migrate v2 inverts hunger to rising scale" {
+    const ent_save = EntitySave{
+        .id = 0,
+        .name = "entity_0",
+        .x = 49,
+        .y = 49,
+        .movement = 30,
+        .char_name = "George",
+        .race_name = "dwarf",
+        .class_name = "barbarian",
+        .status = .exploring,
+        .str = 10,
+        .dex = 10,
+        .con = 10,
+        .int_stat = 10,
+        .wis = 10,
+        .cha = 10,
+        .conditions_bits = 0,
+        .current_hp = 10,
+        .max_hp = 10,
+        .damage_die = 0,
+        .is_monster = false,
+        .hunger = 5,
+    };
+    var entities = [_]EntitySave{ent_save};
+    var save = WorldSave{
+        .schema_version = schema_version_v2,
+        .seed = 42,
+        .rng_state = 1,
+        .rng_offset = 0,
+        .floor_index = 1,
+        .has_dungeon = true,
+        .clock_ticks = 0,
+        .clock_time_of_day = 0,
+        .clock_seconds_per_day = 120,
+        .clock_update_rate = 5,
+        .clock_time_multiplier = 1,
+        .next_entity_id = 1,
+        .player_id = 0,
+        .entities = entities[0..],
+        .map_cells = &.{},
+        .combat = null,
+    };
+    migrateV2ToV3(&save);
+    try std.testing.expectEqual(schema_version, save.schema_version);
+    try std.testing.expectEqual(@as(u16, 95), save.entities[0].hunger);
 }
 
 test "migrate v1 save adds v2 defaults" {
@@ -375,7 +433,7 @@ test "migrate v1 save adds v2 defaults" {
         .combat = null,
     };
     try migrateV1ToV2(&save, allocator);
-    try std.testing.expectEqual(schema_version, save.schema_version);
+    try std.testing.expectEqual(schema_version_v2, save.schema_version);
     try std.testing.expectEqual(@as(usize, 0), save.floor_objects.len);
     try std.testing.expect(!save.player_dead);
 }

@@ -457,7 +457,7 @@ pub const starve_scenario = Scenario{
         .{ .choose_class = 1 },
         .{ .creation_finish = "George" },
         .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
-        .{ .set_hunger = .{ .entity = "entity_0", .value = 0 } },
+        .{ .set_hunger = .{ .entity = "entity_0", .value = 100 } },
         .{ .tick = 3 },
         .{ .command = "time" },
         .{ .command = "move east" },
@@ -1291,7 +1291,7 @@ test "dst survive scenario is byte-identical across runs" {
 test "dst starve scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "starve", 131072);
-    try std.testing.expect(std.mem.indexOf(u8, out, "hunger=0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "hunger=100") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "exhaustion=3") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "moved to") != null);
 }

@@ -22,7 +22,7 @@ pub fn run(allocator: std.mem.Allocator, writer: anytype) !void {
     var starve_buf: [65536]u8 = undefined;
     const starve_out = try evidence_format.runScenario(allocator, "starve", 42, &starve_buf, gate);
     try writer.print("--- scenario starve ---\n", .{});
-    try evidence_format.marker(writer, "hunger=0", starve_out, "hunger=0");
+    try evidence_format.marker(writer, "hunger=100", starve_out, "hunger=100");
     try evidence_format.marker(writer, "exhaustion=3", starve_out, "exhaustion=3");
     try evidence_format.marker(writer, "moved to", starve_out, "moved to");
 
