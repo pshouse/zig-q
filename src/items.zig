@@ -53,7 +53,7 @@ pub fn def(id: Id) Def {
             .weight = 10,
             .category = .armour,
             .ac_bonus = 11,
-            .proficient_classes = &.{"fighter"},
+            .proficient_classes = &.{"fighter", "barbarian"},
         },
         .wooden_shield => .{
             .id = id,
@@ -101,6 +101,39 @@ pub fn parseId(name: []const u8) ?Id {
     return null;
 }
 
+pub fn parseCategory(name: []const u8) ?Category {
+    if (std.mem.eql(u8, name, "weapon")) return .weapon;
+    if (std.mem.eql(u8, name, "armour") or std.mem.eql(u8, name, "armor")) return .armour;
+    if (std.mem.eql(u8, name, "shield")) return .shield;
+    if (std.mem.eql(u8, name, "consumable")) return .consumable;
+    return null;
+}
+
+pub fn categoryLabel(cat: Category) []const u8 {
+    return switch (cat) {
+        .weapon => "weapon",
+        .armour => "armour",
+        .shield => "shield",
+        .consumable => "consumable",
+    };
+}
+
+pub fn printProficiencyHint(d: Def, player_class: []const u8, writer: anytype) !void {
+    if (d.proficient_classes.len == 0) return;
+    try writer.print(" (", .{});
+    for (d.proficient_classes, 0..) |class_name, i| {
+        if (i > 0) {
+            if (i == d.proficient_classes.len - 1) {
+                try writer.print(" or ", .{});
+            } else {
+                try writer.print(", ", .{});
+            }
+        }
+        try writer.print("{s}", .{class_name});
+    }
+    try writer.print(" only; you are {s})", .{player_class});
+}
+
 pub fn idTag(id: Id) []const u8 {
     return @tagName(id);
 }
@@ -108,4 +141,11 @@ pub fn idTag(id: Id) []const u8 {
 test "parse short sword aliases" {
     try std.testing.expectEqual(Id.short_sword, parseId("short_sword").?);
     try std.testing.expectEqual(Id.short_sword, parseId("short sword").?);
+}
+
+test "parse category aliases" {
+    try std.testing.expectEqual(Category.armour, parseCategory("armour").?);
+    try std.testing.expectEqual(Category.armour, parseCategory("armor").?);
+    try std.testing.expectEqual(Category.weapon, parseCategory("weapon").?);
+    try std.testing.expectEqual(Category.shield, parseCategory("shield").?);
 }

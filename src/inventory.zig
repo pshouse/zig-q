@@ -91,6 +91,31 @@ pub const State = struct {
         return false;
     }
 
+    pub const BagResolve = union(enum) {
+        found: items.Id,
+        unknown,
+        none_in_category: items.Category,
+        ambiguous: items.Category,
+    };
+
+    pub fn resolveBagItem(self: *const State, name: []const u8) BagResolve {
+        if (items.parseId(name)) |id| return .{ .found = id };
+        if (items.parseCategory(name)) |cat| {
+            var single: ?items.Id = null;
+            var count: usize = 0;
+            for (self.bag.items) |stack| {
+                if (stack.count == 0) continue;
+                if (items.def(stack.id).category != cat) continue;
+                count += 1;
+                single = stack.id;
+            }
+            if (count == 0) return .{ .none_in_category = cat };
+            if (count == 1) return .{ .found = single.? };
+            return .{ .ambiguous = cat };
+        }
+        return .unknown;
+    }
+
     pub fn classProficient(ent: *const entity.Entity, id: items.Id) bool {
         const d = items.def(id);
         if (d.proficient_classes.len == 0) return true;
@@ -199,4 +224,13 @@ test "total weight sums stacks" {
     defer state.deinit(std.testing.allocator);
     try state.add(std.testing.allocator, .leather_armour, 3);
     try std.testing.expectEqual(@as(u32, 30), state.totalWeight());
+}
+
+test "resolve bag item by category" {
+    var state = State.init();
+    defer state.deinit(std.testing.allocator);
+    try state.add(std.testing.allocator, .leather_armour, 1);
+    try std.testing.expectEqual(.leather_armour, state.resolveBagItem("armour").found);
+    try std.testing.expectEqual(.leather_armour, state.resolveBagItem("armor").found);
+    try std.testing.expect(state.resolveBagItem("weapon") == .none_in_category);
 }

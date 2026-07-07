@@ -305,6 +305,37 @@ fn cmdGet(ctx: *Context, name: ?[]const u8, writer: anytype) !Result {
     return .continue_repl;
 }
 
+fn printBagCategoryOptions(ent: *entity.Entity, cat: items.Category, writer: anytype) !void {
+    var first = true;
+    for (ent.inventory.bag.items) |stack| {
+        if (stack.count == 0) continue;
+        if (items.def(stack.id).category != cat) continue;
+        if (!first) try writer.print(", ", .{});
+        try writer.print("{s}", .{items.def(stack.id).name});
+        first = false;
+    }
+    try writer.print("\n", .{});
+}
+
+fn resolveBagItemOrPrint(ent: *entity.Entity, name: []const u8, writer: anytype) !?items.Id {
+    switch (ent.inventory.resolveBagItem(name)) {
+        .found => |id| return id,
+        .unknown => {
+            try writer.print("unknown item\n", .{});
+            return null;
+        },
+        .none_in_category => |cat| {
+            try writer.print("no {s} in inventory\n", .{items.categoryLabel(cat)});
+            return null;
+        },
+        .ambiguous => |cat| {
+            try writer.print("ambiguous {s}; specify: ", .{items.categoryLabel(cat)});
+            try printBagCategoryOptions(ent, cat, writer);
+            return null;
+        },
+    }
+}
+
 fn cmdDrop(ctx: *Context, name: []const u8, writer: anytype) !Result {
     if (combat.isInCombat(ctx.w)) {
         try writer.print("cannot drop during combat\n", .{});
@@ -314,10 +345,7 @@ fn cmdDrop(ctx: *Context, name: []const u8, writer: anytype) !Result {
         try writer.print("no player spawned\n", .{});
         return .continue_repl;
     };
-    const id = items.parseId(name) orelse {
-        try writer.print("unknown item\n", .{});
-        return .continue_repl;
-    };
+    const id = try resolveBagItemOrPrint(ent, name, writer) orelse return .continue_repl;
     if (!ent.inventory.remove(id, 1)) {
         try writer.print("you do not have that item\n", .{});
         return .continue_repl;
@@ -374,10 +402,7 @@ fn cmdEquip(ctx: *Context, name: []const u8, writer: anytype) !Result {
         try writer.print("no player spawned\n", .{});
         return .continue_repl;
     };
-    const id = items.parseId(name) orelse {
-        try writer.print("unknown item\n", .{});
-        return .continue_repl;
-    };
+    const id = try resolveBagItemOrPrint(ent, name, writer) orelse return .continue_repl;
     if (!ent.inventory.has(id)) {
         try writer.print("you do not have that item\n", .{});
         return .continue_repl;
@@ -387,7 +412,9 @@ fn cmdEquip(ctx: *Context, name: []const u8, writer: anytype) !Result {
         .weapon => ent.inventory.weapon = id,
         .armour => {
             if (!inventory.State.classProficient(ent, id)) {
-                try writer.print("not proficient with {s}\n", .{d.name});
+                try writer.print("not proficient with {s}", .{d.name});
+                try items.printProficiencyHint(d, ent.char.class.name, writer);
+                try writer.print("\n", .{});
                 return .continue_repl;
             }
             ent.inventory.armour = id;
@@ -528,10 +555,7 @@ fn cmdUse(ctx: *Context, name: []const u8, writer: anytype) !Result {
         try writer.print("no player spawned\n", .{});
         return .continue_repl;
     };
-    const id = items.parseId(name) orelse {
-        try writer.print("unknown item\n", .{});
-        return .continue_repl;
-    };
+    const id = try resolveBagItemOrPrint(ent, name, writer) orelse return .continue_repl;
     if (!ent.inventory.has(id)) {
         try writer.print("you do not have that item\n", .{});
         return .continue_repl;
@@ -1527,6 +1551,24 @@ test "get requires adjacent floor item" {
     _ = try execute(&ctx, parseLine("get leather armour"), fbs.writer());
     try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "nothing to pick up") != null);
     try std.testing.expect(w.floor_objects.at(loc.Loc.init(52, 49)) != null);
+}
+
+test "equip armour resolves category shorthand" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    var draft: session.CreationDraft = .{};
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    var ctx = Context{ .allocator = allocator, .w = &w, .draft = &draft, .player_id = player_id };
+    const ent = w.store.get(player_id).?;
+    try ent.inventory.add(allocator, .leather_armour, 1);
+
+    var buf: [256]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("equip armour"), fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "equipped leather armour") != null);
+    try std.testing.expectEqual(.leather_armour, ent.inventory.armour);
 }
 
 test "examine corpse reports empty skeleton" {
