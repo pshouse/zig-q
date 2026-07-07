@@ -52,6 +52,7 @@ pub const Command = union(enum) {
     drop_item: []const u8,
     examine_item: []const u8,
     equip_item: []const u8,
+    equip_usage,
     food,
     food_item: []const u8,
     rest,
@@ -120,6 +121,7 @@ pub fn parseLine(line: []const u8) Command {
         const arg = std.mem.trim(u8, trimmed[8..], " \t");
         if (arg.len > 0) return .{ .examine_item = arg };
     }
+    if (std.mem.eql(u8, trimmed, "equip")) return .equip_usage;
     if (std.mem.startsWith(u8, trimmed, "equip ")) {
         const arg = std.mem.trim(u8, trimmed[6..], " \t");
         if (arg.len > 0) return .{ .equip_item = arg };
@@ -243,6 +245,8 @@ fn cmdGet(ctx: *Context, name: ?[]const u8, writer: anytype) !Result {
     };
     var picked: ?items.Id = null;
     var remove_pos: ?loc.Loc = null;
+    var picked_from_corpse = false;
+    var corpse_label: ?[]const u8 = null;
     var empty_corpse_near = false;
 
     if (name) |n| {
@@ -253,6 +257,8 @@ fn cmdGet(ctx: *Context, name: ?[]const u8, writer: anytype) !Result {
                 if (obj.item) |loot| {
                     picked = loot;
                     remove_pos = loc.Loc.init(obj.x, obj.y);
+                    picked_from_corpse = true;
+                    corpse_label = obj.label;
                     break;
                 }
                 empty_corpse_near = true;
@@ -264,6 +270,10 @@ fn cmdGet(ctx: *Context, name: ?[]const u8, writer: anytype) !Result {
                 if (!tileNearPlayer(ctx.w, ctx.player_id, obj.x, obj.y)) continue;
                 picked = id;
                 remove_pos = loc.Loc.init(obj.x, obj.y);
+                if (obj.kind == .corpse) {
+                    picked_from_corpse = true;
+                    corpse_label = obj.label;
+                }
                 break;
             }
         }
@@ -274,6 +284,10 @@ fn cmdGet(ctx: *Context, name: ?[]const u8, writer: anytype) !Result {
             if (obj.item) |loot| {
                 picked = loot;
                 remove_pos = loc.Loc.init(obj.x, obj.y);
+                if (obj.kind == .corpse) {
+                    picked_from_corpse = true;
+                    corpse_label = obj.label;
+                }
                 break;
             }
             if (obj.kind == .corpse) empty_corpse_near = true;
@@ -299,10 +313,44 @@ fn cmdGet(ctx: *Context, name: ?[]const u8, writer: anytype) !Result {
             }
         }
     }
-    try writer.print("picked up {s}\n", .{items.def(picked.?).name});
+    const d = items.def(picked.?);
+    if (picked_from_corpse and corpse_label != null) {
+        try writer.print("picked up {s} from {s}\n", .{ d.name, corpse_label.? });
+    } else {
+        try writer.print("picked up {s}\n", .{d.name});
+    }
     ctx.w.tickAction(1);
     try finishExploreAction(ctx, writer);
     return .continue_repl;
+}
+
+fn printItemExamine(id: items.Id, writer: anytype) !void {
+    const d = items.def(id);
+    try writer.print("{s}: weight={} category={s}", .{ d.name, d.weight, @tagName(d.category) });
+    if (d.damage_die > 0) try writer.print(" damage=d{}", .{d.damage_die});
+    if (d.ac_bonus > 0) try writer.print(" ac_bonus={}", .{d.ac_bonus});
+    if (d.trait != .none) try writer.print(" trait={s}", .{@tagName(d.trait)});
+    try writer.print("\n", .{});
+}
+
+fn countNearbyFloorCategory(ctx: *Context, cat: items.Category) usize {
+    var count: usize = 0;
+    for (ctx.w.floor_objects.objects.items) |obj| {
+        if (!tileNearPlayer(ctx.w, ctx.player_id, obj.x, obj.y)) continue;
+        const id = obj.item orelse continue;
+        if (items.def(id).category == cat) count += 1;
+    }
+    return count;
+}
+
+fn findNearbyFloorCategory(ctx: *Context, cat: items.Category) ?items.Id {
+    if (countNearbyFloorCategory(ctx, cat) != 1) return null;
+    for (ctx.w.floor_objects.objects.items) |obj| {
+        if (!tileNearPlayer(ctx.w, ctx.player_id, obj.x, obj.y)) continue;
+        const id = obj.item orelse continue;
+        if (items.def(id).category == cat) return id;
+    }
+    return null;
 }
 
 fn printBagCategoryOptions(ent: *entity.Entity, cat: items.Category, writer: anytype) !void {
@@ -359,12 +407,35 @@ fn cmdDrop(ctx: *Context, name: []const u8, writer: anytype) !Result {
 
 fn cmdExamine(ctx: *Context, name: []const u8, writer: anytype) !Result {
     if (items.parseId(name)) |id| {
-        const d = items.def(id);
-        try writer.print("{s}: weight={} category={s}", .{ d.name, d.weight, @tagName(d.category) });
-        if (d.damage_die > 0) try writer.print(" damage=d{}", .{d.damage_die});
-        if (d.ac_bonus > 0) try writer.print(" ac_bonus={}", .{d.ac_bonus});
-        if (d.trait != .none) try writer.print(" trait={s}", .{@tagName(d.trait)});
-        try writer.print("\n", .{});
+        try printItemExamine(id, writer);
+        return .continue_repl;
+    }
+    if (items.parseCategory(name)) |cat| {
+        if (findNearbyFloorCategory(ctx, cat)) |id| {
+            try printItemExamine(id, writer);
+            return .continue_repl;
+        }
+        if (countNearbyFloorCategory(ctx, cat) > 1) {
+            try writer.print("ambiguous {s} nearby; specify item name\n", .{items.categoryLabel(cat)});
+            return .continue_repl;
+        }
+        const ent = ctx.w.store.get(ctx.player_id) orelse {
+            try writer.print("no player spawned\n", .{});
+            return .continue_repl;
+        };
+        switch (ent.inventory.resolveBagItem(name)) {
+            .found => |id| {
+                try printItemExamine(id, writer);
+            },
+            .unknown => try writer.print("unknown item\n", .{}),
+            .none_in_category => {
+                try writer.print("no {s} here or in inventory\n", .{items.categoryLabel(cat)});
+            },
+            .ambiguous => {
+                try writer.print("ambiguous {s}; specify: ", .{items.categoryLabel(cat)});
+                try printBagCategoryOptions(ent, cat, writer);
+            },
+        }
         return .continue_repl;
     }
     for (ctx.w.floor_objects.objects.items) |obj| {
@@ -814,6 +885,9 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
         .get_item => |name| return cmdGet(ctx, name, writer),
         .drop_item => |name| return cmdDrop(ctx, name, writer),
         .examine_item => |name| return cmdExamine(ctx, name, writer),
+        .equip_usage => {
+            try writer.print("equip what? (e.g. equip short sword, equip armour)\n", .{});
+        },
         .equip_item => |name| return cmdEquip(ctx, name, writer),
         .food => return cmdFood(ctx, null, writer),
         .food_item => |name| return cmdFood(ctx, name, writer),
@@ -1551,6 +1625,28 @@ test "get requires adjacent floor item" {
     _ = try execute(&ctx, parseLine("get leather armour"), fbs.writer());
     try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "nothing to pick up") != null);
     try std.testing.expect(w.floor_objects.at(loc.Loc.init(52, 49)) != null);
+}
+
+test "bare equip prints usage" {
+    const cmd = parseLine("equip");
+    try std.testing.expect(cmd == .equip_usage);
+}
+
+test "examine armour resolves nearby floor item" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    var draft: session.CreationDraft = .{};
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    var ctx = Context{ .allocator = allocator, .w = &w, .draft = &draft, .player_id = player_id };
+    try w.floor_objects.addItem(allocator, .item, loc.Loc.init(50, 49), "leather_armour", .leather_armour);
+
+    var buf: [256]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("examine armour"), fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "leather armour") != null);
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "ac_bonus=11") != null);
 }
 
 test "equip armour resolves category shorthand" {
