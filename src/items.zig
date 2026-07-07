@@ -1,5 +1,6 @@
 //! Mundane item catalog (no magic).
 const std = @import("std");
+const entity = @import("entity.zig");
 
 pub const Id = enum {
     short_sword,
@@ -139,6 +140,15 @@ pub fn printProficiencyHint(d: Def, player_class: []const u8, writer: anytype) !
 
 pub fn idTag(id: Id) []const u8 {
     return @tagName(id);
+}
+
+/// Applies flat bandage healing; returns HP restored (capped by room to max_hp).
+pub fn applyBandageHeal(ent: *entity.Entity) u16 {
+    if (ent.current_hp >= ent.max_hp) return 0;
+    const room: u32 = ent.max_hp - ent.current_hp;
+    const applied: u32 = @min(@as(u32, bandage_heal), room);
+    ent.current_hp += applied;
+    return @intCast(applied);
 }
 
 test "parse short sword aliases" {

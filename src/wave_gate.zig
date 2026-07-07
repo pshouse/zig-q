@@ -220,6 +220,8 @@ fn zigExe(allocator: std.mem.Allocator) ![]const u8 {
     return try allocator.dupe(u8, "zig");
 }
 
+const max_capture_bytes = 64 * 1024 * 1024;
+
 fn runProcess(allocator: std.mem.Allocator, argv: []const []const u8) !RunResult {
     var child = std.process.Child.init(argv, allocator);
     child.stdin_behavior = .Ignore;
@@ -227,37 +229,22 @@ fn runProcess(allocator: std.mem.Allocator, argv: []const []const u8) !RunResult
     child.stderr_behavior = .Pipe;
     try child.spawn();
 
-    const stdout_pipe = child.stdout orelse return error.MissingStdout;
-    const stderr_pipe = child.stderr orelse return error.MissingStderr;
-
-    const ReadCtx = struct {
-        pipe: std.fs.File,
-        output: ?[]u8 = null,
-        allocator: std.mem.Allocator,
-        fn run(ctx: *@This()) void {
-            ctx.output = ctx.pipe.readToEndAlloc(ctx.allocator, 64 * 1024 * 1024) catch null;
-        }
-    };
-
-    var stdout_ctx: ReadCtx = .{ .pipe = stdout_pipe, .allocator = allocator };
-    var stderr_ctx: ReadCtx = .{ .pipe = stderr_pipe, .allocator = allocator };
-    defer if (stdout_ctx.output) |out| allocator.free(out);
-    defer if (stderr_ctx.output) |out| allocator.free(out);
-
-    const stdout_thread = try std.Thread.spawn(.{}, ReadCtx.run, .{&stdout_ctx});
-    const stderr_thread = try std.Thread.spawn(.{}, ReadCtx.run, .{&stderr_ctx});
+    var stdout_list: std.ArrayList(u8) = .empty;
+    defer stdout_list.deinit(allocator);
+    var stderr_list: std.ArrayList(u8) = .empty;
+    defer stderr_list.deinit(allocator);
+    try child.collectOutput(allocator, &stdout_list, &stderr_list, max_capture_bytes);
 
     const term = try child.wait();
-    stdout_thread.join();
-    stderr_thread.join();
-
     const exit_code: u32 = switch (term) {
         .Exited => |code| code,
         else => 1,
     };
 
-    const stdout = stdout_ctx.output orelse "";
-    const stderr = stderr_ctx.output orelse "";
+    const stdout = try stdout_list.toOwnedSlice(allocator);
+    defer allocator.free(stdout);
+    const stderr = try stderr_list.toOwnedSlice(allocator);
+    defer allocator.free(stderr);
     const combined = try std.fmt.allocPrint(allocator, "{s}{s}", .{ stdout, stderr });
     return .{ .exit_code = exit_code, .output = combined };
 }
@@ -272,6 +259,44 @@ fn runZigBuild(allocator: std.mem.Allocator, build_args: []const []const u8) !Ru
     argv[1] = "build";
     @memcpy(argv[2..], build_args);
     return runProcess(allocator, argv);
+}
+
+fn runZigReplScript(allocator: std.mem.Allocator, seed: u64, script: []const u8) !RunResult {
+    const seed_str = try std.fmt.allocPrint(allocator, "{d}", .{seed});
+    defer allocator.free(seed_str);
+    const zig = try zigExe(allocator);
+    defer allocator.free(zig);
+
+    const argv = [_][]const u8{ zig, "build", "run", "--", "--repl", seed_str };
+    var child = std.process.Child.init(&argv, allocator);
+    child.stdin_behavior = .Pipe;
+    child.stdout_behavior = .Pipe;
+    child.stderr_behavior = .Pipe;
+    try child.spawn();
+
+    const stdin_pipe = child.stdin orelse return error.MissingStdin;
+    try stdin_pipe.writeAll(script);
+    stdin_pipe.close();
+    child.stdin = null;
+
+    var stdout_list: std.ArrayList(u8) = .empty;
+    defer stdout_list.deinit(allocator);
+    var stderr_list: std.ArrayList(u8) = .empty;
+    defer stderr_list.deinit(allocator);
+    try child.collectOutput(allocator, &stdout_list, &stderr_list, max_capture_bytes);
+
+    const term = try child.wait();
+    const exit_code: u32 = switch (term) {
+        .Exited => |code| code,
+        else => 1,
+    };
+
+    const stdout = try stdout_list.toOwnedSlice(allocator);
+    defer allocator.free(stdout);
+    const stderr = try stderr_list.toOwnedSlice(allocator);
+    defer allocator.free(stderr);
+    const combined = try std.fmt.allocPrint(allocator, "{s}{s}", .{ stdout, stderr });
+    return .{ .exit_code = exit_code, .output = combined };
 }
 
 fn writeCapture(path: []const u8, output: []const u8) !void {
@@ -346,6 +371,75 @@ fn dstSemverForScenario(wave: u8, scenario: []const u8) []const u8 {
     return version.wave(wave);
 }
 
+fn isV15PlanDstScenario(scenario: []const u8) bool {
+    return std.mem.eql(u8, scenario, "heal_bandage") or
+        std.mem.eql(u8, scenario, "trap_floor") or
+        std.mem.eql(u8, scenario, "deep_floor");
+}
+
+fn copyScratchLeaf(allocator: std.mem.Allocator, scratch: []const u8, src_leaf: []const u8, dst_leaf: []const u8) !void {
+    const src_path = try joinPath(allocator, scratch, src_leaf);
+    defer allocator.free(src_path);
+    const dst_path = try joinPath(allocator, scratch, dst_leaf);
+    defer allocator.free(dst_path);
+    const data = try std.fs.cwd().readFileAlloc(allocator, src_path, 64 * 1024 * 1024);
+    defer allocator.free(data);
+    try writeCapture(dst_path, data);
+}
+
+const repl_bandage_script =
+    \\assign 6 5 4 3 2 1
+    \\race 2
+    \\class 1
+    \\spawn
+    \\wound
+    \\use bandage
+    \\stats
+    \\exit
+    \\
+;
+
+fn verifyReplBandage(output: []const u8) !void {
+    if (std.mem.indexOf(u8, output, "used bandage; healed") == null) return error.ReplMissingBandageHeal;
+    if (std.mem.indexOf(u8, output, "HP:") == null) return error.ReplMissingHp;
+}
+
+fn captureReplBandage(allocator: std.mem.Allocator, scratch: []const u8, prefix: []const u8) !void {
+    const result = try runZigReplScript(allocator, 42, repl_bandage_script);
+    const output = try requireExit(result, allocator);
+    defer allocator.free(output);
+    try verifyReplBandage(output);
+
+    const prefix_leaf = try std.fmt.allocPrint(allocator, "{s}_repl-bandage.txt", .{prefix});
+    defer allocator.free(prefix_leaf);
+    const prefix_path = try joinPath(allocator, scratch, prefix_leaf);
+    defer allocator.free(prefix_path);
+    try writeCapture(prefix_path, output);
+
+    const plan_path = try joinPath(allocator, scratch, "repl-bandage.txt");
+    defer allocator.free(plan_path);
+    try writeCapture(plan_path, output);
+}
+
+fn mirrorV15PlanCaptures(allocator: std.mem.Allocator, scratch: []const u8, prefix: []const u8) !void {
+    const test_leaf = try std.fmt.allocPrint(allocator, "{s}_test.log", .{prefix});
+    defer allocator.free(test_leaf);
+    const fuzz_leaf = try std.fmt.allocPrint(allocator, "{s}_fuzz.log", .{prefix});
+    defer allocator.free(fuzz_leaf);
+    const consumer_leaf = try std.fmt.allocPrint(allocator, "{s}_consumer.log", .{prefix});
+    defer allocator.free(consumer_leaf);
+    const evidence_leaf = try std.fmt.allocPrint(allocator, "{s}_evidence.log", .{prefix});
+    defer allocator.free(evidence_leaf);
+    const version_leaf = try std.fmt.allocPrint(allocator, "{s}_version1.log", .{prefix});
+    defer allocator.free(version_leaf);
+
+    try copyScratchLeaf(allocator, scratch, test_leaf, "test.log");
+    try copyScratchLeaf(allocator, scratch, fuzz_leaf, "fuzz.log");
+    try copyScratchLeaf(allocator, scratch, consumer_leaf, "consumer.log");
+    try copyScratchLeaf(allocator, scratch, evidence_leaf, "evidence-v15.log");
+    try copyScratchLeaf(allocator, scratch, version_leaf, "version.log");
+}
+
 fn captureDstPair(
     allocator: std.mem.Allocator,
     wave: u8,
@@ -379,6 +473,19 @@ fn captureDstPair(
     defer allocator.free(path_b);
     try writeCapture(path_a, out_a);
     try writeCapture(path_b, out_b);
+
+    if (wave == 15 and isV15PlanDstScenario(scenario)) {
+        const plan_a = try std.fmt.allocPrint(allocator, "dst-v15-{s}-a.log", .{scenario});
+        defer allocator.free(plan_a);
+        const plan_b = try std.fmt.allocPrint(allocator, "dst-v15-{s}-b.log", .{scenario});
+        defer allocator.free(plan_b);
+        const plan_path_a = try joinPath(allocator, scratch, plan_a);
+        defer allocator.free(plan_path_a);
+        const plan_path_b = try joinPath(allocator, scratch, plan_b);
+        defer allocator.free(plan_path_b);
+        try writeCapture(plan_path_a, out_a);
+        try writeCapture(plan_path_b, out_b);
+    }
 }
 
 fn captureDstAll(
@@ -544,6 +651,11 @@ pub fn runWave(
         const migration_path = try joinPath(allocator, scratch, "v11_migration.log");
         defer allocator.free(migration_path);
         try writeCapture(migration_path, migration_out);
+    }
+
+    if (wave == 15) {
+        try captureReplBandage(allocator, scratch, plan.prefix);
+        try mirrorV15PlanCaptures(allocator, scratch, plan.prefix);
     }
 
     const ref_leaf = try std.fmt.allocPrint(allocator, "{s}_dst_reference_crawl_a.txt", .{plan.prefix});

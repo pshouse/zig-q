@@ -718,9 +718,7 @@ fn cmdUse(ctx: *Context, name: []const u8, writer: anytype) !Result {
             return .continue_repl;
         }
         _ = ent.inventory.remove(id, 1);
-        const room = ent.max_hp - ent.current_hp;
-        const applied = @min(items.bandage_heal, room);
-        ent.current_hp += applied;
+        const applied = items.applyBandageHeal(ent);
         try writer.print("used bandage; healed {} hp\n", .{applied});
         try tickPlayerAction(ctx, 1, writer);
         try finishExploreAction(ctx, writer);
@@ -1623,6 +1621,22 @@ test "descend via execute from normal spawn reaches floor 2" {
     evidence_format.printDescendEvidence(w.floor_index, gen.layout_hash, gen.walkable_count, monster_count);
 }
 
+test "applyBandageHeal restores flat bandage_heal on wounded player" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+
+    const ctx = try descendTestCtx(allocator, &w);
+    const ent = w.store.get(ctx.player_id).?;
+    const max_hp = ent.max_hp;
+    ent.current_hp = max_hp - items.bandage_heal;
+
+    const applied = items.applyBandageHeal(ent);
+    try std.testing.expectEqual(items.bandage_heal, applied);
+    try std.testing.expectEqual(max_hp, ent.current_hp);
+}
+
 test "wound and bandage via execute on minimal repl path" {
     const allocator = std.testing.allocator;
     var w = try world.World.init(allocator, 42);
@@ -1644,7 +1658,7 @@ test "wound and bandage via execute on minimal repl path" {
     try std.testing.expectEqual(max_hp, w.store.get(ctx.player_id).?.current_hp);
 }
 
-test "use bandage via execute heals wounded player and consumes item" {
+test "use bandage via execute heals flat bandage_heal and consumes item" {
     const allocator = std.testing.allocator;
     var w = try world.World.init(allocator, 42);
     defer w.deinit();
@@ -1654,13 +1668,15 @@ test "use bandage via execute heals wounded player and consumes item" {
     const ent = w.store.get(ctx.player_id).?;
     try std.testing.expect(ent.inventory.findStack(.bandage).?.count == 1);
     const max_hp = ent.max_hp;
-    ent.current_hp = max_hp - 3;
+    const before_hp = max_hp - items.bandage_heal;
+    ent.current_hp = before_hp;
 
     var buf: [512]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
     _ = try execute(&ctx, parseLine("use bandage"), fbs.writer());
     const out = fbs.getWritten();
-    try std.testing.expect(std.mem.indexOf(u8, out, "used bandage; healed") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "used bandage; healed 5 hp") != null);
+    try std.testing.expectEqual(before_hp + items.bandage_heal, ent.current_hp);
     try std.testing.expectEqual(max_hp, ent.current_hp);
     try std.testing.expect(!ent.inventory.has(.bandage));
 }
