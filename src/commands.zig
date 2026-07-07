@@ -529,11 +529,11 @@ fn cmdFood(ctx: *Context, name: ?[]const u8, writer: anytype) !Result {
         try writer.print("you do not have {s}\n", .{d.name});
         return .continue_repl;
     }
-    const before = conditions.exhaustionLevel(ent);
+    const notice = SurvivalNoticeState.capture(ent);
     _ = ent.inventory.remove(id, 1);
     _ = survival.eatFood(ent, id);
     ctx.w.tickAction(1);
-    try survival.printExhaustionNotice(before, conditions.exhaustionLevel(ent), writer);
+    try notice.printChanges(ent, writer);
     try writer.print("ate {s} hunger={}\n", .{ d.name, ent.hunger });
     return .continue_repl;
 }
@@ -551,7 +551,7 @@ fn cmdRest(ctx: *Context, writer: anytype) !Result {
         try writer.print("cannot rest while incapacitated\n", .{});
         return .continue_repl;
     }
-    const before = conditions.exhaustionLevel(ent);
+    const notice = SurvivalNoticeState.capture(ent);
     var i: u32 = 0;
     while (i < survival.rest_ticks) : (i += 1) {
         ctx.w.tickAction(1);
@@ -566,7 +566,7 @@ fn cmdRest(ctx: *Context, writer: anytype) !Result {
         ent.fatigue = 0;
     }
     _ = survival.syncExhaustion(ent);
-    try survival.printExhaustionNotice(before, conditions.exhaustionLevel(ent), writer);
+    try notice.printChanges(ent, writer);
     try writer.print("rested (ticks={} fatigue={})\n", .{ ctx.w.game_clock.ticks, ent.fatigue });
     return .continue_repl;
 }
@@ -587,7 +587,7 @@ fn cmdSleep(ctx: *Context, writer: anytype) !Result {
     ent.sleeping = true;
     conditions.apply(ent, .unconscious);
     try writer.print("sleeping (unconscious)\n", .{});
-    const before = conditions.exhaustionLevel(ent);
+    const notice = SurvivalNoticeState.capture(ent);
     var i: u32 = 0;
     while (i < survival.sleep_ticks) : (i += 1) {
         ctx.w.tickAction(1);
@@ -603,7 +603,7 @@ fn cmdSleep(ctx: *Context, writer: anytype) !Result {
     ent.fatigue = 0;
     conditions.remove(ent, .unconscious);
     _ = survival.syncExhaustion(ent);
-    try survival.printExhaustionNotice(before, conditions.exhaustionLevel(ent), writer);
+    try notice.printChanges(ent, writer);
     try writer.print("slept (ticks={} fatigue=0)\n", .{ ctx.w.game_clock.ticks });
     return .continue_repl;
 }
@@ -612,26 +612,43 @@ fn isSpawned(ctx: *const Context) bool {
     return ctx.player_id != entity.invalid_id;
 }
 
+const SurvivalNoticeState = struct {
+    exhaustion: u3,
+    starving: bool,
+
+    fn capture(ent: *const entity.Entity) SurvivalNoticeState {
+        return .{
+            .exhaustion = conditions.exhaustionLevel(ent),
+            .starving = conditions.has(ent, .starving),
+        };
+    }
+
+    fn printChanges(self: SurvivalNoticeState, ent: *const entity.Entity, writer: anytype) !void {
+        try survival.printExhaustionNotice(self.exhaustion, conditions.exhaustionLevel(ent), writer);
+        try survival.printStarvingNotice(self.starving, conditions.has(ent, .starving), writer);
+    }
+};
+
 fn tickPlayerAction(ctx: *Context, count: u32, writer: anytype) !void {
     const ent = ctx.w.store.get(ctx.player_id) orelse {
         ctx.w.tickAction(count);
         return;
     };
-    const before = conditions.exhaustionLevel(ent);
+    const notice = SurvivalNoticeState.capture(ent);
     ctx.w.tickAction(count);
-    try survival.printExhaustionNotice(before, conditions.exhaustionLevel(ent), writer);
+    try notice.printChanges(ent, writer);
 }
 
 fn finishExploreAction(ctx: *Context, writer: anytype) !void {
     if (combat.isInCombat(ctx.w)) return;
-    const ex_before: ?u3 = if (ctx.w.store.get(ctx.player_id)) |ent|
-        conditions.exhaustionLevel(ent)
+    const notice_before: ?SurvivalNoticeState = if (ctx.w.store.get(ctx.player_id)) |ent|
+        SurvivalNoticeState.capture(ent)
     else
         null;
     const ambush = try explore.afterPlayerExploreAction(ctx.w, ctx.player_id, writer);
-    if (ex_before) |before| {
+    if (notice_before) |before| {
         if (ctx.w.store.get(ctx.player_id)) |ent| {
-            try survival.printExhaustionNotice(before, conditions.exhaustionLevel(ent), writer);
+            try before.printChanges(ent, writer);
         }
     }
     if (ambush) try writer.print("ambush combat started\n", .{});
@@ -848,7 +865,7 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                     return .continue_repl;
                 }
             }
-            const ex_before = conditions.exhaustionLevel(move_ent);
+            const notice = SurvivalNoticeState.capture(move_ent);
             const new_loc = movement.moveEntity(ctx.w, ctx.player_id, dir) catch |err| switch (err) {
                 error.Blocked => {
                     try writer.print("You cannot move there.\n", .{});
@@ -857,7 +874,7 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                 else => |e| return e,
             };
             try writer.print("moved to ({},{})\n", .{ new_loc.x, new_loc.y });
-            try survival.printExhaustionNotice(ex_before, conditions.exhaustionLevel(move_ent), writer);
+            try notice.printChanges(move_ent, writer);
             if (explore.checkStepTraps(ctx.w, ctx.player_id)) {
                 try writer.print("trap triggered: poisoned\n", .{});
             }

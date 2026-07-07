@@ -23,7 +23,7 @@ pub fn run(allocator: std.mem.Allocator, writer: anytype) !void {
     const starve_out = try evidence_format.runScenario(allocator, "starve", 42, &starve_buf, gate);
     try writer.print("--- scenario starve ---\n", .{});
     try evidence_format.marker(writer, "hunger=100", starve_out, "hunger=100");
-    try evidence_format.marker(writer, "exhaustion=3", starve_out, "exhaustion=3");
+    try evidence_format.marker(writer, "starving", starve_out, "starving");
     try evidence_format.marker(writer, "moved to", starve_out, "moved to");
 
     var sleep_buf: [65536]u8 = undefined;
@@ -58,6 +58,6 @@ test "evidence v14 survival clock markers" {
     try evidence_format.expectMarkerLineTrue(out, "marker hunger=: true");
     try evidence_format.expectMarkerLineTrue(out, "marker ate rations: true");
     try evidence_format.expectMarkerLineTrue(out, "marker sleeping (unconscious): true");
-    try evidence_format.expectMarkerLineTrue(out, "marker exhaustion=3: true");
+    try evidence_format.expectMarkerLineTrue(out, "marker starving: true");
     try evidence_format.expectMarkerLineTrue(out, "marker loaded slot: true");
 }

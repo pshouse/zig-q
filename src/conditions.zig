@@ -53,7 +53,7 @@ pub fn blocksAttack(ent: *const entity.Entity) bool {
 
 pub fn attackDisadvantage(attacker: *const entity.Entity) bool {
     return has(attacker, .blinded) or has(attacker, .prone) or has(attacker, .frightened) or
-        has(attacker, .poisoned) or exhaustionLevel(attacker) >= 3;
+        has(attacker, .poisoned) or has(attacker, .starving) or exhaustionLevel(attacker) >= 3;
 }
 
 pub fn attackAdvantageVs(target: *const entity.Entity) i32 {

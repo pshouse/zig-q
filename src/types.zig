@@ -17,6 +17,7 @@ pub const Condition = enum {
     stunned,
     unconscious,
     dead,
+    starving,
 };
 
 pub const ConditionSet = struct {

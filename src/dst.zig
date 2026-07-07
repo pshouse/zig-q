@@ -888,7 +888,7 @@ pub const Harness = struct {
             .set_hunger => |cfg| {
                 const ent = findEntityByName(&self.w, cfg.entity) orelse return error.EntityNotFound;
                 ent.hunger = cfg.value;
-                _ = survival.syncExhaustion(ent);
+                _ = survival.syncSurvival(ent);
                 try writer.print("step set_hunger {s} value={}\n", .{ cfg.entity, cfg.value });
             },
             .set_fatigue => |cfg| {
@@ -1292,7 +1292,7 @@ test "dst starve scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "starve", 131072);
     try std.testing.expect(std.mem.indexOf(u8, out, "hunger=100") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "exhaustion=3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "starving") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "moved to") != null);
 }
 
