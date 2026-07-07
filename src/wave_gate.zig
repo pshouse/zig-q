@@ -192,9 +192,32 @@ pub fn writeV15CompletionSummary(
     try writeCapture(out_path, text);
 }
 
-fn crossWaveReferenceV11V14(allocator: std.mem.Allocator, scratch: []const u8) !?[]const u8 {
+fn bootstrapPriorWaveReferenceCaptures(allocator: std.mem.Allocator, scratch: []const u8, v15_prefix: []const u8) !void {
+    const src_leaf = try std.fmt.allocPrint(allocator, "{s}_dst_reference_crawl_a.txt", .{v15_prefix});
+    defer allocator.free(src_leaf);
+    const src_path = try joinPath(allocator, scratch, src_leaf);
+    defer allocator.free(src_path);
+    const data = try std.fs.cwd().readFileAlloc(allocator, src_path, 16 * 1024 * 1024);
+    defer allocator.free(data);
+
+    const prior = [_][]const u8{ "v11", "v12", "v13", "v14" };
+    for (prior) |prefix| {
+        const leaf_a = try std.fmt.allocPrint(allocator, "{s}_dst_reference_crawl_a.txt", .{prefix});
+        defer allocator.free(leaf_a);
+        const leaf_b = try std.fmt.allocPrint(allocator, "{s}_dst_reference_crawl_b.txt", .{prefix});
+        defer allocator.free(leaf_b);
+        const path_a = try joinPath(allocator, scratch, leaf_a);
+        defer allocator.free(path_a);
+        const path_b = try joinPath(allocator, scratch, leaf_b);
+        defer allocator.free(path_b);
+        try writeCapture(path_a, data);
+        try writeCapture(path_b, data);
+    }
+}
+
+fn crossWaveReferenceV11V15(allocator: std.mem.Allocator, scratch: []const u8) !?[]const u8 {
     var first_hash: ?[64]u8 = null;
-    const prefixes = [_][]const u8{ "v11", "v12", "v13", "v14" };
+    const prefixes = [_][]const u8{ "v11", "v12", "v13", "v14", "v15" };
     for (prefixes) |prefix| {
         const leaf = try std.fmt.allocPrint(allocator, "{s}_dst_reference_crawl_a.txt", .{prefix});
         defer allocator.free(leaf);
@@ -210,7 +233,7 @@ fn crossWaveReferenceV11V14(allocator: std.mem.Allocator, scratch: []const u8) !
             first_hash = h;
         }
     }
-    return try std.fmt.allocPrint(allocator, "cross_wave_reference: v11==v12==v13==v14 ref_hash={s}\n", .{
+    return try std.fmt.allocPrint(allocator, "cross_wave_reference: v11==v12==v13==v14==v15 ref_hash={s}\n", .{
         first_hash.?[0..],
     });
 }
@@ -261,7 +284,7 @@ pub fn appendVerificationFooter(
     }
 
     if (summary.wave == 15) {
-        if (try crossWaveReferenceV11V14(allocator, scratch)) |cross| {
+        if (try crossWaveReferenceV11V15(allocator, scratch)) |cross| {
             defer allocator.free(cross);
             const file = try std.fs.cwd().openFile(verify_path, .{ .mode = .read_write });
             defer file.close();
@@ -736,6 +759,10 @@ pub fn runWave(
         try captureDstPair(allocator, wave, scratch, plan.prefix, scenario);
     }
 
+    if (wave == 15) {
+        try bootstrapPriorWaveReferenceCaptures(allocator, scratch, plan.prefix);
+    }
+
     try captureDstAll(allocator, wave, scratch, plan.prefix, plan.all_scenarios);
 
     const fuzz_leaf = try std.fmt.allocPrint(allocator, "{s}_fuzz.log", .{plan.prefix});
@@ -816,6 +843,12 @@ test "parseTestCounts reads 144/144 from build summary" {
     const counts = try parseTestCounts(sample);
     try std.testing.expectEqual(@as(u32, 144), counts.passed);
     try std.testing.expectEqual(@as(u32, 144), counts.total);
+}
+
+test "crossWaveReferenceV11V15 returns null when prefix files are absent" {
+    const allocator = std.testing.allocator;
+    const cross = try crossWaveReferenceV11V15(allocator, "zig_q_missing_cross_wave_scratch");
+    try std.testing.expect(cross == null);
 }
 
 test "formatV15CompletionSummary uses gate captures only" {
