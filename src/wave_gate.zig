@@ -393,6 +393,7 @@ const repl_bandage_script =
     \\class 1
     \\spawn
     \\wound
+    \\wound
     \\use bandage
     \\stats
     \\exit
@@ -400,11 +401,15 @@ const repl_bandage_script =
 ;
 
 fn verifyReplBandage(output: []const u8) !void {
-    if (std.mem.indexOf(u8, output, "used bandage; healed") == null) return error.ReplMissingBandageHeal;
+    if (std.mem.indexOf(u8, output, "used bandage; healed 5 hp") == null) return error.ReplMissingBandageHeal;
     if (std.mem.indexOf(u8, output, "HP:") == null) return error.ReplMissingHp;
 }
 
 fn captureReplBandage(allocator: std.mem.Allocator, scratch: []const u8, prefix: []const u8) !void {
+    const script_path = try joinPath(allocator, scratch, "repl-bandage-script.txt");
+    defer allocator.free(script_path);
+    try writeCapture(script_path, repl_bandage_script);
+
     const result = try runZigReplScript(allocator, 42, repl_bandage_script);
     const output = try requireExit(result, allocator);
     defer allocator.free(output);
