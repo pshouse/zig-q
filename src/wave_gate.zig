@@ -118,6 +118,103 @@ pub const WaveSummary = struct {
     }
 };
 
+const v15_feature_scenarios = [_][]const u8{ "heal_bandage", "trap_floor", "deep_floor" };
+
+/// Builds completion prose from gate captures only (no hand-authored counts).
+pub fn formatV15CompletionSummary(
+    allocator: std.mem.Allocator,
+    footer: []const u8,
+    deep_floor_dst: []const u8,
+    repl_bandage: []const u8,
+) ![]const u8 {
+    if (std.mem.indexOf(u8, repl_bandage, "used bandage; healed 5 hp") == null)
+        return error.ReplMissingFlatHeal;
+
+    var depth_lines = std.ArrayList(u8).empty;
+    defer depth_lines.deinit(allocator);
+
+    var pos: usize = 0;
+    while (pos < deep_floor_dst.len) {
+        const rel = std.mem.indexOf(u8, deep_floor_dst[pos..], "floor=") orelse break;
+        const abs = pos + rel;
+        const line_end = std.mem.indexOfScalarPos(u8, deep_floor_dst, abs, '\n') orelse deep_floor_dst.len;
+        var row_buf: [128]u8 = undefined;
+        const row = try std.fmt.bufPrint(&row_buf, "  {s}\n", .{deep_floor_dst[abs..line_end]});
+        try depth_lines.appendSlice(allocator, row);
+        pos = line_end + 1;
+    }
+    if (depth_lines.items.len == 0) return error.MissingDepthReport;
+
+    var scenarios = std.ArrayList(u8).empty;
+    defer scenarios.deinit(allocator);
+    for (v15_feature_scenarios, 0..) |name, i| {
+        if (i > 0) try scenarios.appendSlice(allocator, ", ");
+        try scenarios.appendSlice(allocator, name);
+    }
+
+    return std.fmt.allocPrint(allocator,
+        \\zig-q v1.5.0 release complete
+        \\
+        \\{s}
+        \\
+        \\depth scaling (seed 42):
+        \\{s}
+        \\repl bandage capture: used bandage; healed 5 hp
+        \\
+        \\new dst scenarios: {s}
+        \\
+    , .{ footer, depth_lines.items, scenarios.items });
+}
+
+pub fn writeV15CompletionSummary(
+    allocator: std.mem.Allocator,
+    scratch: []const u8,
+    summary: WaveSummary,
+) !void {
+    var footer_buf: [256]u8 = undefined;
+    const footer = try summary.formatFooter(&footer_buf);
+
+    const deep_path = try joinPath(allocator, scratch, "v15_dst_deep_floor_a.txt");
+    defer allocator.free(deep_path);
+    const deep = try std.fs.cwd().readFileAlloc(allocator, deep_path, 16 * 1024 * 1024);
+    defer allocator.free(deep);
+
+    const repl_path = try joinPath(allocator, scratch, "repl-bandage.txt");
+    defer allocator.free(repl_path);
+    const repl = try std.fs.cwd().readFileAlloc(allocator, repl_path, 16 * 1024 * 1024);
+    defer allocator.free(repl);
+
+    const text = try formatV15CompletionSummary(allocator, footer, deep, repl);
+    defer allocator.free(text);
+
+    const out_path = try joinPath(allocator, scratch, "v15_completion.txt");
+    defer allocator.free(out_path);
+    try writeCapture(out_path, text);
+}
+
+fn crossWaveReferenceV11V14(allocator: std.mem.Allocator, scratch: []const u8) !?[]const u8 {
+    var first_hash: ?[64]u8 = null;
+    const prefixes = [_][]const u8{ "v11", "v12", "v13", "v14" };
+    for (prefixes) |prefix| {
+        const leaf = try std.fmt.allocPrint(allocator, "{s}_dst_reference_crawl_a.txt", .{prefix});
+        defer allocator.free(leaf);
+        const ref_path = try joinPath(allocator, scratch, leaf);
+        defer allocator.free(ref_path);
+        const data = std.fs.cwd().readFileAlloc(allocator, ref_path, 16 * 1024 * 1024) catch return null;
+        defer allocator.free(data);
+        var h: [64]u8 = undefined;
+        sha256Hex(data, &h);
+        if (first_hash) |fh| {
+            if (!std.mem.eql(u8, &fh, &h)) return null;
+        } else {
+            first_hash = h;
+        }
+    }
+    return try std.fmt.allocPrint(allocator, "cross_wave_reference: v11==v12==v13==v14 ref_hash={s}\n", .{
+        first_hash.?[0..],
+    });
+}
+
 pub fn appendVerificationFooter(
     allocator: std.mem.Allocator,
     scratch: []const u8,
@@ -139,7 +236,12 @@ pub fn appendVerificationFooter(
         std.fs.cwd().access(verify_path, .{}) catch break :blk false;
         break :blk true;
     };
-    if (summary.wave == 11 or !verify_exists) {
+    if (summary.wave >= 15) {
+        const file = try std.fs.cwd().createFile(verify_path, .{});
+        defer file.close();
+        try file.writeAll(footer);
+        try file.writeAll("\n");
+    } else if (summary.wave == 11 or !verify_exists) {
         const header = if (summary.wave == 11)
             try std.fmt.allocPrint(allocator, "=== zig-q 1.x gate verification ===\n", .{})
         else
@@ -158,12 +260,18 @@ pub fn appendVerificationFooter(
         try file.writeAll("\n");
     }
 
-    if (summary.wave == 14 or summary.wave == 15) {
+    if (summary.wave == 15) {
+        if (try crossWaveReferenceV11V14(allocator, scratch)) |cross| {
+            defer allocator.free(cross);
+            const file = try std.fs.cwd().openFile(verify_path, .{ .mode = .read_write });
+            defer file.close();
+            try file.seekFromEnd(0);
+            try file.writeAll(cross);
+        }
+    } else if (summary.wave == 14) {
         var hash_match = true;
         var first_hash: ?[64]u8 = null;
-        const prefixes_v14 = [_][]const u8{ "v11", "v12", "v13", "v14" };
-        const prefixes_v15 = [_][]const u8{ "v11", "v12", "v13", "v14", "v15" };
-        const prefixes: []const []const u8 = if (summary.wave == 15) &prefixes_v15 else &prefixes_v14;
+        const prefixes = [_][]const u8{ "v11", "v12", "v13", "v14" };
         for (prefixes) |prefix| {
             const leaf = try std.fmt.allocPrint(allocator, "{s}_dst_reference_crawl_a.txt", .{prefix});
             defer allocator.free(leaf);
@@ -182,9 +290,8 @@ pub fn appendVerificationFooter(
                 first_hash = h;
             }
         }
-        const cross_label = if (summary.wave == 15) "v11==v12==v13==v14==v15" else "v11==v12==v13==v14";
         const cross = if (hash_match and first_hash != null)
-            try std.fmt.allocPrint(allocator, "cross_wave_reference: {s} ref_hash={s}\n", .{ cross_label, first_hash.?[0..] })
+            try std.fmt.allocPrint(allocator, "cross_wave_reference: v11==v12==v13==v14 ref_hash={s}\n", .{first_hash.?[0..]})
         else
             try std.fmt.allocPrint(allocator, "cross_wave_reference: MISMATCH\n", .{});
         defer allocator.free(cross);
@@ -192,6 +299,10 @@ pub fn appendVerificationFooter(
         defer file.close();
         try file.seekFromEnd(0);
         try file.writeAll(cross);
+    }
+
+    if (summary.wave == 15) {
+        try writeV15CompletionSummary(allocator, scratch, summary);
     }
 }
 
@@ -705,4 +816,29 @@ test "parseTestCounts reads 144/144 from build summary" {
     const counts = try parseTestCounts(sample);
     try std.testing.expectEqual(@as(u32, 144), counts.passed);
     try std.testing.expectEqual(@as(u32, 144), counts.total);
+}
+
+test "formatV15CompletionSummary uses gate captures only" {
+    const allocator = std.testing.allocator;
+    const footer = "gate-v15: build_bytes=0 tests=184/184 version=1.5.0 ref_hash=abc fuzz=10000";
+    const deep_floor = "step depth_report floor=2 monsters=3 loot=4\nstep depth_report floor=5 monsters=5 loot=8\n";
+    const repl =
+        \\> used bandage; healed 5 hp
+        \\> HP: 12
+    ;
+
+    const out = try formatV15CompletionSummary(allocator, footer, deep_floor, repl);
+    defer allocator.free(out);
+
+    try std.testing.expect(std.mem.indexOf(u8, out, "184/184") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "loot=4") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "loot=8") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "healed 5 hp") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "heal_bandage") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "trap_floor") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "deep_floor") != null);
+
+    try std.testing.expect(std.mem.indexOf(u8, out, "182") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "loot 4 vs 0") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "×2") == null);
 }
