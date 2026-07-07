@@ -1424,9 +1424,8 @@ test "dst trap_floor scenario is byte-identical across runs" {
 test "dst deep_floor scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "deep_floor", 65536);
-    try std.testing.expect(std.mem.indexOf(u8, out, "depth_report floor=2") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "depth_report floor=5") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "loot=4") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "depth_report floor=2 monsters=3 loot=4") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "depth_report floor=5 monsters=5 loot=8") != null);
 }
 
 test "demo output is deterministic for fixed seed" {

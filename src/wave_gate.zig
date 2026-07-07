@@ -135,7 +135,10 @@ pub fn appendVerificationFooter(
     defer allocator.free(wave_footer_path);
     try writeCapture(wave_footer_path, footer);
 
-    const verify_exists = std.fs.cwd().access(verify_path, .{}) == .{};
+    const verify_exists = blk: {
+        std.fs.cwd().access(verify_path, .{}) catch break :blk false;
+        break :blk true;
+    };
     if (summary.wave == 11 or !verify_exists) {
         const header = if (summary.wave == 11)
             try std.fmt.allocPrint(allocator, "=== zig-q 1.x gate verification ===\n", .{})

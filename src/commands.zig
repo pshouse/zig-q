@@ -1034,9 +1034,10 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
             };
             ctx.w.stageCharacter(char);
             ctx.player_id = try ctx.w.spawnStagedPlayer(loc.Loc.init(49, 49), "entity_0");
-            try writer.print("spawned id={} at (49,49) (rations x{})\n", .{
+            try writer.print("spawned id={} at (49,49) (rations x{} bandage x{})\n", .{
                 ctx.player_id,
                 survival.starter_rations,
+                survival.starter_bandage,
             });
         },
         .stats => {
@@ -1606,7 +1607,7 @@ test "use bandage via execute heals wounded player and consumes item" {
 
     var ctx = try descendTestCtx(allocator, &w);
     const ent = w.store.get(ctx.player_id).?;
-    try ent.inventory.add(allocator, .bandage, 1);
+    try std.testing.expect(ent.inventory.findStack(.bandage).?.count == 1);
     const max_hp = ent.max_hp;
     ent.current_hp = max_hp - 3;
 

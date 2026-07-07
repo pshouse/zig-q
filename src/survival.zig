@@ -20,6 +20,8 @@ pub const fatigue_restore_rest: u16 = 30;
 
 /// Rations given at spawn so early floors are survivable before loot sources appear.
 pub const starter_rations: u8 = 2;
+/// One bandage in the starter kit for mundane out-of-combat healing.
+pub const starter_bandage: u8 = 1;
 
 pub fn initEntity(ent: *entity.Entity) void {
     ent.hunger = 0;
@@ -29,6 +31,7 @@ pub fn initEntity(ent: *entity.Entity) void {
 pub fn giveStarterKit(allocator: std.mem.Allocator, ent: *entity.Entity) !void {
     if (ent.is_monster) return;
     try ent.inventory.add(allocator, .rations, starter_rations);
+    try ent.inventory.add(allocator, .bandage, starter_bandage);
 }
 
 pub fn effectiveMaxHp(ent: *const entity.Entity) u32 {

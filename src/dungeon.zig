@@ -92,6 +92,14 @@ pub fn trapRng(world_seed: u64, floor_index: u32) rng.SeededRng {
     return rng.SeededRng.init(trapSeed(world_seed, floor_index));
 }
 
+fn depthBonusSeed(world_seed: u64, floor_index: u32) u64 {
+    return floorSeed(world_seed, floor_index) ^ 0xB005B005B005B005;
+}
+
+fn depthBonusRng(world_seed: u64, floor_index: u32) rng.SeededRng {
+    return rng.SeededRng.init(depthBonusSeed(world_seed, floor_index));
+}
+
 /// Depth tier for generated floors (0 on floor 1–2 baseline).
 fn depthTier(floor_index: u32) u32 {
     if (floor_index < 2) return 0;
@@ -221,48 +229,69 @@ pub const MonsterSpawn = struct {
 };
 
 pub const MonsterPlan = struct {
-    spawns: [4]MonsterSpawn,
+    spawns: [6]MonsterSpawn,
     count: usize,
 };
+
+fn monsterName(kind: monsters.Kind, slot: usize) []const u8 {
+    return switch (kind) {
+        .goblin => switch (slot) {
+            0 => "goblin_0",
+            1 => "goblin_1",
+            2 => "goblin_2",
+            else => "goblin_3",
+        },
+        .skeleton => if (slot == 0) "skeleton_0" else "skeleton_1",
+    };
+}
 
 pub fn planMonsterSpawns(world_seed: u64, floor_index: u32, spawn: loc.Loc) MonsterPlan {
     var floor_rng = floorRng(world_seed, floor_index);
     _ = floor_rng.nextU8();
     _ = floor_rng.nextU8();
 
-    var list: [4]MonsterSpawn = undefined;
+    var list: [6]MonsterSpawn = undefined;
     var count: usize = 0;
 
-    const tier = depthTier(floor_index);
-    const goblin_cap: u8 = @intCast(2 + tier / 2);
-    const goblin_count = 1 + (floor_rng.nextU8() % goblin_cap);
+    const goblin_count = 1 + (floor_rng.nextU8() % 2);
     var g: u8 = 0;
     while (g < goblin_count and count < list.len) : (g += 1) {
         const offset_x: i64 = @intCast((floor_rng.nextU8() % 3) + 1);
         const offset_y: i64 = @as(i64, @intCast(floor_rng.nextU8() % 3)) - 1;
         list[count] = .{
             .kind = .goblin,
-            .name = switch (count) {
-                0 => "goblin_0",
-                1 => "goblin_1",
-                else => "goblin_2",
-            },
+            .name = monsterName(.goblin, count),
             .position = offsetLoc(spawn, offset_x, offset_y),
         };
         count += 1;
     }
 
-    const skel_roll = floor_rng.nextU8();
-    const add_skeleton = (skel_roll % 2) == 0 or (tier >= 2 and (skel_roll % 4) == 0);
-    if (add_skeleton and count < list.len) {
+    if ((floor_rng.nextU8() % 2) == 0 and count < list.len) {
         const offset_x: i64 = -@as(i64, @intCast((floor_rng.nextU8() % 2) + 1));
         const offset_y: i64 = @intCast(floor_rng.nextU8() % 2);
         list[count] = .{
             .kind = .skeleton,
-            .name = "skeleton_0",
+            .name = monsterName(.skeleton, 0),
             .position = offsetLoc(spawn, offset_x, offset_y),
         };
         count += 1;
+    }
+
+    const tier = depthTier(floor_index);
+    if (tier > 0) {
+        var bonus_rng = depthBonusRng(world_seed, floor_index);
+        var bonus: u32 = 0;
+        while (bonus < tier and count < list.len) : (bonus += 1) {
+            const kind: monsters.Kind = if ((bonus_rng.nextU8() % 2) == 0) .goblin else .skeleton;
+            const offset_x: i64 = @intCast((bonus_rng.nextU8() % 6) + 2);
+            const offset_y: i64 = @as(i64, @intCast(bonus_rng.nextU8() % 6)) - 3;
+            list[count] = .{
+                .kind = kind,
+                .name = monsterName(kind, count),
+                .position = offsetLoc(spawn, offset_x, offset_y),
+            };
+            count += 1;
+        }
     }
 
     return .{ .spawns = list, .count = count };
@@ -303,15 +332,19 @@ pub fn planFloorLoot(
     }
 
     const tier = depthTier(floor_index);
-    var extra: usize = 0;
-    while (extra < tier and count < list.len) : (extra += 1) {
-        const pick = floor_rng.nextU8() % @as(u8, @intCast(candidates.len));
-        const offset_x: i64 = @intCast((floor_rng.nextU8() % 5) + 2);
-        const offset_y: i64 = @as(i64, @intCast(floor_rng.nextU8() % 5)) - 2;
-        const pos = offsetLoc(spawn, offset_x, offset_y);
-        if (!map.isWalkable(pos)) continue;
-        list[count] = .{ .item = candidates[pick], .position = pos };
-        count += 1;
+    if (tier > 0) {
+        var bonus_rng = depthBonusRng(world_seed, floor_index);
+        var attempt: u8 = 0;
+        const max_attempts: u8 = @intCast(tier * 4);
+        while (attempt < max_attempts and count < list.len) : (attempt += 1) {
+            const pick = bonus_rng.nextU8() % @as(u8, @intCast(candidates.len));
+            const offset_x: i64 = @intCast((bonus_rng.nextU8() % 8) + 1);
+            const offset_y: i64 = @as(i64, @intCast(bonus_rng.nextU8() % 8)) - 4;
+            const pos = offsetLoc(spawn, offset_x, offset_y);
+            if (!map.isWalkable(pos)) continue;
+            list[count] = .{ .item = candidates[pick], .position = pos };
+            count += 1;
+        }
     }
     return .{ .spawns = list, .count = count };
 }
@@ -436,17 +469,23 @@ test "monster spawn plan is deterministic" {
 
 test "deeper floors scale monster and loot counts on seed 42" {
     const allocator = std.testing.allocator;
-    var map = terrain.TerrainMap.init(allocator);
-    defer map.deinit();
+    var map2 = terrain.TerrainMap.init(allocator);
+    defer map2.deinit();
+    var map5 = terrain.TerrainMap.init(allocator);
+    defer map5.deinit();
 
-    const gen2 = try generateFloor(&map, 42, 2);
-    const gen5 = try generateFloor(&map, 42, 5);
+    const gen2 = try generateFloor(&map2, 42, 2);
+    const gen5 = try generateFloor(&map5, 42, 5);
     const monsters2 = planMonsterSpawns(42, 2, gen2.spawn);
     const monsters5 = planMonsterSpawns(42, 5, gen5.spawn);
-    const loot2 = planFloorLoot(42, 2, gen2.spawn, &map);
-    const loot5 = planFloorLoot(42, 5, gen5.spawn, &map);
+    const loot2 = planFloorLoot(42, 2, gen2.spawn, &map2);
+    const loot5 = planFloorLoot(42, 5, gen5.spawn, &map5);
 
     try std.testing.expect(monsters5.count > monsters2.count or loot5.count > loot2.count);
+    try std.testing.expectEqual(@as(usize, 3), monsters2.count);
+    try std.testing.expectEqual(@as(usize, 4), loot2.count);
+    try std.testing.expect(monsters5.count > monsters2.count);
+    try std.testing.expectEqual(@as(usize, 5), monsters5.count);
     try std.testing.expect(loot5.count > loot2.count);
 }
 

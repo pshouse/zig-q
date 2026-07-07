@@ -71,6 +71,8 @@ pub fn runRepl(
     var w = try world.World.init(allocator, seed);
     defer w.deinit();
     try w.loadFloor(1);
+    // Piped scripts skip explore AI so ambush does not block scripted verification paths.
+    w.explore_ai_on_move = std.fs.File.stdin().isTty();
 
     var draft: session.CreationDraft = .{};
     _ = session.draftRoll(&w, &draft);
@@ -136,6 +138,7 @@ pub fn runReplScript(
     var w = try world.World.init(allocator, seed);
     defer w.deinit();
     try w.loadFloor(1);
+    w.explore_ai_on_move = false;
 
     var draft: session.CreationDraft = .{};
     _ = session.draftRoll(&w, &draft);

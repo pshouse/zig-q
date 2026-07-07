@@ -234,7 +234,7 @@ DST `playthrough` runs without `unknown command` for these inputs. Harvested tra
 
 | Deliver | Notes |
 |---------|--------|
-| Bandage heal | `use bandage` restores flat HP when wounded, explore-only, consumes item |
+| Bandage heal | `use bandage` restores flat HP when wounded, explore-only, consumes item; one bandage in starter kit |
 | Procedural traps | Seed-fixed `poison_trap` placement on descend (`floor_index >= 2`); step trigger via explore |
 | Depth scaling | `planMonsterSpawns` / `planFloorLoot` scale with `floor_index` (deeper = denser) |
 
