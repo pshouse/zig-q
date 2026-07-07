@@ -25,8 +25,13 @@ pub const Store = struct {
     }
 
     pub fn deinit(self: *Store, allocator: std.mem.Allocator) void {
-        for (self.objects.items) |obj| allocator.free(obj.label);
+        self.clear(allocator);
         self.objects.deinit(allocator);
+    }
+
+    pub fn clear(self: *Store, allocator: std.mem.Allocator) void {
+        for (self.objects.items) |obj| allocator.free(obj.label);
+        self.objects.clearRetainingCapacity();
     }
 
     pub fn add(self: *Store, allocator: std.mem.Allocator, kind: Kind, position: loc.Loc, label: []const u8) !void {

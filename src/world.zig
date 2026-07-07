@@ -147,6 +147,8 @@ pub const World = struct {
 
         combat.endCombat(self);
         self.removeAllMonsters();
+        self.floor_objects.clear(self.allocator);
+        self.doors.clear();
 
         const next_floor = self.floor_index + 1;
         try self.loadFloor(next_floor);
@@ -354,4 +356,19 @@ test "same seed yields identical world snapshot after spawn" {
     try std.testing.expectEqual(sa.occupied_cells, sb.occupied_cells);
     try std.testing.expectEqual(sa.clock_ticks, sb.clock_ticks);
     try std.testing.expectEqual(sa.rng_offset, sb.rng_offset);
+}
+
+test "descend clears corpses from previous floor" {
+    const allocator = std.testing.allocator;
+    var w = try World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    const player_id = try w.spawnTestPlayer(dungeon.floor1_stairs_v09);
+    try w.floor_objects.addItem(allocator, .corpse, loc.Loc.init(50, 49), "goblin_0", .short_sword);
+    try std.testing.expectEqual(@as(usize, 1), w.floor_objects.objects.items.len);
+    try w.descend(player_id);
+    try std.testing.expectEqual(@as(u32, 2), w.floor_index);
+    for (w.floor_objects.objects.items) |obj| {
+        try std.testing.expect(obj.kind != .corpse);
+    }
 }
