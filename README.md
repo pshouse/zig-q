@@ -49,7 +49,9 @@ The REPL loads **floor 1** dungeon tiles, rolls six stats on start, then accepts
 
 **Creation commands:** `roll`, `assign <6 picks>`, `race <1-3>`, `class <1-3>`, `spawn`, `stats` (draft preview before spawn)
 
-**Exploration commands:** `look`, `time`, `move <north|south|east|west>`, `descend` (on stairs/door tile), `help`, `exit`
+**Exploration commands:** `look`, `time`, `move <north|south|east|west>`, `m <dir>`, `wait`, `food`, `rest`, `sleep`, `conditions`, `descend` (on stairs/door tile), `help`, `help gear`, `exit`
+
+**Gear commands:** `get [item]`, `get from corpse`, `loot` (alias), `drop <item>`, `inventory`, `examine <item>`, `equip <item>`, `use <item>`. `look` lists nearby items and corpses; stand adjacent to pick up.
 
 **Combat commands:** `attack [target]`, `end turn` (melee d20 + STR mod vs AC; monsters counter on their turn)
 

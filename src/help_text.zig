@@ -22,10 +22,18 @@ pub const dst_v08_golden =
     \\
 ;
 
+pub const gear_golden =
+    \\gear: get [item], get from corpse, loot (alias), drop <item>
+    \\      inventory, examine <item>, equip <item>, use <item>
+    \\      look lists nearby items/corpses; stand adjacent to pick up
+    \\
+;
+
 pub const repl_v11_golden =
     \\creation: roll, assign <6 picks>, race <1-3>, class <1-3>, spawn, stats
-    \\explore:  look (l), time, move <n|s|e|w|nw|...>, m <dir>, wait, food, rest, sleep, conditions, descend, help, exit
+    \\explore:  look (l), time, move <n|s|e|w|nw|...>, m <dir>, wait, food, rest, sleep, conditions, descend, help, help gear, exit
     \\          chains: move w w   or   move w; move w
+    \\gear:     get [item], get from corpse, loot (alias), drop <item>, inventory, examine <item>, equip <item>, use <item>  (help gear)
     \\combat:   attack [target], end turn
     \\persist:  save [slot], load <slot>
     \\
@@ -36,14 +44,19 @@ pub const repl_v11_golden =
     \\
 ;
 
+pub fn writeGearHelp(writer: anytype) !void {
+    try writer.writeAll(gear_golden);
+}
+
 pub fn writeMainHelp(writer: anytype, profile: Profile) !void {
     switch (profile) {
         .dst_v08 => try writer.writeAll(dst_v08_golden),
         .repl_v11 => try writer.writeAll(repl_v11_golden),
         .repl => try writer.print(
             \\creation: roll, assign <6 picks>, race <1-3>, class <1-3>, spawn, stats
-            \\explore:  look (l), time, move <n|s|e|w|nw|...>, m <dir>, descend, help, exit
+            \\explore:  look (l), time, move <n|s|e|w|nw|...>, m <dir>, descend, help, help gear, exit
             \\          chains: move w w   or   move w; move w
+            \\gear:     get [item], get from corpse, loot (alias), drop <item>, inventory, examine <item>, equip <item>, use <item>  (help gear)
             \\combat:   attack [target], end turn
             \\persist:  save [slot], load <slot>
             \\
@@ -64,17 +77,18 @@ test "dst_v08 help matches v0.8 golden substring" {
 }
 
 test "repl_v11 help lists wait and conditions" {
-    var buf: [512]u8 = undefined;
+    var buf: [768]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
     try writeMainHelp(fbs.writer(), .repl_v11);
     const out = fbs.getWritten();
     try std.testing.expect(std.mem.indexOf(u8, out, "wait") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "conditions") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "descend") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "get from corpse") != null);
 }
 
 test "repl help lists descend on explore line" {
-    var buf: [512]u8 = undefined;
+    var buf: [768]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
     try writeMainHelp(fbs.writer(), .repl);
     const out = fbs.getWritten();

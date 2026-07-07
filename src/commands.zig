@@ -44,6 +44,7 @@ pub const Command = union(enum) {
     load_slot: u32,
     load_usage,
     help_descend,
+    help_gear,
     wait,
     conditions_cmd,
     inventory_cmd,
@@ -84,6 +85,7 @@ pub fn parseLine(line: []const u8) Command {
     if (std.mem.eql(u8, trimmed, "time")) return .time;
     if (std.mem.eql(u8, trimmed, "help")) return .help;
     if (std.mem.eql(u8, trimmed, "help descend")) return .help_descend;
+    if (std.mem.eql(u8, trimmed, "help gear")) return .help_gear;
     if (std.mem.eql(u8, trimmed, "exit")) return .exit;
     if (std.mem.eql(u8, trimmed, "roll")) return .roll;
     if (std.mem.eql(u8, trimmed, "spawn")) return .spawn;
@@ -99,6 +101,12 @@ pub fn parseLine(line: []const u8) Command {
     if (std.mem.eql(u8, trimmed, "inventory")) return .inventory_cmd;
     if (std.mem.eql(u8, trimmed, "get")) return .{ .get_item = null };
     if (std.mem.eql(u8, trimmed, "get from corpse")) return .{ .get_item = "corpse" };
+    if (std.mem.eql(u8, trimmed, "loot")) return .{ .get_item = null };
+    if (std.mem.eql(u8, trimmed, "loot from corpse")) return .{ .get_item = "corpse" };
+    if (std.mem.startsWith(u8, trimmed, "loot ")) {
+        const arg = std.mem.trim(u8, trimmed[5..], " \t");
+        if (arg.len > 0) return .{ .get_item = arg };
+    }
     if (std.mem.startsWith(u8, trimmed, "get ")) {
         const arg = std.mem.trim(u8, trimmed[4..], " \t");
         if (arg.len > 0) return .{ .get_item = arg };
@@ -547,7 +555,10 @@ fn expandMoveTail(allocator: std.mem.Allocator, tail: []const u8, list: *std.Arr
     }
 
     for (tokens[0..count]) |tok| {
-        if (movement.Direction.parse(tok)) |dir| {
+        if (movement.parseCompound(tok)) |pair| {
+            try appendMove(allocator, list, pair[0]);
+            try appendMove(allocator, list, pair[1]);
+        } else if (movement.Direction.parse(tok)) |dir| {
             try appendMove(allocator, list, dir);
         } else {
             return error.InvalidMoveShorthand;
@@ -565,8 +576,13 @@ fn expandSegment(allocator: std.mem.Allocator, segment: []const u8, list: *std.A
     }
 
     if (std.mem.startsWith(u8, trimmed, "m ")) {
-        const dir_part = std.mem.trim(u8, trimmed[2..], " \t");
-        try list.append(allocator, try std.fmt.allocPrint(allocator, "move {s}", .{dir_part}));
+        const tail = std.mem.trim(u8, trimmed[2..], " \t");
+        expandMoveTail(allocator, tail, list) catch |err| switch (err) {
+            error.InvalidMoveShorthand, error.TooManyMoveSteps => {
+                try list.append(allocator, try std.fmt.allocPrint(allocator, "move {s}", .{tail}));
+            },
+            else => return err,
+        };
         return;
     }
 
@@ -1002,6 +1018,9 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
         .help_descend => {
             try writer.print("descend: use on stairs (>) to go to the next floor\n", .{});
         },
+        .help_gear => {
+            try help_text.writeGearHelp(writer);
+        },
         .exit => return .exit_repl,
         .unknown => |text| {
             try writer.print("unknown command: {s}\n", .{text});
@@ -1016,6 +1035,20 @@ test "expandInput infers look shorthand" {
     defer freeExpanded(allocator, parts);
     try std.testing.expectEqual(@as(usize, 1), parts.len);
     try std.testing.expectEqualStrings("look", parts[0]);
+}
+
+test "parseLine accepts loot aliases for get" {
+    const loot_cmd = parseLine("loot");
+    try std.testing.expect(loot_cmd == .get_item);
+    try std.testing.expect(loot_cmd.get_item == null);
+
+    const corpse_cmd = parseLine("loot from corpse");
+    try std.testing.expect(corpse_cmd == .get_item);
+    try std.testing.expectEqualStrings("corpse", corpse_cmd.get_item.?);
+
+    const bandage_cmd = parseLine("loot bandage");
+    try std.testing.expect(bandage_cmd == .get_item);
+    try std.testing.expectEqualStrings("bandage", bandage_cmd.get_item.?);
 }
 
 test "expandInput infers move shorthand" {
@@ -1045,6 +1078,20 @@ test "expandInput expands compound and repeated moves" {
     try std.testing.expectEqual(@as(usize, 2), chain.len);
     try std.testing.expectEqualStrings("move w", chain[0]);
     try std.testing.expectEqualStrings("move w", chain[1]);
+
+    const se_e = try expandInput(allocator, "move se e");
+    defer freeExpanded(allocator, se_e);
+    try std.testing.expectEqual(@as(usize, 3), se_e.len);
+    try std.testing.expectEqualStrings("move s", se_e[0]);
+    try std.testing.expectEqualStrings("move e", se_e[1]);
+    try std.testing.expectEqualStrings("move e", se_e[2]);
+
+    const m_se_e = try expandInput(allocator, "m se e");
+    defer freeExpanded(allocator, m_se_e);
+    try std.testing.expectEqual(@as(usize, 3), m_se_e.len);
+    try std.testing.expectEqualStrings("move s", m_se_e[0]);
+    try std.testing.expectEqualStrings("move e", m_se_e[1]);
+    try std.testing.expectEqualStrings("move e", m_se_e[2]);
 }
 
 test "parse and execute move changes position" {
@@ -1284,16 +1331,19 @@ test "help descend via execute documents descend" {
     try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "stairs") != null);
 }
 
-test "repl help via execute lists descend" {
+test "repl help via execute lists descend and gear" {
     const allocator = std.testing.allocator;
     var w = try world.World.init(allocator, 42);
     defer w.deinit();
     var draft: session.CreationDraft = .{};
     var ctx = Context{ .allocator = allocator, .w = &w, .draft = &draft };
-    var buf: [512]u8 = undefined;
+    var buf: [768]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
     _ = try execute(&ctx, .help, fbs.writer());
-    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "descend") != null);
+    const out = fbs.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, out, "descend") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "get from corpse") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "help gear") != null);
 }
 
 fn descendTestCtx(allocator: std.mem.Allocator, w: *world.World) !Context {

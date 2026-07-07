@@ -57,6 +57,41 @@ fn tileDistance(a: loc.Loc, b: loc.Loc) u64 {
     return adx + ady;
 }
 
+pub fn formatVisibleFloorObjects(
+    w: *const world.World,
+    center: loc.Loc,
+    radius: u8,
+    writer: anytype,
+) !void {
+    const items_mod = @import("items.zig");
+    var listed = false;
+    for (w.floor_objects.objects.items) |obj| {
+        const pos = loc.Loc.init(obj.x, obj.y);
+        if (!inViewport(center, radius, pos)) continue;
+        if (!listed) {
+            try writer.writeAll("nearby:\n");
+            listed = true;
+        }
+        switch (obj.kind) {
+            .item => {
+                const name = if (obj.item) |id| items_mod.def(id).name else obj.label;
+                try writer.print("  {s} at ({},{}) (get {s})\n", .{ name, obj.x, obj.y, name });
+            },
+            .corpse => {
+                if (obj.item) |id| {
+                    const loot_name = items_mod.def(id).name;
+                    try writer.print("  corpse {s} at ({},{}) holds {s} (get from corpse)\n", .{
+                        obj.label, obj.x, obj.y, loot_name,
+                    });
+                } else {
+                    try writer.print("  corpse {s} at ({},{})\n", .{ obj.label, obj.x, obj.y });
+                }
+            },
+            .trap => try writer.print("  trap at ({},{})\n", .{ obj.x, obj.y }),
+        }
+    }
+}
+
 pub fn formatVisibleEntities(
     w: *const world.World,
     viewer_id: entity.EntityId,
@@ -106,7 +141,10 @@ pub fn renderLook(
         try writer.print("look center=({},{}) radius=5\n", .{ ent.loc.x, ent.loc.y });
     }
     try renderViewport(w, ent.loc, 5, writer);
-    if (list_nearby) try formatVisibleEntities(w, player_id, ent.loc, 5, writer);
+    if (list_nearby) {
+        try formatVisibleFloorObjects(w, ent.loc, 5, writer);
+        try formatVisibleEntities(w, player_id, ent.loc, 5, writer);
+    }
 }
 
 test "center tile shows @ even when entity is present" {
@@ -139,6 +177,23 @@ test "dungeon look shows walls" {
     const out = fbs.getWritten();
     try std.testing.expect(std.mem.indexOf(u8, out, "look floor=1") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "#") != null);
+}
+
+test "look lists nearby floor items when enabled" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    const id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    try w.floor_objects.addItem(allocator, .item, loc.Loc.init(49, 50), "bandage", @import("items.zig").Id.bandage);
+
+    var buf: [4096]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    try renderLook(&w, id, true, fbs.writer());
+    const out = fbs.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, out, "nearby:\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "bandage") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "(get bandage)") != null);
 }
 
 test "look lists visible entity names when enabled" {
