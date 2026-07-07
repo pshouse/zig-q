@@ -233,12 +233,17 @@ fn cmdInventory(ctx: *Context, writer: anytype) !Result {
 }
 
 fn cmdGet(ctx: *Context, name: ?[]const u8, writer: anytype) !Result {
+    if (combat.isInCombat(ctx.w)) {
+        try writer.print("cannot loot during combat\n", .{});
+        return .continue_repl;
+    }
     const ent = ctx.w.store.get(ctx.player_id) orelse {
         try writer.print("no player spawned\n", .{});
         return .continue_repl;
     };
     var picked: ?items.Id = null;
     var remove_pos: ?loc.Loc = null;
+    var empty_corpse_near = false;
 
     if (name) |n| {
         if (std.mem.eql(u8, n, "corpse")) {
@@ -250,13 +255,14 @@ fn cmdGet(ctx: *Context, name: ?[]const u8, writer: anytype) !Result {
                     remove_pos = loc.Loc.init(obj.x, obj.y);
                     break;
                 }
+                empty_corpse_near = true;
             }
         } else if (items.parseId(n)) |id| {
-            picked = id;
             for (ctx.w.floor_objects.objects.items) |*obj| {
                 if (obj.kind != .item and obj.kind != .corpse) continue;
                 if (obj.item != id) continue;
                 if (!tileNearPlayer(ctx.w, ctx.player_id, obj.x, obj.y)) continue;
+                picked = id;
                 remove_pos = loc.Loc.init(obj.x, obj.y);
                 break;
             }
@@ -270,11 +276,16 @@ fn cmdGet(ctx: *Context, name: ?[]const u8, writer: anytype) !Result {
                 remove_pos = loc.Loc.init(obj.x, obj.y);
                 break;
             }
+            if (obj.kind == .corpse) empty_corpse_near = true;
         }
     }
 
     if (picked == null) {
-        try writer.print("nothing to pick up here\n", .{});
+        if (empty_corpse_near) {
+            try writer.print("corpse is empty\n", .{});
+        } else {
+            try writer.print("nothing to pick up here\n", .{});
+        }
         return .continue_repl;
     }
     try ent.inventory.add(ctx.allocator, picked.?, 1);
@@ -295,6 +306,10 @@ fn cmdGet(ctx: *Context, name: ?[]const u8, writer: anytype) !Result {
 }
 
 fn cmdDrop(ctx: *Context, name: []const u8, writer: anytype) !Result {
+    if (combat.isInCombat(ctx.w)) {
+        try writer.print("cannot drop during combat\n", .{});
+        return .continue_repl;
+    }
     const ent = ctx.w.store.get(ctx.player_id) orelse {
         try writer.print("no player spawned\n", .{});
         return .continue_repl;
@@ -314,17 +329,43 @@ fn cmdDrop(ctx: *Context, name: []const u8, writer: anytype) !Result {
     return .continue_repl;
 }
 
-fn cmdExamine(_: *Context, name: []const u8, writer: anytype) !Result {
-    const id = items.parseId(name) orelse {
-        try writer.print("unknown item\n", .{});
+fn cmdExamine(ctx: *Context, name: []const u8, writer: anytype) !Result {
+    if (items.parseId(name)) |id| {
+        const d = items.def(id);
+        try writer.print("{s}: weight={} category={s}", .{ d.name, d.weight, @tagName(d.category) });
+        if (d.damage_die > 0) try writer.print(" damage=d{}", .{d.damage_die});
+        if (d.ac_bonus > 0) try writer.print(" ac_bonus={}", .{d.ac_bonus});
+        if (d.trait != .none) try writer.print(" trait={s}", .{@tagName(d.trait)});
+        try writer.print("\n", .{});
         return .continue_repl;
-    };
-    const d = items.def(id);
-    try writer.print("{s}: weight={} category={s}", .{ d.name, d.weight, @tagName(d.category) });
-    if (d.damage_die > 0) try writer.print(" damage=d{}", .{d.damage_die});
-    if (d.ac_bonus > 0) try writer.print(" ac_bonus={}", .{d.ac_bonus});
-    if (d.trait != .none) try writer.print(" trait={s}", .{@tagName(d.trait)});
-    try writer.writeAll("\n");
+    }
+    for (ctx.w.floor_objects.objects.items) |obj| {
+        if (!tileNearPlayer(ctx.w, ctx.player_id, obj.x, obj.y)) continue;
+        const matches_label = std.mem.eql(u8, name, obj.label) or
+            (std.mem.eql(u8, name, "corpse") and obj.kind == .corpse);
+        if (!matches_label) continue;
+        switch (obj.kind) {
+            .corpse => {
+                if (obj.item) |loot| {
+                    try writer.print("corpse {s} holds {s}\n", .{ obj.label, items.def(loot).name });
+                } else {
+                    try writer.print("corpse {s} is empty\n", .{obj.label});
+                }
+                return .continue_repl;
+            },
+            .item => {
+                if (obj.item) |loot| {
+                    const d = items.def(loot);
+                    try writer.print("{s} on floor: weight={} category={s}\n", .{
+                        d.name, d.weight, @tagName(d.category),
+                    });
+                    return .continue_repl;
+                }
+            },
+            .trap => {},
+        }
+    }
+    try writer.print("unknown item\n", .{});
     return .continue_repl;
 }
 
@@ -1469,6 +1510,39 @@ test "save load via execute preserves crawl snapshot" {
     try save_state.expectEqual(&before, &after);
     try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "saved slot") != null);
     try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "loaded slot") != null);
+}
+
+test "get requires adjacent floor item" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    var draft: session.CreationDraft = .{};
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    var ctx = Context{ .allocator = allocator, .w = &w, .draft = &draft, .player_id = player_id };
+    try w.floor_objects.addItem(allocator, .item, loc.Loc.init(52, 49), "leather_armour", .leather_armour);
+
+    var buf: [256]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("get leather armour"), fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "nothing to pick up") != null);
+    try std.testing.expect(w.floor_objects.at(loc.Loc.init(52, 49)) != null);
+}
+
+test "examine corpse reports empty skeleton" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    var draft: session.CreationDraft = .{};
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    var ctx = Context{ .allocator = allocator, .w = &w, .draft = &draft, .player_id = player_id };
+    try w.floor_objects.addItem(allocator, .corpse, loc.Loc.init(49, 50), "skeleton_0", null);
+
+    var buf: [256]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("examine corpse"), fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "skeleton_0 is empty") != null);
 }
 
 test "kill via execute restores exploring status" {
