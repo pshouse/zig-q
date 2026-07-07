@@ -557,6 +557,7 @@ fn cmdRest(ctx: *Context, writer: anytype) !Result {
         ctx.w.tickAction(1);
         if (combat.isInCombat(ctx.w)) {
             try writer.print("rest interrupted by combat\n", .{});
+            try notice.printChanges(ent, writer);
             return .continue_repl;
         }
     }
@@ -596,6 +597,7 @@ fn cmdSleep(ctx: *Context, writer: anytype) !Result {
             conditions.remove(ent, .unconscious);
             _ = survival.syncExhaustion(ent);
             try writer.print("sleep interrupted by combat (interrupt rule: ambush ends sleep)\n", .{});
+            try notice.printChanges(ent, writer);
             return .continue_repl;
         }
     }

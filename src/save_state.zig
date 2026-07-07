@@ -312,6 +312,7 @@ pub fn apply(allocator: std.mem.Allocator, save: *const WorldSave) !world.World 
         ent.damage_die = ent_save.damage_die;
         ent.is_monster = ent_save.is_monster;
         ent.inventory = try inventory.fromSave(allocator, ent_save.gear);
+        if (!ent.is_monster) _ = survival.syncStarving(ent);
     }
 
     for (save.map_cells) |cell| {
@@ -531,4 +532,25 @@ test "capture apply roundtrip preserves crawl state" {
     var after = try capture(allocator, &restored, player_id);
     defer after.deinit(allocator);
     try expectEqual(&before, &after);
+}
+
+test "apply syncs starving from hunger on load" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    const ent = w.store.get(player_id).?;
+    ent.hunger = 80;
+    ent.conditions = types.ConditionSet.initEmpty();
+    ent.exhaustion_level = 0;
+
+    var save = try capture(allocator, &w, player_id);
+    defer save.deinit(allocator);
+    save.entities[0].conditions_bits = 0;
+
+    var restored = try apply(allocator, &save);
+    defer restored.deinit();
+    const loaded = restored.store.get(player_id).?;
+    try std.testing.expect(conditions.has(loaded, .starving));
 }
