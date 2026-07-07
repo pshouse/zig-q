@@ -60,6 +60,7 @@ pub const Command = union(enum) {
     open_dir: movement.Direction,
     close_dir: movement.Direction,
     use_item: []const u8,
+    wound,
     unknown: []const u8,
 };
 
@@ -174,6 +175,7 @@ pub fn parseLine(line: []const u8) Command {
         const arg = std.mem.trim(u8, trimmed[4..], " \t");
         if (arg.len > 0) return .{ .use_item = arg };
     }
+    if (std.mem.eql(u8, trimmed, "wound")) return .wound;
 
     if (std.mem.eql(u8, trimmed, "assign")) return .assign_usage;
     if (std.mem.startsWith(u8, trimmed, "assign ")) {
@@ -663,6 +665,27 @@ fn finishExploreMove(ctx: *Context, writer: anytype) !void {
     try finishExploreAction(ctx, writer);
 }
 
+fn cmdWound(ctx: *Context, writer: anytype) !Result {
+    if (combat.isInCombat(ctx.w)) {
+        try writer.print("cannot wound during combat\n", .{});
+        return .continue_repl;
+    }
+    const ent = ctx.w.store.get(ctx.player_id) orelse {
+        try writer.print("no player spawned\n", .{});
+        return .continue_repl;
+    };
+    if (ent.current_hp <= 1) {
+        try writer.print("already at minimum hp\n", .{});
+        return .continue_repl;
+    }
+    const loss: u32 = @min(3, ent.current_hp - 1);
+    ent.current_hp -= loss;
+    try writer.print("wounded for playtest; hp={}/{}\n", .{ ent.current_hp, ent.max_hp });
+    try tickPlayerAction(ctx, 1, writer);
+    try finishExploreAction(ctx, writer);
+    return .continue_repl;
+}
+
 fn cmdUse(ctx: *Context, name: []const u8, writer: anytype) !Result {
     const ent = ctx.w.store.get(ctx.player_id) orelse {
         try writer.print("no player spawned\n", .{});
@@ -941,6 +964,7 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
             try finishExploreAction(ctx, writer);
         },
         .use_item => |name| return cmdUse(ctx, name, writer),
+        .wound => return cmdWound(ctx, writer),
         .conditions_cmd => {
             const ent = ctx.w.store.get(ctx.player_id) orelse {
                 try writer.print("no player spawned\n", .{});
@@ -1597,6 +1621,27 @@ test "descend via execute from normal spawn reaches floor 2" {
         if (ent.is_monster) monster_count += 1;
     }
     evidence_format.printDescendEvidence(w.floor_index, gen.layout_hash, gen.walkable_count, monster_count);
+}
+
+test "wound and bandage via execute on minimal repl path" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+
+    var ctx = try descendTestCtx(allocator, &w);
+    const max_hp = w.store.get(ctx.player_id).?.max_hp;
+
+    var buf: [512]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, .wound, fbs.writer());
+    _ = try execute(&ctx, parseLine("use bandage"), fbs.writer());
+    _ = try execute(&ctx, .stats, fbs.writer());
+
+    const out = fbs.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, out, "wounded for playtest") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "used bandage; healed") != null);
+    try std.testing.expectEqual(max_hp, w.store.get(ctx.player_id).?.current_hp);
 }
 
 test "use bandage via execute heals wounded player and consumes item" {
