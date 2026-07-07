@@ -307,7 +307,6 @@ fn cmdGet(ctx: *Context, name: ?[]const u8, writer: anytype) !Result {
         if (ctx.w.floor_objects.at(pos)) |obj| {
             if (obj.kind == .corpse) {
                 obj.item = null;
-                ctx.w.floor_objects.removeAt(ctx.allocator, pos);
             } else {
                 ctx.w.floor_objects.removeAt(ctx.allocator, pos);
             }
@@ -1684,6 +1683,29 @@ test "equip armour resolves category shorthand" {
     _ = try execute(&ctx, parseLine("equip armour"), fbs.writer());
     try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "equipped leather armour") != null);
     try std.testing.expectEqual(.leather_armour, ent.inventory.armour);
+}
+
+test "loot from corpse leaves empty corpse on floor" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    var draft: session.CreationDraft = .{};
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    var ctx = Context{ .allocator = allocator, .w = &w, .draft = &draft, .player_id = player_id };
+    try w.floor_objects.addItem(allocator, .corpse, loc.Loc.init(50, 49), "goblin_0", .short_sword);
+
+    var buf: [512]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("loot from corpse"), fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "picked up short sword from goblin_0") != null);
+
+    buf = undefined;
+    fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, .look, fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "corpse goblin_0 at (50,49)") != null);
+    try std.testing.expect(w.floor_objects.at(loc.Loc.init(50, 49)) != null);
+    try std.testing.expect(w.floor_objects.at(loc.Loc.init(50, 49)).?.item == null);
 }
 
 test "examine corpse reports empty skeleton" {
