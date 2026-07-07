@@ -74,9 +74,9 @@ pub const Store = struct {
     }
 };
 
-/// Large corpses block movement; small ones (goblins, etc.) can be stepped over.
+/// Only truly large corpses block movement; humanoids (goblin, skeleton, etc.) can be stepped over.
 pub fn corpseBlocksTile(label: []const u8) bool {
-    return std.mem.startsWith(u8, label, "skeleton");
+    return std.mem.startsWith(u8, label, "dragon");
 }
 
 pub const ObjectSave = struct {
@@ -89,7 +89,8 @@ pub const ObjectSave = struct {
 
 test "corpse size gates tile blocking" {
     try std.testing.expect(!corpseBlocksTile("goblin_0"));
-    try std.testing.expect(corpseBlocksTile("skeleton_0"));
+    try std.testing.expect(!corpseBlocksTile("skeleton_0"));
+    try std.testing.expect(corpseBlocksTile("dragon_0"));
 }
 
 test "store add and at" {

@@ -251,7 +251,7 @@ DST `playthrough` runs without `unknown command` for these inputs. Harvested tra
 
 | Idea | Notes |
 |------|--------|
-| **Skeleton bones loot** | Skeleton corpses (`skeleton_*`) currently hold no item; goblins drop `short_sword`. Add mundane `bones` (light weight) lootable via `get from corpse` / `loot`. **Defer until a use exists** — junk-without-sink is poor UX. Candidate mundane sinks: trap bait (distraction), `rest` combo with `bandage`, future trade/shrine turn-in. Fits no-magic rules; no implement-before-use. Large corpses (`skeleton_*`) block tiles; small corpses (`goblin_*`) can be walked over. |
+| **Skeleton bones loot** | Skeleton corpses (`skeleton_*`) currently hold no item; goblins drop `short_sword`. Add mundane `bones` (light weight) lootable via `get from corpse` / `loot`. **Defer until a use exists** — junk-without-sink is poor UX. Candidate mundane sinks: trap bait (distraction), `rest` combo with `bandage`, future trade/shrine turn-in. Fits no-magic rules; no implement-before-use. Humanoid corpses are walkable; only truly large corpses (e.g. `dragon_*`) block tiles. |
 
 ---
 
