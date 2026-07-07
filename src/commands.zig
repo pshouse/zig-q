@@ -834,6 +834,12 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                 }
             }
             const move_ent = ctx.w.store.get(ctx.player_id).?;
+            if (movement.step(move_ent.loc, dir)) |target| {
+                if (ctx.w.tileBlockReason(target, ctx.player_id)) |reason| {
+                    try writer.print("{s}.\n", .{reason});
+                    return .continue_repl;
+                }
+            }
             const ex_before = conditions.exhaustionLevel(move_ent);
             const new_loc = movement.moveEntity(ctx.w, ctx.player_id, dir) catch |err| switch (err) {
                 error.Blocked => {

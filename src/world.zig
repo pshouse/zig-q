@@ -240,8 +240,9 @@ pub const World = struct {
         return self.spawnPlayer(char, position, "entity_0");
     }
 
-    /// Living entities block movement; corpses (floor objects) and dead entities do not.
+    /// Living entities block movement. Small corpses can be stepped over; large ones block the tile.
     pub fn isTileBlockedFor(self: *const World, position: loc.Loc, mover_id: entity.EntityId) bool {
+        if (self.floor_objects.blocksTileAt(position)) return true;
         const list = self.tile_map.cells.get(position) orelse return false;
         for (list.items) |eid| {
             if (eid == mover_id) continue;
@@ -251,6 +252,19 @@ pub const World = struct {
             return true;
         }
         return false;
+    }
+
+    pub fn tileBlockReason(self: *const World, position: loc.Loc, mover_id: entity.EntityId) ?[]const u8 {
+        if (self.floor_objects.blocksTileAt(position)) return "A large corpse blocks the way";
+        const list = self.tile_map.cells.get(position) orelse return null;
+        for (list.items) |eid| {
+            if (eid == mover_id) continue;
+            if (self.store.get(eid)) |ent| {
+                if (conditions.isDead(ent)) continue;
+            }
+            return "something is in the way";
+        }
+        return null;
     }
 
     pub fn tick(self: *World) void {

@@ -119,6 +119,18 @@ test "moveEntity allows stepping onto corpse floor object" {
     try std.testing.expectEqual(loc.Loc.init(50, 49), new_loc);
 }
 
+test "moveEntity rejects large corpse on tile" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+
+    const id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    try w.floor_objects.addItem(allocator, .corpse, loc.Loc.init(50, 49), "skeleton_0", null);
+
+    try std.testing.expectError(error.Blocked, moveEntity(&w, id, .south));
+}
+
 test "moveEntity ignores dead entity still listed on tile map" {
     const allocator = std.testing.allocator;
     var w = try world.World.init(allocator, 42);

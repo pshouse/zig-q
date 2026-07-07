@@ -57,6 +57,11 @@ pub const Store = struct {
         return null;
     }
 
+    pub fn blocksTileAt(self: *const Store, position: loc.Loc) bool {
+        const obj = self.at(position) orelse return false;
+        return obj.kind == .corpse and corpseBlocksTile(obj.label);
+    }
+
     pub fn removeAt(self: *Store, allocator: std.mem.Allocator, position: loc.Loc) void {
         var i: usize = 0;
         while (i < self.objects.items.len) : (i += 1) {
@@ -69,6 +74,11 @@ pub const Store = struct {
     }
 };
 
+/// Large corpses block movement; small ones (goblins, etc.) can be stepped over.
+pub fn corpseBlocksTile(label: []const u8) bool {
+    return std.mem.startsWith(u8, label, "skeleton");
+}
+
 pub const ObjectSave = struct {
     kind: Kind,
     x: u64,
@@ -76,6 +86,11 @@ pub const ObjectSave = struct {
     label: []const u8,
     item: ?items.Id = null,
 };
+
+test "corpse size gates tile blocking" {
+    try std.testing.expect(!corpseBlocksTile("goblin_0"));
+    try std.testing.expect(corpseBlocksTile("skeleton_0"));
+}
 
 test "store add and at" {
     const allocator = std.testing.allocator;
