@@ -674,6 +674,7 @@ pub const Harness = struct {
     player_id: u32 = std.math.maxInt(u32),
     last_pool: session.StatPool = undefined,
     save_path: []const u8 = @import("sqlite_store.zig").dst_path,
+    explore_ai_on_move: bool = true,
 
     pub fn init(allocator: std.mem.Allocator, seed: u64) !Harness {
         return .{
@@ -707,6 +708,8 @@ pub const Harness = struct {
             self.* = try Harness.init(self.allocator, scenario.seed);
         }
         self.w.floor1_profile = floor1ProfileForScenario(scenario.name);
+        self.explore_ai_on_move = !std.mem.startsWith(u8, scenario.name, "reference_crawl");
+        self.w.explore_ai_on_move = self.explore_ai_on_move;
 
         for (scenario.steps) |step| {
             try self.runStep(step, writer);
@@ -804,6 +807,7 @@ pub const Harness = struct {
                 };
                 const result = try commands.executeLine(&ctx, line, writer);
                 self.player_id = ctx.player_id;
+                self.w.explore_ai_on_move = self.explore_ai_on_move;
                 if (result == .exit_repl) {
                     try writer.print("step exit\n", .{});
                 }

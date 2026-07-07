@@ -137,7 +137,7 @@ pub fn tryCloseDoor(
 }
 
 /// One explore step per monster; returns true if a monster moved adjacent to the player.
-pub fn runExploreMonsterTurns(w: *world.World, player_id: entity.EntityId) !bool {
+pub fn runExploreMonsterTurns(w: *world.World, player_id: entity.EntityId, writer: anytype) !bool {
     if (combat.isInCombat(w)) return false;
     const player = w.store.get(player_id) orelse return false;
     if (conditions.isDead(player)) return false;
@@ -165,7 +165,11 @@ pub fn runExploreMonsterTurns(w: *world.World, player_id: entity.EntityId) !bool
         if (w.store.get(mid)) |m| {
             m.last_move_dir = dir;
             m.ai_patrol_phase +%= 1;
-            _ = before;
+            if (before.x != after.x or before.y != after.y) {
+                try writer.print("{s} moved {s} to ({},{})\n", .{
+                    m.name, movement.Direction.token(dir), after.x, after.y,
+                });
+            }
             if (isAdjacent(after, player.loc)) moved_adjacent = true;
         }
         if (moved_adjacent) return true;
@@ -185,9 +189,9 @@ pub fn tryAmbushOnAdjacent(w: *world.World, player_id: entity.EntityId) !void {
     if (best) |enemy| try combat.enterCombat(w, player_id, enemy);
 }
 
-pub fn afterPlayerExploreAction(w: *world.World, player_id: entity.EntityId) !bool {
+pub fn afterPlayerExploreAction(w: *world.World, player_id: entity.EntityId, writer: anytype) !bool {
     if (combat.isInCombat(w)) return false;
-    const moved_adjacent = try runExploreMonsterTurns(w, player_id);
+    const moved_adjacent = try runExploreMonsterTurns(w, player_id, writer);
     if (moved_adjacent) try tryAmbushOnAdjacent(w, player_id);
     return combat.isInCombat(w);
 }
@@ -207,7 +211,9 @@ test "frightened monster flees away from player" {
     if (w.store.get(monster_id)) |m| conditions.apply(m, .frightened);
 
     const before = w.store.get(monster_id).?.loc;
-    _ = try runExploreMonsterTurns(&w, player_id);
+    var discard_buf: [128]u8 = undefined;
+    var discard_stream = std.io.fixedBufferStream(&discard_buf);
+    _ = try runExploreMonsterTurns(&w, player_id, discard_stream.writer());
     const monster = w.store.get(monster_id).?;
     try std.testing.expect(monster.loc.x != before.x or monster.loc.y != before.y);
     try std.testing.expect(!isAdjacent(monster.loc, w.store.get(player_id).?.loc));

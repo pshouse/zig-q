@@ -99,6 +99,7 @@ pub fn parseLine(line: []const u8) Command {
     if (std.mem.eql(u8, trimmed, "sleep")) return .sleep;
     if (std.mem.eql(u8, trimmed, "conditions")) return .conditions_cmd;
     if (std.mem.eql(u8, trimmed, "inventory")) return .inventory_cmd;
+    if (std.mem.eql(u8, trimmed, "inv")) return .inventory_cmd;
     if (std.mem.eql(u8, trimmed, "get")) return .{ .get_item = null };
     if (std.mem.eql(u8, trimmed, "get from corpse")) return .{ .get_item = "corpse" };
     if (std.mem.eql(u8, trimmed, "loot")) return .{ .get_item = null };
@@ -469,16 +470,16 @@ fn isSpawned(ctx: *const Context) bool {
 
 fn finishExploreAction(ctx: *Context, writer: anytype) !void {
     if (combat.isInCombat(ctx.w)) return;
-    if (try explore.afterPlayerExploreAction(ctx.w, ctx.player_id)) {
+    if (try explore.afterPlayerExploreAction(ctx.w, ctx.player_id, writer)) {
         try writer.print("ambush combat started\n", .{});
     }
 }
 
 fn finishExploreMove(ctx: *Context, writer: anytype) !void {
     if (combat.isInCombat(ctx.w)) return;
-    if (ctx.w.floor_index == 1) {
-        try finishExploreAction(ctx, writer);
-    }
+    if (!ctx.w.explore_ai_on_move) return;
+    if (ctx.w.floor_index < 2) return;
+    try finishExploreAction(ctx, writer);
 }
 
 fn cmdUse(ctx: *Context, name: []const u8, writer: anytype) !Result {

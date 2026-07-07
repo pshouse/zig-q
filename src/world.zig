@@ -34,6 +34,8 @@ pub const World = struct {
     floor_objects: world_objects.Store = .init(),
     doors: doors.Store = undefined,
     player_dead: bool = false,
+    /// When false, monster AI does not run after player moves (reference_crawl stability).
+    explore_ai_on_move: bool = true,
 
     pub fn init(allocator: std.mem.Allocator, seed: u64) !World {
         var races = try types.defaultRaces(allocator);
