@@ -888,13 +888,13 @@ pub const Harness = struct {
             .set_hunger => |cfg| {
                 const ent = findEntityByName(&self.w, cfg.entity) orelse return error.EntityNotFound;
                 ent.hunger = cfg.value;
-                survival.syncExhaustion(ent);
+                _ = survival.syncExhaustion(ent);
                 try writer.print("step set_hunger {s} value={}\n", .{ cfg.entity, cfg.value });
             },
             .set_fatigue => |cfg| {
                 const ent = findEntityByName(&self.w, cfg.entity) orelse return error.EntityNotFound;
                 ent.fatigue = cfg.value;
-                survival.syncExhaustion(ent);
+                _ = survival.syncExhaustion(ent);
                 try writer.print("step set_fatigue {s} value={}\n", .{ cfg.entity, cfg.value });
             },
         }

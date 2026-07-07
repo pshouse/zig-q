@@ -56,13 +56,32 @@ pub fn computeExhaustion(ent: *const entity.Entity) u3 {
     return @intCast(@min(level, 6));
 }
 
-pub fn syncExhaustion(ent: *entity.Entity) void {
+pub const ExhaustionChange = struct {
+    before: u3,
+    after: u3,
+};
+
+pub fn syncExhaustion(ent: *entity.Entity) ExhaustionChange {
+    const before = conditions.exhaustionLevel(ent);
     const level = computeExhaustion(ent);
     conditions.setExhaustion(ent, level);
     if (level >= 5) {
         conditions.apply(ent, .unconscious);
     } else if (!ent.sleeping) {
         conditions.remove(ent, .unconscious);
+    }
+    return .{ .before = before, .after = level };
+}
+
+pub fn printExhaustionNotice(before: u3, after: u3, writer: anytype) !void {
+    if (after > before) {
+        try writer.print("exhaustion level {}\n", .{after});
+    } else if (after < before) {
+        if (after == 0) {
+            try writer.print("exhaustion cleared\n", .{});
+        } else {
+            try writer.print("exhaustion eased to level {}\n", .{after});
+        }
     }
 }
 
@@ -82,7 +101,7 @@ pub fn onTick(w: *world.World, ent: *entity.Entity) void {
         }
     }
 
-    syncExhaustion(ent);
+    _ = syncExhaustion(ent);
     clampHpToEffectiveMax(ent);
 
     if (conditions.exhaustionLevel(ent) >= 6) {
@@ -106,7 +125,7 @@ pub fn eatFood(ent: *entity.Entity, id: items.Id) bool {
     } else {
         ent.hunger -= d.food_restore;
     }
-    syncExhaustion(ent);
+    _ = syncExhaustion(ent);
     return true;
 }
 
@@ -127,7 +146,7 @@ test "starvation raises exhaustion" {
     ent.hunger = hunger_max;
     ent.fatigue = 0;
     ent.sleeping = false;
-    syncExhaustion(&ent);
+    _ = syncExhaustion(&ent);
     try std.testing.expectEqual(@as(u3, 3), conditions.exhaustionLevel(&ent));
 }
 
@@ -140,7 +159,7 @@ test "prolonged starvation reaches exhaustion 6" {
     ent.hunger = hunger_max;
     ent.fatigue = 90;
     ent.sleeping = false;
-    syncExhaustion(&ent);
+    _ = syncExhaustion(&ent);
     try std.testing.expectEqual(@as(u3, 6), conditions.exhaustionLevel(&ent));
 }
 
@@ -149,6 +168,13 @@ test "food reduces hunger" {
     const restore = items.def(.rations).food_restore;
     if (hunger <= restore) hunger = 0 else hunger -= restore;
     try std.testing.expectEqual(@as(u16, 10), hunger);
+}
+
+test "exhaustion notice on level increase" {
+    var buf: [64]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    try printExhaustionNotice(0, 1, fbs.writer());
+    try std.testing.expect(std.mem.eql(u8, fbs.getWritten(), "exhaustion level 1\n"));
 }
 
 test "ticks increase hunger" {

@@ -319,7 +319,7 @@ fn cmdGet(ctx: *Context, name: ?[]const u8, writer: anytype) !Result {
     } else {
         try writer.print("picked up {s}\n", .{d.name});
     }
-    ctx.w.tickAction(1);
+    try tickPlayerAction(ctx, 1, writer);
     try finishExploreAction(ctx, writer);
     return .continue_repl;
 }
@@ -400,7 +400,7 @@ fn cmdDrop(ctx: *Context, name: []const u8, writer: anytype) !Result {
     }
     try ctx.w.floor_objects.addItem(ctx.allocator, .item, ent.loc, items.idTag(id), id);
     try writer.print("dropped {s}\n", .{items.def(id).name});
-    ctx.w.tickAction(1);
+    try tickPlayerAction(ctx, 1, writer);
     try finishExploreAction(ctx, writer);
     return .continue_repl;
 }
@@ -530,9 +530,11 @@ fn cmdFood(ctx: *Context, name: ?[]const u8, writer: anytype) !Result {
         try writer.print("you do not have {s}\n", .{d.name});
         return .continue_repl;
     }
+    const before = conditions.exhaustionLevel(ent);
     _ = ent.inventory.remove(id, 1);
     _ = survival.eatFood(ent, id);
     ctx.w.tickAction(1);
+    try survival.printExhaustionNotice(before, conditions.exhaustionLevel(ent), writer);
     try writer.print("ate {s} hunger={}\n", .{ d.name, ent.hunger });
     return .continue_repl;
 }
@@ -550,6 +552,7 @@ fn cmdRest(ctx: *Context, writer: anytype) !Result {
         try writer.print("cannot rest while incapacitated\n", .{});
         return .continue_repl;
     }
+    const before = conditions.exhaustionLevel(ent);
     var i: u32 = 0;
     while (i < survival.rest_ticks) : (i += 1) {
         ctx.w.tickAction(1);
@@ -563,7 +566,8 @@ fn cmdRest(ctx: *Context, writer: anytype) !Result {
     } else {
         ent.fatigue = 0;
     }
-    survival.syncExhaustion(ent);
+    _ = survival.syncExhaustion(ent);
+    try survival.printExhaustionNotice(before, conditions.exhaustionLevel(ent), writer);
     try writer.print("rested (ticks={} fatigue={})\n", .{ ctx.w.game_clock.ticks, ent.fatigue });
     return .continue_repl;
 }
@@ -584,13 +588,14 @@ fn cmdSleep(ctx: *Context, writer: anytype) !Result {
     ent.sleeping = true;
     conditions.apply(ent, .unconscious);
     try writer.print("sleeping (unconscious)\n", .{});
+    const before = conditions.exhaustionLevel(ent);
     var i: u32 = 0;
     while (i < survival.sleep_ticks) : (i += 1) {
         ctx.w.tickAction(1);
         if (combat.isInCombat(ctx.w)) {
             ent.sleeping = false;
             conditions.remove(ent, .unconscious);
-            survival.syncExhaustion(ent);
+            _ = survival.syncExhaustion(ent);
             try writer.print("sleep interrupted by combat (interrupt rule: ambush ends sleep)\n", .{});
             return .continue_repl;
         }
@@ -598,13 +603,24 @@ fn cmdSleep(ctx: *Context, writer: anytype) !Result {
     ent.sleeping = false;
     ent.fatigue = 0;
     conditions.remove(ent, .unconscious);
-    survival.syncExhaustion(ent);
+    _ = survival.syncExhaustion(ent);
+    try survival.printExhaustionNotice(before, conditions.exhaustionLevel(ent), writer);
     try writer.print("slept (ticks={} fatigue=0)\n", .{ ctx.w.game_clock.ticks });
     return .continue_repl;
 }
 
 fn isSpawned(ctx: *const Context) bool {
     return ctx.player_id != entity.invalid_id;
+}
+
+fn tickPlayerAction(ctx: *Context, count: u32, writer: anytype) !void {
+    const ent = ctx.w.store.get(ctx.player_id) orelse {
+        ctx.w.tickAction(count);
+        return;
+    };
+    const before = conditions.exhaustionLevel(ent);
+    ctx.w.tickAction(count);
+    try survival.printExhaustionNotice(before, conditions.exhaustionLevel(ent), writer);
 }
 
 fn finishExploreAction(ctx: *Context, writer: anytype) !void {
@@ -639,7 +655,7 @@ fn cmdUse(ctx: *Context, name: []const u8, writer: anytype) !Result {
         _ = ent.inventory.remove(id, 1);
         conditions.remove(ent, .poisoned);
         try writer.print("used antidote; poison cleared\n", .{});
-        ctx.w.tickAction(1);
+        try tickPlayerAction(ctx, 1, writer);
         try finishExploreAction(ctx, writer);
         return .continue_repl;
     }
@@ -818,6 +834,8 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                     return .continue_repl;
                 }
             }
+            const move_ent = ctx.w.store.get(ctx.player_id).?;
+            const ex_before = conditions.exhaustionLevel(move_ent);
             const new_loc = movement.moveEntity(ctx.w, ctx.player_id, dir) catch |err| switch (err) {
                 error.Blocked => {
                     try writer.print("You cannot move there.\n", .{});
@@ -826,6 +844,7 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                 else => |e| return e,
             };
             try writer.print("moved to ({},{})\n", .{ new_loc.x, new_loc.y });
+            try survival.printExhaustionNotice(ex_before, conditions.exhaustionLevel(move_ent), writer);
             if (explore.checkStepTraps(ctx.w, ctx.player_id)) {
                 try writer.print("trap triggered: poisoned\n", .{});
             }
@@ -836,7 +855,7 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                 try writer.print("no player spawned\n", .{});
                 return .continue_repl;
             }
-            ctx.w.tickAction(1);
+            try tickPlayerAction(ctx, 1, writer);
             try writer.print("waited (ticks={})\n", .{ctx.w.game_clock.ticks});
             try finishExploreAction(ctx, writer);
         },
@@ -853,7 +872,7 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                 error.DoorLocked => try writer.print("door is locked\n", .{}),
                 else => |e| return e,
             }
-            ctx.w.tickAction(1);
+            try tickPlayerAction(ctx, 1, writer);
             try finishExploreAction(ctx, writer);
         },
         .close_dir => |dir| {
@@ -868,7 +887,7 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                 error.AlreadyClosed => try writer.print("door already closed\n", .{}),
                 else => |e| return e,
             }
-            ctx.w.tickAction(1);
+            try tickPlayerAction(ctx, 1, writer);
             try finishExploreAction(ctx, writer);
         },
         .use_item => |name| return cmdUse(ctx, name, writer),

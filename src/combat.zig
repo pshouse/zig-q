@@ -9,6 +9,7 @@ const types = @import("types.zig");
 const conditions = @import("conditions.zig");
 const inventory = @import("inventory.zig");
 const items = @import("items.zig");
+const survival = @import("survival.zig");
 
 pub const CombatState = struct {
     participants: std.ArrayList(entity.EntityId),
@@ -317,7 +318,20 @@ pub fn performAttack(
     } else {
         try writer.print("miss\n", .{});
     }
+    var player_ex_before: ?u3 = null;
+    if (w.combat) |c| {
+        if (w.store.get(c.player_id)) |player| {
+            player_ex_before = conditions.exhaustionLevel(player);
+        }
+    }
     w.tickAction(1);
+    if (player_ex_before) |before| {
+        if (w.combat) |c| {
+            if (w.store.get(c.player_id)) |player| {
+                try survival.printExhaustionNotice(before, conditions.exhaustionLevel(player), writer);
+            }
+        }
+    }
 }
 
 fn processMonsterTurns(w: *world.World, writer: anytype) !void {
