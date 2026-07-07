@@ -193,6 +193,33 @@ test "sqlite save load roundtrip" {
     try save_state.expectEqual(&before, &after);
 }
 
+test "sqlite save load roundtrip preserves damaged hp" {
+    const allocator = std.testing.allocator;
+    const path = "zig-q-hp-test.sqlite";
+    defer deleteDb(path);
+
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    const player_id = try w.spawnTestPlayer(@import("loc.zig").Loc.init(49, 49));
+    const ent = w.store.get(player_id).?;
+    ent.current_hp = 6;
+    try std.testing.expect(ent.current_hp < ent.max_hp);
+
+    var buf: [256]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    try saveSlot(allocator, path, 1, &w, player_id, fbs.writer());
+
+    var out2: [256]u8 = undefined;
+    var fbs2 = std.io.fixedBufferStream(&out2);
+    var loaded = try loadSlot(allocator, path, 1, fbs2.writer());
+    defer loaded.world.deinit();
+
+    const restored = loaded.world.store.get(loaded.player_id).?;
+    try std.testing.expectEqual(@as(u32, 6), restored.current_hp);
+    try std.testing.expectEqual(ent.max_hp, restored.max_hp);
+}
+
 test "sqlite save load roundtrip preserves floor 2 after descend" {
     const allocator = std.testing.allocator;
     const path = "zig-q-floor2-test.sqlite";
