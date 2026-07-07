@@ -624,9 +624,17 @@ fn tickPlayerAction(ctx: *Context, count: u32, writer: anytype) !void {
 
 fn finishExploreAction(ctx: *Context, writer: anytype) !void {
     if (combat.isInCombat(ctx.w)) return;
-    if (try explore.afterPlayerExploreAction(ctx.w, ctx.player_id, writer)) {
-        try writer.print("ambush combat started\n", .{});
+    const ex_before: ?u3 = if (ctx.w.store.get(ctx.player_id)) |ent|
+        conditions.exhaustionLevel(ent)
+    else
+        null;
+    const ambush = try explore.afterPlayerExploreAction(ctx.w, ctx.player_id, writer);
+    if (ex_before) |before| {
+        if (ctx.w.store.get(ctx.player_id)) |ent| {
+            try survival.printExhaustionNotice(before, conditions.exhaustionLevel(ent), writer);
+        }
     }
+    if (ambush) try writer.print("ambush combat started\n", .{});
 }
 
 fn finishExploreMove(ctx: *Context, writer: anytype) !void {
@@ -1007,6 +1015,8 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                     try writer.print("movement: {}\n", .{inventory.State.effectiveMovement(&ent.inventory, ent)});
                     const cap = inventory.State.carryCapacity(character.statByAbbr(ent.char, "STR"));
                     try writer.print("encumbrance: {} of {}\n", .{ ent.inventory.totalWeight(), cap });
+                    try survival.formatMeters(ent, writer);
+                    try writer.writeAll("\n");
                 } else {
                     try character.formatStats(ent.char, writer);
                 }
@@ -1649,6 +1659,26 @@ test "get requires adjacent floor item" {
     _ = try execute(&ctx, parseLine("get leather armour"), fbs.writer());
     try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "nothing to pick up") != null);
     try std.testing.expect(w.floor_objects.at(loc.Loc.init(52, 49)) != null);
+}
+
+test "finish explore action prints exhaustion after monster tick" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(2);
+    w.explore_ai_on_move = true;
+    var draft: session.CreationDraft = .{};
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    var ctx = Context{ .allocator = allocator, .w = &w, .draft = &draft, .player_id = player_id };
+    const player = w.store.get(player_id).?;
+    player.fatigue = 19;
+    _ = survival.syncExhaustion(player);
+    _ = try w.spawnMonster(.goblin, loc.Loc.init(52, 49), "goblin_0");
+
+    var buf: [512]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    try finishExploreAction(&ctx, fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "exhaustion level 1") != null);
 }
 
 test "bare equip prints usage" {

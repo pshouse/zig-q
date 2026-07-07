@@ -73,14 +73,32 @@ pub fn syncExhaustion(ent: *entity.Entity) ExhaustionChange {
     return .{ .before = before, .after = level };
 }
 
+pub fn exhaustionEffectHint(level: u3) ?[]const u8 {
+    return switch (level) {
+        1, 2 => "getting tired",
+        3 => "disadvantage on attacks; movement -1",
+        4 => "HP max halved",
+        5, 6 => "risk of collapse",
+        else => null,
+    };
+}
+
 pub fn printExhaustionNotice(before: u3, after: u3, writer: anytype) !void {
     if (after > before) {
-        try writer.print("exhaustion level {}\n", .{after});
+        var level: u32 = @as(u32, before) + 1;
+        while (level <= after) : (level += 1) {
+            const lvl: u3 = @intCast(level);
+            try writer.print("exhaustion level {}", .{lvl});
+            if (exhaustionEffectHint(lvl)) |hint| try writer.print(" ({s})", .{hint});
+            try writer.writeAll("\n");
+        }
     } else if (after < before) {
         if (after == 0) {
             try writer.print("exhaustion cleared\n", .{});
         } else {
-            try writer.print("exhaustion eased to level {}\n", .{after});
+            try writer.print("exhaustion eased to level {}", .{after});
+            if (exhaustionEffectHint(after)) |hint| try writer.print(" ({s})", .{hint});
+            try writer.writeAll("\n");
         }
     }
 }
@@ -171,10 +189,20 @@ test "food reduces hunger" {
 }
 
 test "exhaustion notice on level increase" {
-    var buf: [64]u8 = undefined;
+    var buf: [128]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
     try printExhaustionNotice(0, 1, fbs.writer());
-    try std.testing.expect(std.mem.eql(u8, fbs.getWritten(), "exhaustion level 1\n"));
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "exhaustion level 1") != null);
+}
+
+test "exhaustion notice reports each crossed level" {
+    var buf: [256]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    try printExhaustionNotice(0, 3, fbs.writer());
+    const out = fbs.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, out, "exhaustion level 1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "exhaustion level 2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "exhaustion level 3") != null);
 }
 
 test "ticks increase hunger" {
