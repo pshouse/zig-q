@@ -6,6 +6,73 @@ const terrain = @import("terrain.zig");
 const conditions = @import("conditions.zig");
 const perception = @import("perception.zig");
 
+const DescendTile = struct {
+    pos: loc.Loc,
+    tile: terrain.Tile,
+};
+
+fn findDescendTile(w: *const world.World) ?DescendTile {
+    var it = w.terrain.tiles.iterator();
+    while (it.next()) |entry| {
+        if (entry.value_ptr.isDescendTrigger()) {
+            return .{ .pos = entry.key_ptr.*, .tile = entry.value_ptr.* };
+        }
+    }
+    return null;
+}
+
+fn descendLabel(tile: terrain.Tile) []const u8 {
+    return switch (tile) {
+        .stairs => "stairs down",
+        .door => "descend door",
+        else => "descend tile",
+    };
+}
+
+fn formatRelativeDir(from: loc.Loc, to: loc.Loc, writer: anytype) !void {
+    const dx: i64 = @as(i64, @intCast(to.x)) - @as(i64, @intCast(from.x));
+    const dy: i64 = @as(i64, @intCast(to.y)) - @as(i64, @intCast(from.y));
+    if (dx == 0 and dy == 0) return;
+    try writer.writeAll(" toward ");
+    if (dx < 0) try writer.writeAll("north");
+    if (dx > 0) {
+        if (dx < 0) try writer.writeAll("-");
+        try writer.writeAll("south");
+    }
+    if (dy != 0 and dx != 0) try writer.writeAll("-");
+    if (dy < 0) try writer.writeAll("west");
+    if (dy > 0) try writer.writeAll("east");
+}
+
+pub fn formatDescendHint(
+    w: *const world.World,
+    center: loc.Loc,
+    radius: u8,
+    writer: anytype,
+) !void {
+    const trigger = findDescendTile(w) orelse return;
+    const label = descendLabel(trigger.tile);
+    try writer.writeAll("descend:\n");
+    if (center.x == trigger.pos.x and center.y == trigger.pos.y) {
+        try writer.print("  you are on {s} (descend)\n", .{label});
+        return;
+    }
+    const dist = tileDistance(center, trigger.pos);
+    const in_view = inViewport(center, radius, trigger.pos);
+    const has_los = !w.has_dungeon or perception.hasLineOfSight(&w.terrain, center, trigger.pos);
+    if (in_view and has_los) {
+        try writer.print("  {s} at ({},{}) distance={} (descend)\n", .{
+            label, trigger.pos.x, trigger.pos.y, dist,
+        });
+    } else {
+        try writer.print("  {s} at ({},{}) distance={}", .{
+            label, trigger.pos.x, trigger.pos.y, dist,
+        });
+        try formatRelativeDir(center, trigger.pos, writer);
+        try writer.writeAll(" (not in sight)\n");
+    }
+}
+
 
 pub fn renderViewport(w: *const world.World, center: loc.Loc, radius: u8, writer: anytype) !void {
     const r0 = center.x;
@@ -140,10 +207,12 @@ pub fn renderLook(
     } else {
         try writer.print("look center=({},{}) radius=5\n", .{ ent.loc.x, ent.loc.y });
     }
-    try renderViewport(w, ent.loc, 5, writer);
+    const radius: u8 = 5;
+    try renderViewport(w, ent.loc, radius, writer);
+    if (w.has_dungeon) try formatDescendHint(w, ent.loc, radius, writer);
     if (list_nearby) {
-        try formatVisibleFloorObjects(w, ent.loc, 5, writer);
-        try formatVisibleEntities(w, player_id, ent.loc, 5, writer);
+        try formatVisibleFloorObjects(w, ent.loc, radius, writer);
+        try formatVisibleEntities(w, player_id, ent.loc, radius, writer);
     }
 }
 
@@ -194,6 +263,54 @@ test "look lists nearby floor items when enabled" {
     try std.testing.expect(std.mem.indexOf(u8, out, "nearby:\n") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "bandage") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "(get bandage)") != null);
+}
+
+test "look hints at floor 1 stairs" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    const id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+
+    var buf: [4096]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    try renderLook(&w, id, false, fbs.writer());
+    const out = fbs.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, out, "descend:\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "stairs down") != null);
+}
+
+test "look reports standing on stairs" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    const stairs = @import("dungeon.zig").floor1_stairs_v09;
+    const id = try w.spawnTestPlayer(stairs);
+
+    var buf: [4096]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    try renderLook(&w, id, false, fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "you are on stairs down") != null);
+}
+
+test "look hints at procedural floor stairs when out of sight" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(5);
+    const id = try w.spawnTestPlayer(loc.Loc.init(49, 42));
+
+    var buf: [4096]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    try renderLook(&w, id, false, fbs.writer());
+    const out = fbs.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, out, "descend:\n") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "stairs down at (") != null);
+    try std.testing.expect(
+        std.mem.indexOf(u8, out, "(not in sight)") != null or
+            std.mem.indexOf(u8, out, "(descend)") != null,
+    );
 }
 
 test "look lists visible entity names when enabled" {
