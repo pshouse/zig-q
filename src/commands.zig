@@ -1210,7 +1210,7 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
             try help_text.writeMainHelp(writer, ctx.help_profile);
         },
         .help_descend => {
-            try writer.print("descend: stand on stairs (>) or floor-1 door (+), then descend; look lists location\n", .{});
+            try writer.print("descend: use on stairs (>) or floor-1 door (+); explore until you see > in look\n", .{});
         },
         .help_gear => {
             try help_text.writeGearHelp(writer);
