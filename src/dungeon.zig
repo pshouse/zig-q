@@ -273,7 +273,7 @@ pub fn planFloorLoot(
 
     var list: [4]LootSpawn = undefined;
     var count: usize = 0;
-    const candidates = [_]items.Id{ .bandage, .antidote, .leather_armour };
+    const candidates = [_]items.Id{ .bandage, .antidote, .rations, .leather_armour };
     var c: usize = 0;
     while (c < candidates.len and count < list.len) : (c += 1) {
         const offset_x: i64 = @intCast((floor_rng.nextU8() % 4) + 1);

@@ -1014,7 +1014,10 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
             };
             ctx.w.stageCharacter(char);
             ctx.player_id = try ctx.w.spawnStagedPlayer(loc.Loc.init(49, 49), "entity_0");
-            try writer.print("spawned id={} at (49,49)\n", .{ ctx.player_id });
+            try writer.print("spawned id={} at (49,49) (rations x{})\n", .{
+                ctx.player_id,
+                survival.starter_rations,
+            });
         },
         .stats => {
             if (ctx.w.store.get(ctx.player_id)) |ent| {

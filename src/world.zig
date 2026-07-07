@@ -188,7 +188,9 @@ pub const World = struct {
     pub fn spawnStagedPlayer(self: *World, position: loc.Loc, name: []const u8) !entity.EntityId {
         const char = self.staged_character orelse return error.NoStagedCharacter;
         self.staged_character = null;
-        return self.spawnPlayer(char, position, name);
+        const id = try self.spawnPlayer(char, position, name);
+        if (self.store.get(id)) |ent| try survival.giveStarterKit(self.allocator, ent);
+        return id;
     }
 
     fn initEntityCombat(ent: *entity.Entity) void {
@@ -299,6 +301,18 @@ pub const Snapshot = struct {
     clock_ticks: u64,
     rng_offset: u16,
 };
+
+test "spawnStagedPlayer gives starter rations" {
+    const allocator = std.testing.allocator;
+    var w = try World.init(allocator, 42);
+    defer w.deinit();
+    const boot = try @import("session.zig").bootstrapCharacter(allocator, &w, "George");
+    w.stageCharacter(boot.character);
+    const id = try w.spawnStagedPlayer(loc.Loc.init(49, 49), "entity_0");
+    const ent = w.store.get(id).?;
+    try std.testing.expect(ent.inventory.has(.rations));
+    try std.testing.expectEqual(survival.starter_rations, ent.inventory.findStack(.rations).?.count);
+}
 
 test "world init place deinit lifecycle via single teardown path" {
     const allocator = std.testing.allocator;
