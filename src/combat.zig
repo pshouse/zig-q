@@ -447,6 +447,40 @@ test "melee reduces target hp" {
     try std.testing.expect(w.store.get(goblin_id).?.current_hp <= before);
 }
 
+test "looting a weaker weapon never cuts a melee class's damage die" {
+    // Reproduces the George-the-barbarian trap: an innate d12 brawler who loots
+    // and equips a short sword (d6) must keep rolling the d12 baseline, not d6.
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49)); // barbarian, innate d12
+    const player = w.store.get(player_id).?;
+    for (player.char.attributes.items) |*attr| {
+        if (std.mem.eql(u8, attr.abbr, "STR")) attr.stat = 18; // +4 damage modifier
+    }
+
+    // Bare-fisted and short-sword-equipped must both report the d12 baseline.
+    try std.testing.expectEqual(@as(u8, 12), inventory.State.weaponDamageDie(&player.inventory, player));
+    try player.inventory.add(allocator, .short_sword, 1);
+    player.inventory.weapon = .short_sword;
+    try std.testing.expectEqual(@as(u8, 12), inventory.State.weaponDamageDie(&player.inventory, player));
+
+    // Drive the real combat damage roll: with the sword equipped, damage must be
+    // able to exceed 10 (d6+4's ceiling), proving the d12 baseline still applies.
+    var max_dmg: i32 = 0;
+    var min_dmg: i32 = std.math.maxInt(i32);
+    var i: usize = 0;
+    while (i < 200) : (i += 1) {
+        const dmg = rollDamage(&w, player);
+        max_dmg = @max(max_dmg, dmg);
+        min_dmg = @min(min_dmg, dmg);
+    }
+    try std.testing.expect(max_dmg > 10); // impossible with the old d6+4 cap
+    try std.testing.expect(max_dmg <= 16); // stays within the d12+4 ceiling
+    try std.testing.expect(min_dmg >= 5); // d12 min (1) + STR mod (4)
+}
+
 test "end turn advances initiative" {
     const allocator = std.testing.allocator;
     var w = try world.World.init(allocator, 42);
