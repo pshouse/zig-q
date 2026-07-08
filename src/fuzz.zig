@@ -89,6 +89,12 @@ const templates = [_][]const u8{
     "open south",
     "close north",
     "use antidote",
+    "equip short sword",
+    "drop short sword",
+    "unequip weapon",
+    "unequip armour",
+    "unequip short sword",
+    "take off armour",
 };
 
 pub fn run(allocator: std.mem.Allocator, cfg: Config) !Report {
