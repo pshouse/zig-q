@@ -2,7 +2,7 @@
 
 **Product:** deterministic, scriptable **dungeon crawl** engine — create a character, descend floors, fight monsters, persist progress. No dialogue trees.
 
-**Current release:** `1.5.0` (mundane healing, procedural traps, depth-scaled crawl).
+**Current release:** `1.5.1` (v1.5 crawl completeness + WIS-gated trap spotting in look).
 
 ---
 
@@ -306,6 +306,7 @@ DST `playthrough` runs without `unknown command` for these inputs. Harvested tra
 | 1.3 | Monster AI, doors, traps |
 | 1.4 | Hunger, sleep, exhaustion, survival clock |
 | 1.5 | Bandage heal, procedural traps, depth-scaled crawl |
+| 1.5.1 | Trap `look` listing gated on WIS perception check (d20 + mod vs DC 12 + distance) |
 
 ## Version history (planned)
 
