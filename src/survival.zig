@@ -141,6 +141,28 @@ pub fn printStarvingNotice(before: bool, after: bool, writer: anytype) !void {
     }
 }
 
+pub fn printHpDotNotice(before_hp: u32, ent: *const entity.Entity, writer: anytype) !void {
+    if (ent.current_hp >= before_hp) return;
+    const loss = before_hp - ent.current_hp;
+    if (conditions.has(ent, .poisoned) and conditions.has(ent, .starving)) {
+        try writer.print("poison and starvation deal {} hp; hp={}/{}\n", .{
+            loss, ent.current_hp, ent.max_hp,
+        });
+    } else if (conditions.has(ent, .poisoned)) {
+        try writer.print("poison deals {} hp; hp={}/{}\n", .{
+            loss, ent.current_hp, ent.max_hp,
+        });
+    } else if (conditions.has(ent, .starving)) {
+        try writer.print("starvation deals {} hp; hp={}/{}\n", .{
+            loss, ent.current_hp, ent.max_hp,
+        });
+    } else {
+        try writer.print("lost {} hp; hp={}/{}\n", .{
+            loss, ent.current_hp, ent.max_hp,
+        });
+    }
+}
+
 pub fn printSurvivalNotices(change: SurvivalChange, writer: anytype) !void {
     try printExhaustionNotice(change.exhaustion.before, change.exhaustion.after, writer);
     try printStarvingNotice(change.starving.before, change.starving.after, writer);
@@ -285,6 +307,41 @@ test "exhaustion notice reports each crossed level" {
     try std.testing.expect(std.mem.indexOf(u8, out, "exhaustion level 1") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "exhaustion level 2") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "exhaustion level 3") != null);
+}
+
+test "hp dot notice reports poison damage" {
+    var ent: entity.Entity = undefined;
+    ent.conditions = @import("types.zig").ConditionSet.initEmpty();
+    ent.exhaustion_level = 0;
+    ent.current_hp = 9;
+    ent.max_hp = 13;
+    ent.hunger = 0;
+    ent.fatigue = 0;
+    ent.sleeping = false;
+    conditions.apply(&ent, .poisoned);
+
+    var buf: [128]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    try printHpDotNotice(10, &ent, fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "poison deals 1 hp; hp=9/13") != null);
+}
+
+test "hp dot notice reports combined poison and starvation" {
+    var ent: entity.Entity = undefined;
+    ent.conditions = @import("types.zig").ConditionSet.initEmpty();
+    ent.exhaustion_level = 0;
+    ent.current_hp = 8;
+    ent.max_hp = 13;
+    ent.hunger = hunger_max;
+    ent.fatigue = 0;
+    ent.sleeping = false;
+    conditions.apply(&ent, .poisoned);
+    conditions.apply(&ent, .starving);
+
+    var buf: [128]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    try printHpDotNotice(10, &ent, fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "poison and starvation deal 2 hp; hp=8/13") != null);
 }
 
 test "starving notice on apply and clear" {

@@ -619,15 +619,18 @@ fn isSpawned(ctx: *const Context) bool {
 const SurvivalNoticeState = struct {
     exhaustion: u3,
     starving: bool,
+    current_hp: u32,
 
     fn capture(ent: *const entity.Entity) SurvivalNoticeState {
         return .{
             .exhaustion = conditions.exhaustionLevel(ent),
             .starving = conditions.has(ent, .starving),
+            .current_hp = ent.current_hp,
         };
     }
 
     fn printChanges(self: SurvivalNoticeState, ent: *const entity.Entity, writer: anytype) !void {
+        try survival.printHpDotNotice(self.current_hp, ent, writer);
         try survival.printExhaustionNotice(self.exhaustion, conditions.exhaustionLevel(ent), writer);
         try survival.printStarvingNotice(self.starving, conditions.has(ent, .starving), writer);
     }
@@ -1789,6 +1792,25 @@ test "get requires adjacent floor item" {
     _ = try execute(&ctx, parseLine("get leather armour"), fbs.writer());
     try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "nothing to pick up") != null);
     try std.testing.expect(w.floor_objects.at(loc.Loc.init(52, 49)) != null);
+}
+
+test "wait prints poison hp dot after tick" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    var draft: session.CreationDraft = .{};
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    var ctx = Context{ .allocator = allocator, .w = &w, .draft = &draft, .player_id = player_id };
+    const player = w.store.get(player_id).?;
+    player.max_hp = 13;
+    player.current_hp = 10;
+    conditions.apply(player, .poisoned);
+
+    var buf: [256]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, .wait, fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "poison deals 1 hp; hp=9/13") != null);
 }
 
 test "finish explore action prints exhaustion after monster tick" {
