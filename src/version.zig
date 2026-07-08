@@ -1,7 +1,7 @@
 //! Single source of truth for release identity (semver).
 const std = @import("std");
 
-pub const semver: []const u8 = "1.5.3";
+pub const semver: []const u8 = "1.5.4";
 
 /// Wave gate versions recorded in DST/evidence transcripts per release plan.
 pub const v11: []const u8 = "1.1.0";
@@ -69,7 +69,7 @@ test "forGate maps wave to emit semver" {
 }
 
 test "resolve defaults to shipped semver" {
-    try std.testing.expectEqualStrings("1.5.3", resolve(null));
+    try std.testing.expectEqualStrings("1.5.4", resolve(null));
     try std.testing.expectEqualStrings("0.6.0-dev", resolve("0.6.0-dev"));
 }
 

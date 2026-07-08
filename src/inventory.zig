@@ -4,6 +4,7 @@ const items = @import("items.zig");
 const entity = @import("entity.zig");
 const character = @import("character.zig");
 const conditions = @import("conditions.zig");
+const types = @import("types.zig");
 
 pub const Stack = struct {
     id: items.Id,
@@ -103,6 +104,27 @@ pub const State = struct {
         return false;
     }
 
+    /// Clear any equipment slot (weapon/armour/shield) currently referencing `id`.
+    /// Returns true if a slot was cleared. Call this when an item leaves the bag so
+    /// combat stats (weaponDamageDie, playerAc) fall back to defaults instead of
+    /// keeping a "phantom" reference to gear the player no longer holds.
+    pub fn unequip(self: *State, id: items.Id) bool {
+        var cleared = false;
+        if (self.weapon == id) {
+            self.weapon = null;
+            cleared = true;
+        }
+        if (self.armour == id) {
+            self.armour = null;
+            cleared = true;
+        }
+        if (self.shield == id) {
+            self.shield = null;
+            cleared = true;
+        }
+        return cleared;
+    }
+
     pub const BagResolve = union(enum) {
         found: items.Id,
         unknown,
@@ -171,10 +193,22 @@ pub const State = struct {
         return ac;
     }
 
-    pub fn weaponDamageDie(self: *const State, ent: *const entity.Entity) u8 {
-        if (self.weapon) |wid| return items.def(wid).damage_die;
+    /// The entity's unarmed/martial damage die: the innate die seeded at spawn
+    /// (`initEntityCombat` sets it to the class hit_die), falling back to the
+    /// class hit_die if unset (e.g. before combat init).
+    pub fn baselineDamageDie(ent: *const entity.Entity) u8 {
         if (ent.damage_die > 0) return ent.damage_die;
         return ent.char.class.hit_die;
+    }
+
+    /// Effective melee damage die. A wielded weapon can only *upgrade* damage:
+    /// the innate martial baseline (e.g. barbarian d12) stands unless the weapon
+    /// beats it, so looting a weaker weapon (short sword d6) never silently cuts a
+    /// melee class's damage. A weapon still contributes its trait regardless.
+    pub fn weaponDamageDie(self: *const State, ent: *const entity.Entity) u8 {
+        const baseline = baselineDamageDie(ent);
+        if (self.weapon) |wid| return @max(items.def(wid).damage_die, baseline);
+        return baseline;
     }
 
     /// Item currently occupying `slot`, or null if the slot is empty.
@@ -203,15 +237,6 @@ pub const State = struct {
             .shield => self.shield = null,
         }
         return prev;
-    }
-
-    /// Drops any equipment slot still pointing at `id`. Call this when the last
-    /// copy of `id` leaves the bag so weapon/armour/shield never reference an
-    /// item that is no longer carried (e.g. after `drop`ping equipped gear).
-    pub fn unlinkEquipped(self: *State, id: items.Id) void {
-        if (self.weapon == id) self.weapon = null;
-        if (self.armour == id) self.armour = null;
-        if (self.shield == id) self.shield = null;
     }
 
     pub fn format(self: *const State, writer: anytype) !void {
@@ -275,6 +300,18 @@ test "total weight sums stacks" {
     try std.testing.expectEqual(@as(u32, 30), state.totalWeight());
 }
 
+test "unequip clears matching slots and reports whether it did" {
+    var state = State.init();
+    defer state.deinit(std.testing.allocator);
+    state.weapon = .short_sword;
+    state.armour = .leather_armour;
+    try std.testing.expect(state.unequip(.short_sword));
+    try std.testing.expect(state.weapon == null);
+    try std.testing.expectEqual(.leather_armour, state.armour.?);
+    // Nothing references a bare hand any more, so no slot changes.
+    try std.testing.expect(!state.unequip(.short_sword));
+}
+
 test "resolve bag item by category" {
     var state = State.init();
     defer state.deinit(std.testing.allocator);
@@ -299,13 +336,33 @@ test "clearSlot returns the item and leaves it in the bag" {
     try std.testing.expect(state.clearSlot(.weapon) == null);
 }
 
-test "unlinkEquipped drops a dangling slot reference" {
+test "weapon damage die only ever upgrades the innate baseline" {
+    var char = types.Character{
+        .name = "George",
+        .attributes = .empty,
+        .race = .{ .name = "dwarf", .speed = 25, .attr_bonuses = .empty },
+        .class = .{ .name = "barbarian", .hit_die = 12 },
+    };
+    var ent: entity.Entity = undefined;
+    ent.char = &char;
+    ent.damage_die = 12; // innate d12, as initEntityCombat seeds a barbarian
+
     var state = State.init();
     defer state.deinit(std.testing.allocator);
+
+    // Bare-fisted barbarian rolls its innate d12.
+    try std.testing.expectEqual(@as(u8, 12), state.weaponDamageDie(&ent));
+
+    // Looting and equipping the weaker short sword (d6) must NOT cut damage to d6.
     state.weapon = .short_sword;
-    state.armour = .leather_armour;
-    state.unlinkEquipped(.short_sword);
-    try std.testing.expect(state.weapon == null);
-    // Only the matching slot is cleared.
-    try std.testing.expectEqual(.leather_armour, state.armour.?);
+    try std.testing.expectEqual(@as(u8, 12), state.weaponDamageDie(&ent));
+
+    // But a weapon that beats the baseline upgrades the die.
+    ent.damage_die = 4;
+    try std.testing.expectEqual(@as(u8, 6), state.weaponDamageDie(&ent));
+
+    // With no innate die recorded, the class hit_die is the baseline.
+    state.weapon = null;
+    ent.damage_die = 0;
+    try std.testing.expectEqual(@as(u8, 12), state.weaponDamageDie(&ent));
 }

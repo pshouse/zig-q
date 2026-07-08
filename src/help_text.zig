@@ -23,7 +23,7 @@ pub const dst_v08_golden =
 ;
 
 pub const gear_golden =
-    \\gear: get [item], get from corpse, loot (alias), drop <item>
+    \\gear: get [item], get from corpse, loot (corpse first), drop <item>
     \\      inventory (inv), examine <item>, equip <item>, unequip <slot|item>, use <item>
     \\      look lists nearby items/corpses; stand adjacent to pick up
     \\ai:    monsters act after wait/move on floor 2+; ambush when they reach you
@@ -34,9 +34,9 @@ pub const repl_v11_golden =
     \\creation: roll, assign <6 picks>, race <1-3>, class <1-3>, spawn, stats
     \\explore:  look (l), time, move <n|s|e|w|nw|...>, m <dir>, wait, food, rest, sleep, conditions, descend, help, help gear, exit
     \\          chains: move w w   or   move w; move w
-    \\gear:     get [item], get from corpse, loot (alias), drop <item>, inventory (inv), examine <item>, equip <item>, unequip <slot|item>, use <item>  (help gear)
+    \\gear:     get [item], get from corpse, loot (corpse first), drop <item>, inventory (inv), examine <item>, equip <item>, unequip <slot|item>, use <item>  (help gear)
     \\ai:      monsters act on wait/move (floor 2+); ambush when they step adjacent
-    \\combat:   attack [target], end turn
+    \\combat:   attack [target], end turn, flee (disengage), catch breath
     \\persist:  save [slot], load <slot>
     \\
     \\example: assign 6 5 4 3 2 1
@@ -58,7 +58,7 @@ pub fn writeMainHelp(writer: anytype, profile: Profile) !void {
             \\creation: roll, assign <6 picks>, race <1-3>, class <1-3>, spawn, stats
             \\explore:  look (l), time, move <n|s|e|w|nw|...>, m <dir>, descend, help, help gear, exit
             \\          chains: move w w   or   move w; move w
-            \\gear:     get [item], get from corpse, loot (alias), drop <item>, inventory (inv), examine <item>, equip <item>, unequip <slot|item>, use <item>  (help gear)
+            \\gear:     get [item], get from corpse, loot (corpse first), drop <item>, inventory (inv), examine <item>, equip <item>, unequip <slot|item>, use <item>  (help gear)
             \\ai:      monsters act on wait/move (floor 2+); ambush when they step adjacent
             \\combat:   attack [target], end turn
             \\persist:  save [slot], load <slot>

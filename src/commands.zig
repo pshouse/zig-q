@@ -19,6 +19,18 @@ const inventory = @import("inventory.zig");
 const world_objects = @import("world_objects.zig");
 const survival = @import("survival.zig");
 
+/// Target for the `get`/`loot` command family. All of `get`, `loot`,
+/// `get from corpse`, and `loot X` funnel through one command with this payload.
+pub const GetTarget = struct {
+    /// Named target: an item id/category token, or the literal `"corpse"` for
+    /// the adjacent corpse's loot. `null` means "nearest nearby object".
+    name: ?[]const u8 = null,
+    /// When picking the nearest object (`name == null`), prefer an adjacent
+    /// corpse's loot before a floor item. Set by the bare `loot` verb; bare
+    /// `get` leaves it false and takes whichever object is nearest in order.
+    prefer_corpse: bool = false,
+};
+
 pub const Command = union(enum) {
     look,
     time,
@@ -37,6 +49,8 @@ pub const Command = union(enum) {
     attack,
     attack_target: []const u8,
     end_turn,
+    flee,
+    catch_breath,
     descend,
     save,
     save_slot: u32,
@@ -48,7 +62,7 @@ pub const Command = union(enum) {
     wait,
     conditions_cmd,
     inventory_cmd,
-    get_item: ?[]const u8,
+    get_item: GetTarget,
     drop_item: []const u8,
     examine_item: []const u8,
     equip_item: []const u8,
@@ -99,6 +113,11 @@ pub fn parseLine(line: []const u8) Command {
     if (std.mem.eql(u8, trimmed, "stats")) return .stats;
     if (std.mem.eql(u8, trimmed, "attack")) return .attack;
     if (std.mem.eql(u8, trimmed, "end turn")) return .end_turn;
+    if (std.mem.eql(u8, trimmed, "flee")) return .flee;
+    if (std.mem.eql(u8, trimmed, "disengage")) return .flee;
+    if (std.mem.eql(u8, trimmed, "retreat")) return .flee;
+    if (std.mem.eql(u8, trimmed, "catch breath")) return .catch_breath;
+    if (std.mem.eql(u8, trimmed, "recover")) return .catch_breath;
     if (std.mem.eql(u8, trimmed, "descend")) return .descend;
     if (std.mem.eql(u8, trimmed, "wait")) return .wait;
     if (std.mem.eql(u8, trimmed, "food")) return .food;
@@ -107,17 +126,17 @@ pub fn parseLine(line: []const u8) Command {
     if (std.mem.eql(u8, trimmed, "conditions")) return .conditions_cmd;
     if (std.mem.eql(u8, trimmed, "inventory")) return .inventory_cmd;
     if (std.mem.eql(u8, trimmed, "inv")) return .inventory_cmd;
-    if (std.mem.eql(u8, trimmed, "get")) return .{ .get_item = null };
-    if (std.mem.eql(u8, trimmed, "get from corpse")) return .{ .get_item = "corpse" };
-    if (std.mem.eql(u8, trimmed, "loot")) return .{ .get_item = null };
-    if (std.mem.eql(u8, trimmed, "loot from corpse")) return .{ .get_item = "corpse" };
+    if (std.mem.eql(u8, trimmed, "get")) return .{ .get_item = .{} };
+    if (std.mem.eql(u8, trimmed, "get from corpse")) return .{ .get_item = .{ .name = "corpse" } };
+    if (std.mem.eql(u8, trimmed, "loot")) return .{ .get_item = .{ .prefer_corpse = true } };
+    if (std.mem.eql(u8, trimmed, "loot from corpse")) return .{ .get_item = .{ .name = "corpse" } };
     if (std.mem.startsWith(u8, trimmed, "loot ")) {
         const arg = std.mem.trim(u8, trimmed[5..], " \t");
-        if (arg.len > 0) return .{ .get_item = arg };
+        if (arg.len > 0) return .{ .get_item = .{ .name = arg } };
     }
     if (std.mem.startsWith(u8, trimmed, "get ")) {
         const arg = std.mem.trim(u8, trimmed[4..], " \t");
-        if (arg.len > 0) return .{ .get_item = arg };
+        if (arg.len > 0) return .{ .get_item = .{ .name = arg } };
     }
     if (std.mem.startsWith(u8, trimmed, "drop ")) {
         const arg = std.mem.trim(u8, trimmed[5..], " \t");
@@ -250,7 +269,7 @@ fn cmdInventory(ctx: *Context, writer: anytype) !Result {
     return .continue_repl;
 }
 
-fn cmdGet(ctx: *Context, name: ?[]const u8, writer: anytype) !Result {
+fn cmdGet(ctx: *Context, target: GetTarget, writer: anytype) !Result {
     if (combat.isInCombat(ctx.w)) {
         try writer.print("cannot loot during combat\n", .{});
         return .continue_repl;
@@ -265,7 +284,7 @@ fn cmdGet(ctx: *Context, name: ?[]const u8, writer: anytype) !Result {
     var corpse_label: ?[]const u8 = null;
     var empty_corpse_near = false;
 
-    if (name) |n| {
+    if (target.name) |n| {
         if (std.mem.eql(u8, n, "corpse")) {
             for (ctx.w.floor_objects.objects.items) |*obj| {
                 if (obj.kind != .corpse) continue;
@@ -294,19 +313,38 @@ fn cmdGet(ctx: *Context, name: ?[]const u8, writer: anytype) !Result {
             }
         }
     } else {
-        for (ctx.w.floor_objects.objects.items) |*obj| {
-            if (obj.kind != .item and obj.kind != .corpse) continue;
-            if (!tileNearPlayer(ctx.w, ctx.player_id, obj.x, obj.y)) continue;
-            if (obj.item) |loot| {
-                picked = loot;
-                remove_pos = loc.Loc.init(obj.x, obj.y);
-                if (obj.kind == .corpse) {
+        // Bare `loot` prefers an adjacent corpse's gear (the interesting loot)
+        // before falling back to a floor item; bare `get` skips this pass and
+        // takes whichever nearby object comes first in object order.
+        if (target.prefer_corpse) {
+            for (ctx.w.floor_objects.objects.items) |*obj| {
+                if (obj.kind != .corpse) continue;
+                if (!tileNearPlayer(ctx.w, ctx.player_id, obj.x, obj.y)) continue;
+                if (obj.item) |loot| {
+                    picked = loot;
+                    remove_pos = loc.Loc.init(obj.x, obj.y);
                     picked_from_corpse = true;
                     corpse_label = obj.label;
+                    break;
                 }
-                break;
+                empty_corpse_near = true;
             }
-            if (obj.kind == .corpse) empty_corpse_near = true;
+        }
+        if (picked == null) {
+            for (ctx.w.floor_objects.objects.items) |*obj| {
+                if (obj.kind != .item and obj.kind != .corpse) continue;
+                if (!tileNearPlayer(ctx.w, ctx.player_id, obj.x, obj.y)) continue;
+                if (obj.item) |loot| {
+                    picked = loot;
+                    remove_pos = loc.Loc.init(obj.x, obj.y);
+                    if (obj.kind == .corpse) {
+                        picked_from_corpse = true;
+                        corpse_label = obj.label;
+                    }
+                    break;
+                }
+                if (obj.kind == .corpse) empty_corpse_near = true;
+            }
         }
     }
 
@@ -413,11 +451,13 @@ fn cmdDrop(ctx: *Context, name: []const u8, writer: anytype) !Result {
         try writer.print("you do not have that item\n", .{});
         return .continue_repl;
     }
-    // Once the last copy leaves the bag, clear any equipment slot pointing at it
-    // so weapon/armour/shield never reference an item now lying on the floor.
-    if (!ent.inventory.has(id)) ent.inventory.unlinkEquipped(id);
     try ctx.w.floor_objects.addItem(ctx.allocator, .item, ent.loc, items.idTag(id), id);
     try writer.print("dropped {s}\n", .{items.def(id).name});
+    // Dropping the last copy of equipped gear must release its slot; otherwise the
+    // weapon/armour reference dangles and combat keeps using the departed item.
+    if (!ent.inventory.has(id) and ent.inventory.unequip(id)) {
+        try writer.print("unequipped {s}\n", .{items.def(id).name});
+    }
     try tickPlayerAction(ctx, 1, writer);
     try finishExploreAction(ctx, writer);
     return .continue_repl;
@@ -624,12 +664,7 @@ fn cmdRest(ctx: *Context, writer: anytype) !Result {
             return .continue_repl;
         }
     }
-    if (ent.fatigue >= survival.fatigue_restore_rest) {
-        ent.fatigue -= survival.fatigue_restore_rest;
-    } else {
-        ent.fatigue = 0;
-    }
-    _ = survival.syncExhaustion(ent);
+    _ = survival.applyRest(ent);
     try notice.printChanges(ent, writer);
     try writer.print("rested (ticks={} fatigue={})\n", .{ ctx.w.game_clock.ticks, ent.fatigue });
     return .continue_repl;
@@ -665,9 +700,8 @@ fn cmdSleep(ctx: *Context, writer: anytype) !Result {
         }
     }
     ent.sleeping = false;
-    ent.fatigue = 0;
     conditions.remove(ent, .unconscious);
-    _ = survival.syncExhaustion(ent);
+    _ = survival.applySleep(ent);
     try notice.printChanges(ent, writer);
     try writer.print("slept (ticks={} fatigue=0)\n", .{ ctx.w.game_clock.ticks });
     return .continue_repl;
@@ -709,6 +743,11 @@ fn tickPlayerAction(ctx: *Context, count: u32, writer: anytype) !void {
 
 fn finishExploreAction(ctx: *Context, writer: anytype) !void {
     if (combat.isInCombat(ctx.w)) return;
+    // When explore AI is disabled (piped REPL, reference/trap scenarios), no player
+    // action advances monsters or triggers ambushes. This must gate every finish path
+    // — moves and non-move actions (get/loot/use/wait/open/close/wound) alike — so a
+    // scripted run behaves the same regardless of which command the player issues.
+    if (!ctx.w.explore_ai_on_move) return;
     const notice_before: ?SurvivalNoticeState = if (ctx.w.store.get(ctx.player_id)) |ent|
         SurvivalNoticeState.capture(ent)
     else
@@ -723,8 +762,8 @@ fn finishExploreAction(ctx: *Context, writer: anytype) !void {
 }
 
 fn finishExploreMove(ctx: *Context, writer: anytype) !void {
-    if (combat.isInCombat(ctx.w)) return;
-    if (!ctx.w.explore_ai_on_move) return;
+    // The explore_ai_on_move / combat gates live in finishExploreAction; moves add the
+    // floor-1 exemption (no wandering monsters on the handcrafted starting floor).
     if (ctx.w.floor_index < 2) return;
     try finishExploreAction(ctx, writer);
 }
@@ -1041,7 +1080,7 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
             try writer.writeAll("\n");
         },
         .inventory_cmd => return cmdInventory(ctx, writer),
-        .get_item => |name| return cmdGet(ctx, name, writer),
+        .get_item => |target| return cmdGet(ctx, target, writer),
         .drop_item => |name| return cmdDrop(ctx, name, writer),
         .examine_item => |name| return cmdExamine(ctx, name, writer),
         .equip_usage => {
@@ -1257,6 +1296,40 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                 else => |e| return e,
             };
         },
+        .flee => {
+            if (!isSpawned(ctx)) {
+                try writer.print("no player spawned\n", .{});
+                return .continue_repl;
+            }
+            combat.flee(ctx.w, ctx.player_id, writer) catch |err| switch (err) {
+                error.NotInCombat => {
+                    try writer.print("not in combat\n", .{});
+                    return .continue_repl;
+                },
+                error.NotYourTurn => {
+                    try writer.print("not your turn\n", .{});
+                    return .continue_repl;
+                },
+                else => |e| return e,
+            };
+        },
+        .catch_breath => {
+            if (!isSpawned(ctx)) {
+                try writer.print("no player spawned\n", .{});
+                return .continue_repl;
+            }
+            combat.catchBreath(ctx.w, ctx.player_id, writer) catch |err| switch (err) {
+                error.NotInCombat => {
+                    try writer.print("not in combat\n", .{});
+                    return .continue_repl;
+                },
+                error.NotYourTurn => {
+                    try writer.print("not your turn\n", .{});
+                    return .continue_repl;
+                },
+                else => |e| return e,
+            };
+        },
         .save => {
             if (!isSpawned(ctx)) {
                 try writer.print("no player spawned\n", .{});
@@ -1346,18 +1419,25 @@ test "expandInput infers look shorthand" {
     try std.testing.expectEqualStrings("look", parts[0]);
 }
 
-test "parseLine accepts loot aliases for get" {
+test "parseLine maps get and loot verbs" {
+    // Bare `loot` prefers a corpse; bare `get` does not.
     const loot_cmd = parseLine("loot");
     try std.testing.expect(loot_cmd == .get_item);
-    try std.testing.expect(loot_cmd.get_item == null);
+    try std.testing.expect(loot_cmd.get_item.name == null);
+    try std.testing.expect(loot_cmd.get_item.prefer_corpse);
+
+    const get_cmd = parseLine("get");
+    try std.testing.expect(get_cmd == .get_item);
+    try std.testing.expect(get_cmd.get_item.name == null);
+    try std.testing.expect(!get_cmd.get_item.prefer_corpse);
 
     const corpse_cmd = parseLine("loot from corpse");
     try std.testing.expect(corpse_cmd == .get_item);
-    try std.testing.expectEqualStrings("corpse", corpse_cmd.get_item.?);
+    try std.testing.expectEqualStrings("corpse", corpse_cmd.get_item.name.?);
 
     const bandage_cmd = parseLine("loot bandage");
     try std.testing.expect(bandage_cmd == .get_item);
-    try std.testing.expectEqualStrings("bandage", bandage_cmd.get_item.?);
+    try std.testing.expectEqualStrings("bandage", bandage_cmd.get_item.name.?);
 }
 
 test "expandInput infers move shorthand" {
@@ -1572,6 +1652,64 @@ test "end turn via execute advances initiative" {
     _ = try execute(&ctx, parseLine("end turn"), fbs.writer());
     const out = fbs.getWritten();
     try std.testing.expect(std.mem.indexOf(u8, out, "turn:") != null or std.mem.indexOf(u8, out, "attack ") != null);
+}
+
+test "flee via execute ends combat" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+
+    var ctx = try combatTestCtx(allocator, &w);
+    w.store.get(ctx.player_id).?.max_hp = 30;
+    w.store.get(ctx.player_id).?.current_hp = 30;
+    _ = try execute(&ctx, parseLine("attack goblin_0"), std.io.null_writer);
+    try std.testing.expect(combat.isInCombat(&w));
+
+    var buf: [512]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("flee"), fbs.writer());
+    try std.testing.expect(!combat.isInCombat(&w));
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "flees from combat") != null);
+}
+
+test "flee aliases disengage and retreat parse to flee" {
+    try std.testing.expect(parseLine("flee") == .flee);
+    try std.testing.expect(parseLine("disengage") == .flee);
+    try std.testing.expect(parseLine("retreat") == .flee);
+    try std.testing.expect(parseLine("catch breath") == .catch_breath);
+    try std.testing.expect(parseLine("recover") == .catch_breath);
+}
+
+test "flee out of combat via execute reports not in combat" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+
+    var ctx = try combatTestCtx(allocator, &w);
+    var buf: [128]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("flee"), fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "not in combat") != null);
+}
+
+test "catch breath via execute recovers fatigue and keeps fighting" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+
+    var ctx = try combatTestCtx(allocator, &w);
+    const player = w.store.get(ctx.player_id).?;
+    player.max_hp = 40;
+    player.current_hp = 40;
+    player.fatigue = 42;
+    _ = survival.syncExhaustion(player);
+    _ = try execute(&ctx, parseLine("attack goblin_0"), std.io.null_writer);
+
+    var buf: [512]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("catch breath"), fbs.writer());
+    try std.testing.expect(w.store.get(ctx.player_id).?.fatigue < 42);
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "catches their breath") != null);
 }
 
 test "move allowed on player turn during combat via execute" {
@@ -1903,6 +2041,43 @@ test "finish explore action prints exhaustion after monster tick" {
     try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "exhaustion level 1") != null);
 }
 
+test "non-move action does not advance monster AI when explore_ai_on_move is off" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(2);
+    w.explore_ai_on_move = false;
+    var draft: session.CreationDraft = .{};
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    var ctx = Context{ .allocator = allocator, .w = &w, .draft = &draft, .player_id = player_id };
+    const monster_id = try w.spawnMonster(.goblin, loc.Loc.init(51, 49), "goblin_0");
+    const goblin_start = w.store.get(monster_id).?.loc;
+    // A pickable item on the player's tile so `get` reaches finishExploreAction.
+    try w.floor_objects.addItem(allocator, .item, loc.Loc.init(49, 49), "bandage", .bandage);
+
+    var buf: [512]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("get"), fbs.writer());
+    const out = fbs.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, out, "picked up bandage") != null);
+    // Flag off: the goblin must hold still and no ambush may start, exactly like a move.
+    const after_off = w.store.get(monster_id).?.loc;
+    try std.testing.expectEqual(goblin_start.x, after_off.x);
+    try std.testing.expectEqual(goblin_start.y, after_off.y);
+    try std.testing.expect(!combat.isInCombat(&w));
+    try std.testing.expect(std.mem.indexOf(u8, out, "moved") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "ambush") == null);
+
+    // Control: with the flag on, the same setup advances the goblin, proving the guard
+    // above is real and not passing only because the monster could never move here.
+    w.explore_ai_on_move = true;
+    try w.floor_objects.addItem(allocator, .item, loc.Loc.init(49, 49), "bandage", .bandage);
+    fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("get"), fbs.writer());
+    const after_on = w.store.get(monster_id).?.loc;
+    try std.testing.expect(after_on.x != goblin_start.x or after_on.y != goblin_start.y);
+}
+
 test "bare equip prints usage" {
     const cmd = parseLine("equip");
     try std.testing.expect(cmd == .equip_usage);
@@ -1952,7 +2127,7 @@ test "bare unequip and aliases parse" {
     try std.testing.expectEqualStrings("armour", parseLine("take off armour").unequip_item);
 }
 
-test "unequip weapon restores innate damage die" {
+test "unequip weapon clears the slot and keeps the item" {
     const allocator = std.testing.allocator;
     var w = try world.World.init(allocator, 42);
     defer w.deinit();
@@ -1961,22 +2136,18 @@ test "unequip weapon restores innate damage die" {
     const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
     var ctx = Context{ .allocator = allocator, .w = &w, .draft = &draft, .player_id = player_id };
     const ent = w.store.get(player_id).?;
-    // spawnTestPlayer is a barbarian: innate die = hit_die 12.
-    const innate = ent.inventory.weaponDamageDie(ent);
-    try std.testing.expectEqual(@as(u8, 12), innate);
-
     try ent.inventory.add(allocator, .short_sword, 1);
+
     var buf: [256]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
     _ = try execute(&ctx, parseLine("equip short sword"), fbs.writer());
-    try std.testing.expectEqual(@as(u8, 6), ent.inventory.weaponDamageDie(ent));
+    try std.testing.expectEqual(.short_sword, ent.inventory.weapon);
 
     fbs = std.io.fixedBufferStream(&buf);
     _ = try execute(&ctx, parseLine("unequip weapon"), fbs.writer());
     try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "unequipped short sword") != null);
+    // Slot cleared, but the sword stays in the bag and is re-equippable.
     try std.testing.expect(ent.inventory.weapon == null);
-    // Back to the barbarian's d12, and the sword is still in the bag.
-    try std.testing.expectEqual(@as(u8, 12), ent.inventory.weaponDamageDie(ent));
     try std.testing.expect(ent.inventory.has(.short_sword));
 }
 
@@ -2025,7 +2196,7 @@ test "unequip empty slot and unequipped item report clearly" {
     try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "short sword is not equipped") != null);
 }
 
-test "drop of equipped weapon clears the slot (no dangling reference)" {
+test "drop while wielded clears weapon slot and restores innate die" {
     const allocator = std.testing.allocator;
     var w = try world.World.init(allocator, 42);
     defer w.deinit();
@@ -2036,21 +2207,49 @@ test "drop of equipped weapon clears the slot (no dangling reference)" {
     const ent = w.store.get(player_id).?;
     try ent.inventory.add(allocator, .short_sword, 1);
 
-    var buf: [256]u8 = undefined;
+    var buf: [512]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
     _ = try execute(&ctx, parseLine("equip short sword"), fbs.writer());
-    try std.testing.expectEqual(.short_sword, ent.inventory.weapon);
+    try std.testing.expectEqual(.short_sword, ent.inventory.weapon.?);
+    // Upgrade-only: the short sword (d6) can't cut the barbarian's innate d12.
+    try std.testing.expectEqual(@as(u8, 12), ent.inventory.weaponDamageDie(ent));
 
     fbs = std.io.fixedBufferStream(&buf);
     _ = try execute(&ctx, parseLine("drop short sword"), fbs.writer());
     try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "dropped short sword") != null);
-    // The slot must not dangle onto an item now on the floor.
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "unequipped short sword") != null);
+    // Slot released and the bag empty of it; the die stays the barbarian's d12.
     try std.testing.expect(ent.inventory.weapon == null);
     try std.testing.expect(!ent.inventory.has(.short_sword));
     try std.testing.expectEqual(@as(u8, 12), ent.inventory.weaponDamageDie(ent));
 }
 
-test "drop one of a stacked equipped weapon keeps the slot" {
+test "drop while worn clears armour slot and restores base ac" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    var draft: session.CreationDraft = .{};
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    var ctx = Context{ .allocator = allocator, .w = &w, .draft = &draft, .player_id = player_id };
+    const ent = w.store.get(player_id).?;
+    try ent.inventory.add(allocator, .leather_armour, 1);
+
+    var buf: [512]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("equip leather armour"), fbs.writer());
+    try std.testing.expectEqual(.leather_armour, ent.inventory.armour.?);
+    const worn_ac = ent.inventory.playerAc(ent);
+
+    fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("drop leather armour"), fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "unequipped leather armour") != null);
+    try std.testing.expect(ent.inventory.armour == null);
+    // Base AC (10 + dex) differs from the leather-clad AC, confirming the fallback.
+    try std.testing.expect(ent.inventory.playerAc(ent) != worn_ac);
+}
+
+test "drop one of two wielded copies keeps weapon slot" {
     const allocator = std.testing.allocator;
     var w = try world.World.init(allocator, 42);
     defer w.deinit();
@@ -2060,16 +2259,16 @@ test "drop one of a stacked equipped weapon keeps the slot" {
     var ctx = Context{ .allocator = allocator, .w = &w, .draft = &draft, .player_id = player_id };
     const ent = w.store.get(player_id).?;
     try ent.inventory.add(allocator, .short_sword, 2);
+    ent.inventory.weapon = .short_sword;
 
-    var buf: [256]u8 = undefined;
+    var buf: [512]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
-    _ = try execute(&ctx, parseLine("equip short sword"), fbs.writer());
-
-    fbs = std.io.fixedBufferStream(&buf);
     _ = try execute(&ctx, parseLine("drop short sword"), fbs.writer());
-    // One copy remains in the bag, so the weapon stays validly equipped.
-    try std.testing.expectEqual(.short_sword, ent.inventory.weapon);
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "unequipped short sword") == null);
+    // A copy remains, so the wield stays consistent and the die is unchanged.
+    try std.testing.expectEqual(.short_sword, ent.inventory.weapon.?);
     try std.testing.expect(ent.inventory.has(.short_sword));
+    try std.testing.expectEqual(@as(u8, 12), ent.inventory.weaponDamageDie(ent));
 }
 
 test "loot from corpse leaves empty corpse on floor" {
@@ -2093,6 +2292,49 @@ test "loot from corpse leaves empty corpse on floor" {
     try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "corpse goblin_0 at (50,49)") != null);
     try std.testing.expect(w.floor_objects.at(loc.Loc.init(50, 49)) != null);
     try std.testing.expect(w.floor_objects.at(loc.Loc.init(50, 49)).?.item == null);
+}
+
+test "bare loot prefers adjacent corpse over floor item" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    var draft: session.CreationDraft = .{};
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    var ctx = Context{ .allocator = allocator, .w = &w, .draft = &draft, .player_id = player_id };
+    // Floor item added first: a bare `get` (or the old `loot`) would grab it
+    // before the corpse, since it takes the first nearby object in order.
+    try w.floor_objects.addItem(allocator, .item, loc.Loc.init(48, 49), "leather_armour", .leather_armour);
+    try w.floor_objects.addItem(allocator, .corpse, loc.Loc.init(50, 49), "goblin_0", .short_sword);
+
+    var buf: [256]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("loot"), fbs.writer());
+    // `loot` takes the corpse's gear, leaving the floor item untouched.
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "picked up short sword from goblin_0") != null);
+    try std.testing.expect(w.floor_objects.at(loc.Loc.init(50, 49)).?.item == null);
+    try std.testing.expect(w.floor_objects.at(loc.Loc.init(48, 49)) != null);
+    try std.testing.expect(w.floor_objects.at(loc.Loc.init(48, 49)).?.item.? == .leather_armour);
+}
+
+test "bare loot falls back to floor item when no corpse loot" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    var draft: session.CreationDraft = .{};
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    var ctx = Context{ .allocator = allocator, .w = &w, .draft = &draft, .player_id = player_id };
+    // Only a floor item is adjacent (plus an already-empty corpse): `loot`
+    // still picks up the floor item rather than reporting nothing.
+    try w.floor_objects.addItem(allocator, .corpse, loc.Loc.init(50, 49), "goblin_0", null);
+    try w.floor_objects.addItem(allocator, .item, loc.Loc.init(48, 49), "leather_armour", .leather_armour);
+
+    var buf: [256]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("loot"), fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "picked up leather armour") != null);
+    try std.testing.expect(w.floor_objects.at(loc.Loc.init(48, 49)) == null);
 }
 
 test "examine corpse reports empty skeleton" {
