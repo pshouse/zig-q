@@ -489,6 +489,33 @@ pub const sleep_cycle_scenario = Scenario{
     },
 };
 
+/// Seed 42: guards the rest/sleep survival economy. From a penalty exhaustion
+/// tier, repeated `rest` sheds fatigue only down to `rest_fatigue_floor` (tier 1)
+/// and can never fully clear exhaustion; only `sleep` resets fatigue to 0. This is
+/// what stops rest from strictly dominating sleep.
+pub const rest_floor_scenario = Scenario{
+    .name = "rest_floor",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 },
+        .{ .choose_class = 1 },
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .set_fatigue = .{ .entity = "entity_0", .value = 60 } },
+        .{ .command = "conditions" }, // exhaustion=3 (penalty tier)
+        .{ .command = "rest" },
+        .{ .command = "rest" },
+        .{ .command = "rest" }, // fatigue bottoms out at the floor (20), never 0
+        .{ .command = "conditions" }, // exhaustion=1: rest cannot clear it
+        .{ .command = "sleep" }, // only sleep resets fatigue to 0
+        .{ .command = "conditions" }, // exhaustion gone
+        .{ .command = "exit" },
+    },
+};
+
 /// Seed 42: survival needs walkthrough with save/load; byte-stable DST transcript.
 pub const reference_survive_scenario = Scenario{
     .name = "reference_survive",
@@ -1036,6 +1063,8 @@ pub fn scenarioByName(name: []const u8, seed: u64) ?Scenario {
         return Scenario{ .name = "starve", .seed = seed, .steps = starve_scenario.steps };
     if (std.mem.eql(u8, name, "sleep_cycle"))
         return Scenario{ .name = "sleep_cycle", .seed = seed, .steps = sleep_cycle_scenario.steps };
+    if (std.mem.eql(u8, name, "rest_floor"))
+        return Scenario{ .name = "rest_floor", .seed = seed, .steps = rest_floor_scenario.steps };
     if (std.mem.eql(u8, name, "reference_survive"))
         return Scenario{ .name = "reference_survive", .seed = seed, .steps = reference_survive_scenario.steps };
     if (std.mem.eql(u8, name, "heal_bandage"))
@@ -1393,6 +1422,18 @@ test "dst sleep_cycle scenario is byte-identical across runs" {
     try std.testing.expect(std.mem.indexOf(u8, out, "slept") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "fatigue=") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "rested") != null);
+}
+
+test "dst rest_floor scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "rest_floor", 131072);
+    // From a penalty tier, rest lifts out but is floored: fatigue stalls at 20...
+    try std.testing.expect(std.mem.indexOf(u8, out, "exhaustion=3") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "fatigue=20)") != null);
+    // ...and rest can never fully clear exhaustion.
+    try std.testing.expect(std.mem.indexOf(u8, out, "exhaustion=1") != null);
+    // Only sleep resets fatigue to 0.
+    try std.testing.expect(std.mem.indexOf(u8, out, "slept (ticks=") != null);
 }
 
 test "dst reference_survive scenario is byte-identical across runs" {

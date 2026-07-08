@@ -602,12 +602,7 @@ fn cmdRest(ctx: *Context, writer: anytype) !Result {
             return .continue_repl;
         }
     }
-    if (ent.fatigue >= survival.fatigue_restore_rest) {
-        ent.fatigue -= survival.fatigue_restore_rest;
-    } else {
-        ent.fatigue = 0;
-    }
-    _ = survival.syncExhaustion(ent);
+    _ = survival.applyRest(ent);
     try notice.printChanges(ent, writer);
     try writer.print("rested (ticks={} fatigue={})\n", .{ ctx.w.game_clock.ticks, ent.fatigue });
     return .continue_repl;
@@ -643,9 +638,8 @@ fn cmdSleep(ctx: *Context, writer: anytype) !Result {
         }
     }
     ent.sleeping = false;
-    ent.fatigue = 0;
     conditions.remove(ent, .unconscious);
-    _ = survival.syncExhaustion(ent);
+    _ = survival.applySleep(ent);
     try notice.printChanges(ent, writer);
     try writer.print("slept (ticks={} fatigue=0)\n", .{ ctx.w.game_clock.ticks });
     return .continue_repl;
