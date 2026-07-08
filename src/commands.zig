@@ -404,6 +404,11 @@ fn cmdDrop(ctx: *Context, name: []const u8, writer: anytype) !Result {
     }
     try ctx.w.floor_objects.addItem(ctx.allocator, .item, ent.loc, items.idTag(id), id);
     try writer.print("dropped {s}\n", .{items.def(id).name});
+    // Dropping the last copy of equipped gear must release its slot; otherwise the
+    // weapon/armour reference dangles and combat keeps using the departed item.
+    if (!ent.inventory.has(id) and ent.inventory.unequip(id)) {
+        try writer.print("unequipped {s}\n", .{items.def(id).name});
+    }
     try tickPlayerAction(ctx, 1, writer);
     try finishExploreAction(ctx, writer);
     return .continue_repl;
@@ -1879,6 +1884,80 @@ test "equip armour resolves category shorthand" {
     _ = try execute(&ctx, parseLine("equip armour"), fbs.writer());
     try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "equipped leather armour") != null);
     try std.testing.expectEqual(.leather_armour, ent.inventory.armour);
+}
+
+test "drop while wielded clears weapon slot and restores innate die" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    var draft: session.CreationDraft = .{};
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    var ctx = Context{ .allocator = allocator, .w = &w, .draft = &draft, .player_id = player_id };
+    const ent = w.store.get(player_id).?;
+    try ent.inventory.add(allocator, .short_sword, 1);
+
+    var buf: [512]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("equip short sword"), fbs.writer());
+    try std.testing.expectEqual(.short_sword, ent.inventory.weapon.?);
+    try std.testing.expectEqual(@as(u8, 6), ent.inventory.weaponDamageDie(ent));
+
+    fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("drop short sword"), fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "dropped short sword") != null);
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "unequipped short sword") != null);
+    // Slot released, bag empty of it, damage die falls back to the barbarian's d12.
+    try std.testing.expect(ent.inventory.weapon == null);
+    try std.testing.expect(!ent.inventory.has(.short_sword));
+    try std.testing.expectEqual(@as(u8, 12), ent.inventory.weaponDamageDie(ent));
+}
+
+test "drop while worn clears armour slot and restores base ac" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    var draft: session.CreationDraft = .{};
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    var ctx = Context{ .allocator = allocator, .w = &w, .draft = &draft, .player_id = player_id };
+    const ent = w.store.get(player_id).?;
+    try ent.inventory.add(allocator, .leather_armour, 1);
+
+    var buf: [512]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("equip leather armour"), fbs.writer());
+    try std.testing.expectEqual(.leather_armour, ent.inventory.armour.?);
+    const worn_ac = ent.inventory.playerAc(ent);
+
+    fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("drop leather armour"), fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "unequipped leather armour") != null);
+    try std.testing.expect(ent.inventory.armour == null);
+    // Base AC (10 + dex) differs from the leather-clad AC, confirming the fallback.
+    try std.testing.expect(ent.inventory.playerAc(ent) != worn_ac);
+}
+
+test "drop one of two wielded copies keeps weapon slot" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    var draft: session.CreationDraft = .{};
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    var ctx = Context{ .allocator = allocator, .w = &w, .draft = &draft, .player_id = player_id };
+    const ent = w.store.get(player_id).?;
+    try ent.inventory.add(allocator, .short_sword, 2);
+    ent.inventory.weapon = .short_sword;
+
+    var buf: [512]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("drop short sword"), fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "unequipped short sword") == null);
+    // A copy remains, so the wield stays consistent and the die is unchanged.
+    try std.testing.expectEqual(.short_sword, ent.inventory.weapon.?);
+    try std.testing.expect(ent.inventory.has(.short_sword));
+    try std.testing.expectEqual(@as(u8, 6), ent.inventory.weaponDamageDie(ent));
 }
 
 test "loot from corpse leaves empty corpse on floor" {

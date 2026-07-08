@@ -91,6 +91,27 @@ pub const State = struct {
         return false;
     }
 
+    /// Clear any equipment slot (weapon/armour/shield) currently referencing `id`.
+    /// Returns true if a slot was cleared. Call this when an item leaves the bag so
+    /// combat stats (weaponDamageDie, playerAc) fall back to defaults instead of
+    /// keeping a "phantom" reference to gear the player no longer holds.
+    pub fn unequip(self: *State, id: items.Id) bool {
+        var cleared = false;
+        if (self.weapon == id) {
+            self.weapon = null;
+            cleared = true;
+        }
+        if (self.armour == id) {
+            self.armour = null;
+            cleared = true;
+        }
+        if (self.shield == id) {
+            self.shield = null;
+            cleared = true;
+        }
+        return cleared;
+    }
+
     pub const BagResolve = union(enum) {
         found: items.Id,
         unknown,
@@ -224,6 +245,18 @@ test "total weight sums stacks" {
     defer state.deinit(std.testing.allocator);
     try state.add(std.testing.allocator, .leather_armour, 3);
     try std.testing.expectEqual(@as(u32, 30), state.totalWeight());
+}
+
+test "unequip clears matching slots and reports whether it did" {
+    var state = State.init();
+    defer state.deinit(std.testing.allocator);
+    state.weapon = .short_sword;
+    state.armour = .leather_armour;
+    try std.testing.expect(state.unequip(.short_sword));
+    try std.testing.expect(state.weapon == null);
+    try std.testing.expectEqual(.leather_armour, state.armour.?);
+    // Nothing references a bare hand any more, so no slot changes.
+    try std.testing.expect(!state.unequip(.short_sword));
 }
 
 test "resolve bag item by category" {
