@@ -10,6 +10,18 @@ pub const Stack = struct {
     count: u8 = 1,
 };
 
+/// The three equipment slots a bag item can occupy. Equipped gear stays in the
+/// bag; the slot merely marks which stack is worn/wielded.
+pub const Slot = enum { weapon, armour, shield };
+
+pub fn slotLabel(slot: Slot) []const u8 {
+    return switch (slot) {
+        .weapon => "weapon",
+        .armour => "armour",
+        .shield => "shield",
+    };
+}
+
 pub const State = struct {
     bag: std.ArrayList(Stack),
     weapon: ?items.Id = null,
@@ -165,6 +177,43 @@ pub const State = struct {
         return ent.char.class.hit_die;
     }
 
+    /// Item currently occupying `slot`, or null if the slot is empty.
+    pub fn equippedIn(self: *const State, slot: Slot) ?items.Id {
+        return switch (slot) {
+            .weapon => self.weapon,
+            .armour => self.armour,
+            .shield => self.shield,
+        };
+    }
+
+    /// Which slot, if any, currently holds `id`.
+    pub fn slotOf(self: *const State, id: items.Id) ?Slot {
+        if (self.weapon == id) return .weapon;
+        if (self.armour == id) return .armour;
+        if (self.shield == id) return .shield;
+        return null;
+    }
+
+    /// Clears `slot` and returns the item that occupied it (null if empty).
+    pub fn clearSlot(self: *State, slot: Slot) ?items.Id {
+        const prev = self.equippedIn(slot);
+        switch (slot) {
+            .weapon => self.weapon = null,
+            .armour => self.armour = null,
+            .shield => self.shield = null,
+        }
+        return prev;
+    }
+
+    /// Drops any equipment slot still pointing at `id`. Call this when the last
+    /// copy of `id` leaves the bag so weapon/armour/shield never reference an
+    /// item that is no longer carried (e.g. after `drop`ping equipped gear).
+    pub fn unlinkEquipped(self: *State, id: items.Id) void {
+        if (self.weapon == id) self.weapon = null;
+        if (self.armour == id) self.armour = null;
+        if (self.shield == id) self.shield = null;
+    }
+
     pub fn format(self: *const State, writer: anytype) !void {
         try writer.writeAll("inventory:\n");
         if (self.bag.items.len == 0) {
@@ -233,4 +282,30 @@ test "resolve bag item by category" {
     try std.testing.expectEqual(.leather_armour, state.resolveBagItem("armour").found);
     try std.testing.expectEqual(.leather_armour, state.resolveBagItem("armor").found);
     try std.testing.expect(state.resolveBagItem("weapon") == .none_in_category);
+}
+
+test "clearSlot returns the item and leaves it in the bag" {
+    var state = State.init();
+    defer state.deinit(std.testing.allocator);
+    try state.add(std.testing.allocator, .short_sword, 1);
+    state.weapon = .short_sword;
+    try std.testing.expectEqual(Slot.weapon, state.slotOf(.short_sword).?);
+
+    try std.testing.expectEqual(.short_sword, state.clearSlot(.weapon).?);
+    try std.testing.expect(state.weapon == null);
+    // Equipped gear never left the bag, so it is still carried after unequip.
+    try std.testing.expect(state.has(.short_sword));
+    // Clearing an already-empty slot yields null.
+    try std.testing.expect(state.clearSlot(.weapon) == null);
+}
+
+test "unlinkEquipped drops a dangling slot reference" {
+    var state = State.init();
+    defer state.deinit(std.testing.allocator);
+    state.weapon = .short_sword;
+    state.armour = .leather_armour;
+    state.unlinkEquipped(.short_sword);
+    try std.testing.expect(state.weapon == null);
+    // Only the matching slot is cleared.
+    try std.testing.expectEqual(.leather_armour, state.armour.?);
 }

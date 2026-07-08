@@ -53,6 +53,8 @@ pub const Command = union(enum) {
     examine_item: []const u8,
     equip_item: []const u8,
     equip_usage,
+    unequip_item: []const u8,
+    unequip_usage,
     food,
     food_item: []const u8,
     rest,
@@ -129,6 +131,15 @@ pub fn parseLine(line: []const u8) Command {
     if (std.mem.startsWith(u8, trimmed, "equip ")) {
         const arg = std.mem.trim(u8, trimmed[6..], " \t");
         if (arg.len > 0) return .{ .equip_item = arg };
+    }
+    // `unequip <slot|item>` plus the natural-language aliases `unwield`, `remove`,
+    // and `take off`. All map to the same command; a bare verb prints usage.
+    for ([_][]const u8{ "unequip", "unwield", "remove", "take off" }) |verb| {
+        if (std.mem.eql(u8, trimmed, verb)) return .unequip_usage;
+        if (std.mem.startsWith(u8, trimmed, verb) and trimmed.len > verb.len and trimmed[verb.len] == ' ') {
+            const arg = std.mem.trim(u8, trimmed[verb.len + 1 ..], " \t");
+            if (arg.len > 0) return .{ .unequip_item = arg };
+        }
     }
     if (std.mem.startsWith(u8, trimmed, "eat ")) {
         const arg = std.mem.trim(u8, trimmed[4..], " \t");
@@ -402,6 +413,9 @@ fn cmdDrop(ctx: *Context, name: []const u8, writer: anytype) !Result {
         try writer.print("you do not have that item\n", .{});
         return .continue_repl;
     }
+    // Once the last copy leaves the bag, clear any equipment slot pointing at it
+    // so weapon/armour/shield never reference an item now lying on the floor.
+    if (!ent.inventory.has(id)) ent.inventory.unlinkEquipped(id);
     try ctx.w.floor_objects.addItem(ctx.allocator, .item, ent.loc, items.idTag(id), id);
     try writer.print("dropped {s}\n", .{items.def(id).name});
     try tickPlayerAction(ctx, 1, writer);
@@ -501,6 +515,50 @@ fn cmdEquip(ctx: *Context, name: []const u8, writer: anytype) !Result {
         },
     }
     try writer.print("equipped {s}\n", .{d.name});
+    return .continue_repl;
+}
+
+fn cmdUnequip(ctx: *Context, name: []const u8, writer: anytype) !Result {
+    const ent = ctx.w.store.get(ctx.player_id) orelse {
+        try writer.print("no player spawned\n", .{});
+        return .continue_repl;
+    };
+    const inv = &ent.inventory;
+
+    // A bare slot keyword ("weapon", "armour"/"armor", "shield") clears that slot.
+    if (items.parseCategory(name)) |cat| {
+        return switch (cat) {
+            .weapon => unequipFromSlot(ctx, inv, .weapon, writer),
+            .armour => unequipFromSlot(ctx, inv, .armour, writer),
+            .shield => unequipFromSlot(ctx, inv, .shield, writer),
+            .consumable => {
+                try writer.print("consumables are not equipped\n", .{});
+                return .continue_repl;
+            },
+        };
+    }
+
+    // Otherwise resolve an item name and clear whichever slot holds it.
+    if (items.parseId(name)) |id| {
+        if (inv.slotOf(id)) |slot| return unequipFromSlot(ctx, inv, slot, writer);
+        try writer.print("{s} is not equipped\n", .{items.def(id).name});
+        return .continue_repl;
+    }
+
+    try writer.print("unknown item or slot\n", .{});
+    return .continue_repl;
+}
+
+fn unequipFromSlot(ctx: *Context, inv: *inventory.State, slot: inventory.Slot, writer: anytype) !Result {
+    const id = inv.clearSlot(slot) orelse {
+        try writer.print("no {s} equipped\n", .{inventory.slotLabel(slot)});
+        return .continue_repl;
+    };
+    // Equipped gear stays in the bag, so clearing the slot already returns it to
+    // the pack. Guard against a legacy dangling slot (item no longer carried) by
+    // putting the item back so `unequip` can never delete gear.
+    if (!inv.has(id)) try inv.add(ctx.allocator, id, 1);
+    try writer.print("unequipped {s}\n", .{items.def(id).name});
     return .continue_repl;
 }
 
@@ -990,6 +1048,10 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
             try writer.print("equip what? (e.g. equip short sword, equip armour)\n", .{});
         },
         .equip_item => |name| return cmdEquip(ctx, name, writer),
+        .unequip_usage => {
+            try writer.print("unequip what? (e.g. unequip weapon, unequip armour, unequip short sword)\n", .{});
+        },
+        .unequip_item => |name| return cmdUnequip(ctx, name, writer),
         .food => return cmdFood(ctx, null, writer),
         .food_item => |name| return cmdFood(ctx, name, writer),
         .rest => return cmdRest(ctx, writer),
@@ -1879,6 +1941,135 @@ test "equip armour resolves category shorthand" {
     _ = try execute(&ctx, parseLine("equip armour"), fbs.writer());
     try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "equipped leather armour") != null);
     try std.testing.expectEqual(.leather_armour, ent.inventory.armour);
+}
+
+test "bare unequip and aliases parse" {
+    try std.testing.expect(parseLine("unequip") == .unequip_usage);
+    try std.testing.expect(parseLine("take off") == .unequip_usage);
+    try std.testing.expectEqualStrings("short sword", parseLine("unequip short sword").unequip_item);
+    try std.testing.expectEqualStrings("weapon", parseLine("unwield weapon").unequip_item);
+    try std.testing.expectEqualStrings("weapon", parseLine("remove weapon").unequip_item);
+    try std.testing.expectEqualStrings("armour", parseLine("take off armour").unequip_item);
+}
+
+test "unequip weapon restores innate damage die" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    var draft: session.CreationDraft = .{};
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    var ctx = Context{ .allocator = allocator, .w = &w, .draft = &draft, .player_id = player_id };
+    const ent = w.store.get(player_id).?;
+    // spawnTestPlayer is a barbarian: innate die = hit_die 12.
+    const innate = ent.inventory.weaponDamageDie(ent);
+    try std.testing.expectEqual(@as(u8, 12), innate);
+
+    try ent.inventory.add(allocator, .short_sword, 1);
+    var buf: [256]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("equip short sword"), fbs.writer());
+    try std.testing.expectEqual(@as(u8, 6), ent.inventory.weaponDamageDie(ent));
+
+    fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("unequip weapon"), fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "unequipped short sword") != null);
+    try std.testing.expect(ent.inventory.weapon == null);
+    // Back to the barbarian's d12, and the sword is still in the bag.
+    try std.testing.expectEqual(@as(u8, 12), ent.inventory.weaponDamageDie(ent));
+    try std.testing.expect(ent.inventory.has(.short_sword));
+}
+
+test "unequip by item name clears the slot" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    var draft: session.CreationDraft = .{};
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    var ctx = Context{ .allocator = allocator, .w = &w, .draft = &draft, .player_id = player_id };
+    const ent = w.store.get(player_id).?;
+    try ent.inventory.add(allocator, .leather_armour, 1);
+
+    var buf: [256]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("equip armour"), fbs.writer());
+    try std.testing.expectEqual(.leather_armour, ent.inventory.armour);
+
+    fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("unequip leather armour"), fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "unequipped leather armour") != null);
+    try std.testing.expect(ent.inventory.armour == null);
+    try std.testing.expect(ent.inventory.has(.leather_armour));
+}
+
+test "unequip empty slot and unequipped item report clearly" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    var draft: session.CreationDraft = .{};
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    var ctx = Context{ .allocator = allocator, .w = &w, .draft = &draft, .player_id = player_id };
+    const ent = w.store.get(player_id).?;
+    try ent.inventory.add(allocator, .short_sword, 1);
+
+    var buf: [256]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("unequip weapon"), fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "no weapon equipped") != null);
+
+    // Carried but not equipped: naming the item says so.
+    fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("unequip short sword"), fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "short sword is not equipped") != null);
+}
+
+test "drop of equipped weapon clears the slot (no dangling reference)" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    var draft: session.CreationDraft = .{};
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    var ctx = Context{ .allocator = allocator, .w = &w, .draft = &draft, .player_id = player_id };
+    const ent = w.store.get(player_id).?;
+    try ent.inventory.add(allocator, .short_sword, 1);
+
+    var buf: [256]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("equip short sword"), fbs.writer());
+    try std.testing.expectEqual(.short_sword, ent.inventory.weapon);
+
+    fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("drop short sword"), fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "dropped short sword") != null);
+    // The slot must not dangle onto an item now on the floor.
+    try std.testing.expect(ent.inventory.weapon == null);
+    try std.testing.expect(!ent.inventory.has(.short_sword));
+    try std.testing.expectEqual(@as(u8, 12), ent.inventory.weaponDamageDie(ent));
+}
+
+test "drop one of a stacked equipped weapon keeps the slot" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    var draft: session.CreationDraft = .{};
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    var ctx = Context{ .allocator = allocator, .w = &w, .draft = &draft, .player_id = player_id };
+    const ent = w.store.get(player_id).?;
+    try ent.inventory.add(allocator, .short_sword, 2);
+
+    var buf: [256]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("equip short sword"), fbs.writer());
+
+    fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("drop short sword"), fbs.writer());
+    // One copy remains in the bag, so the weapon stays validly equipped.
+    try std.testing.expectEqual(.short_sword, ent.inventory.weapon);
+    try std.testing.expect(ent.inventory.has(.short_sword));
 }
 
 test "loot from corpse leaves empty corpse on floor" {
