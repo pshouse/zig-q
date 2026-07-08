@@ -192,54 +192,51 @@ pub fn writeV15CompletionSummary(
     try writeCapture(out_path, text);
 }
 
-/// Compares the reference_crawl captures of whichever of v11..v15 are actually
-/// present in `scratch` (each written by that wave's own gate run). Returns a
-/// status line on success. A genuine byte mismatch between two present captures
-/// is a regression and returns `error.CrossWaveReferenceMismatch` so the gate
-/// fails; when prior-wave captures are absent it reports INCOMPLETE rather than
-/// fabricating a pass. `error.CrossWaveReferenceMissing` means nothing was found.
-fn crossWaveReference(allocator: std.mem.Allocator, scratch: []const u8) ![]const u8 {
-    const prefixes = [_][]const u8{ "v11", "v12", "v13", "v14", "v15" };
-    var present: std.ArrayList(u8) = .empty;
-    defer present.deinit(allocator);
-    var missing: std.ArrayList(u8) = .empty;
-    defer missing.deinit(allocator);
-    var first_hash: ?[64]u8 = null;
+/// reference_crawl is version-invariant (its transcript is pinned to `# version=1.1.0`),
+/// so its canonical bytes are committed once as a golden. Regenerate with
+/// `zig build update-reference-golden` whenever a change intentionally alters the crawl.
+pub const reference_golden_path = "references/reference_crawl.txt";
 
-    for (prefixes) |prefix| {
-        const leaf = try std.fmt.allocPrint(allocator, "{s}_dst_reference_crawl_a.txt", .{prefix});
-        defer allocator.free(leaf);
-        const ref_path = try joinPath(allocator, scratch, leaf);
-        defer allocator.free(ref_path);
-        const data = std.fs.cwd().readFileAlloc(allocator, ref_path, 16 * 1024 * 1024) catch |err| switch (err) {
-            error.FileNotFound => {
-                if (missing.items.len > 0) try missing.appendSlice(allocator, ",");
-                try missing.appendSlice(allocator, prefix);
-                continue;
-            },
-            else => return err,
-        };
-        defer allocator.free(data);
-        var h: [64]u8 = undefined;
-        sha256Hex(data, &h);
-        if (first_hash) |fh| {
-            if (!std.mem.eql(u8, &fh, &h)) return error.CrossWaveReferenceMismatch;
-        } else {
-            first_hash = h;
-        }
-        if (present.items.len > 0) try present.appendSlice(allocator, "==");
-        try present.appendSlice(allocator, prefix);
+/// Byte comparison that ignores carriage returns, so a golden checked out as CRLF
+/// still matches the LF-only bytes captured from process stdout.
+fn eqlIgnoringCr(a: []const u8, b: []const u8) bool {
+    var i: usize = 0;
+    var j: usize = 0;
+    while (true) {
+        while (i < a.len and a[i] == '\r') i += 1;
+        while (j < b.len and b[j] == '\r') j += 1;
+        const a_done = i >= a.len;
+        const b_done = j >= b.len;
+        if (a_done or b_done) return a_done and b_done;
+        if (a[i] != b[j]) return false;
+        i += 1;
+        j += 1;
     }
+}
 
-    const hash = first_hash orelse return error.CrossWaveReferenceMissing;
-    if (missing.items.len == 0) {
-        return try std.fmt.allocPrint(allocator, "cross_wave_reference: {s} ref_hash={s}\n", .{
-            present.items, hash[0..],
-        });
-    }
-    return try std.fmt.allocPrint(allocator, "cross_wave_reference: {s} ref_hash={s} (INCOMPLETE: missing {s})\n", .{
-        present.items, hash[0..], missing.items,
-    });
+/// Compares this wave's freshly captured reference_crawl against the committed golden.
+/// Returns a status line on match; a genuine difference is a regression and returns
+/// `error.ReferenceCrawlRegression` so the gate fails. Unlike the old cross-wave check
+/// this needs no prior-wave gate runs and can never report a fabricated pass.
+fn verifyReferenceGolden(allocator: std.mem.Allocator, scratch: []const u8, prefix: []const u8) ![]const u8 {
+    const leaf = try std.fmt.allocPrint(allocator, "{s}_dst_reference_crawl_a.txt", .{prefix});
+    defer allocator.free(leaf);
+    const fresh_path = try joinPath(allocator, scratch, leaf);
+    defer allocator.free(fresh_path);
+    const fresh = try std.fs.cwd().readFileAlloc(allocator, fresh_path, 16 * 1024 * 1024);
+    defer allocator.free(fresh);
+
+    const golden = std.fs.cwd().readFileAlloc(allocator, reference_golden_path, 16 * 1024 * 1024) catch |err| switch (err) {
+        error.FileNotFound => return error.ReferenceGoldenMissing,
+        else => return err,
+    };
+    defer allocator.free(golden);
+
+    if (!eqlIgnoringCr(fresh, golden)) return error.ReferenceCrawlRegression;
+
+    var h: [64]u8 = undefined;
+    sha256Hex(fresh, &h);
+    return try std.fmt.allocPrint(allocator, "reference_crawl: matches committed golden ref_hash={s}\n", .{h[0..]});
 }
 
 pub fn appendVerificationFooter(
@@ -282,44 +279,15 @@ pub fn appendVerificationFooter(
         try file.writeAll("\n");
     }
 
-    if (summary.wave == 15) {
-        const cross = try crossWaveReference(allocator, scratch);
-        defer allocator.free(cross);
+    {
+        var prefix_buf: [8]u8 = undefined;
+        const prefix = try std.fmt.bufPrint(&prefix_buf, "v{d}", .{summary.wave});
+        const status = try verifyReferenceGolden(allocator, scratch, prefix);
+        defer allocator.free(status);
         const file = try std.fs.cwd().openFile(verify_path, .{ .mode = .read_write });
         defer file.close();
         try file.seekFromEnd(0);
-        try file.writeAll(cross);
-    } else if (summary.wave == 14) {
-        var hash_match = true;
-        var first_hash: ?[64]u8 = null;
-        const prefixes = [_][]const u8{ "v11", "v12", "v13", "v14" };
-        for (prefixes) |prefix| {
-            const leaf = try std.fmt.allocPrint(allocator, "{s}_dst_reference_crawl_a.txt", .{prefix});
-            defer allocator.free(leaf);
-            const ref_path = try joinPath(allocator, scratch, leaf);
-            defer allocator.free(ref_path);
-            const data = std.fs.cwd().readFileAlloc(allocator, ref_path, 16 * 1024 * 1024) catch {
-                hash_match = false;
-                continue;
-            };
-            defer allocator.free(data);
-            var h: [64]u8 = undefined;
-            sha256Hex(data, &h);
-            if (first_hash) |fh| {
-                if (!std.mem.eql(u8, &fh, &h)) hash_match = false;
-            } else {
-                first_hash = h;
-            }
-        }
-        const cross = if (hash_match and first_hash != null)
-            try std.fmt.allocPrint(allocator, "cross_wave_reference: v11==v12==v13==v14 ref_hash={s}\n", .{first_hash.?[0..]})
-        else
-            try std.fmt.allocPrint(allocator, "cross_wave_reference: MISMATCH\n", .{});
-        defer allocator.free(cross);
-        const file = try std.fs.cwd().openFile(verify_path, .{ .mode = .read_write });
-        defer file.close();
-        try file.seekFromEnd(0);
-        try file.writeAll(cross);
+        try file.writeAll(status);
     }
 
     if (summary.wave == 15) {
@@ -855,12 +823,36 @@ test "parseTestCounts reads 144/144 from build summary" {
     try std.testing.expectEqual(@as(u32, 144), counts.total);
 }
 
-test "crossWaveReference errors when all prefix files are absent" {
+test "eqlIgnoringCr matches across CRLF/LF and rejects real differences" {
+    try std.testing.expect(eqlIgnoringCr("a\nb\nc\n", "a\r\nb\r\nc\r\n"));
+    try std.testing.expect(eqlIgnoringCr("abc", "abc"));
+    try std.testing.expect(!eqlIgnoringCr("a\nb", "a\nc"));
+    try std.testing.expect(!eqlIgnoringCr("abc", "abcd"));
+}
+
+test "verifyReferenceGolden matches the committed golden and flags a regression" {
     const allocator = std.testing.allocator;
-    try std.testing.expectError(
-        error.CrossWaveReferenceMissing,
-        crossWaveReference(allocator, "zig_q_missing_cross_wave_scratch"),
-    );
+    const scratch = "zig_q_refgold_test_scratch";
+    std.fs.cwd().makePath(scratch) catch {};
+    defer std.fs.cwd().deleteTree(scratch) catch {};
+
+    const golden = try std.fs.cwd().readFileAlloc(allocator, reference_golden_path, 16 * 1024 * 1024);
+    defer allocator.free(golden);
+
+    const leaf_path = try joinPath(allocator, scratch, "v99_dst_reference_crawl_a.txt");
+    defer allocator.free(leaf_path);
+
+    // A fresh capture equal to the golden passes.
+    try writeCapture(leaf_path, golden);
+    const ok = try verifyReferenceGolden(allocator, scratch, "v99");
+    defer allocator.free(ok);
+    try std.testing.expect(std.mem.indexOf(u8, ok, "matches committed golden") != null);
+
+    // A regressed capture must fail the gate.
+    const bad = try std.fmt.allocPrint(allocator, "{s}\nREGRESSION\n", .{golden});
+    defer allocator.free(bad);
+    try writeCapture(leaf_path, bad);
+    try std.testing.expectError(error.ReferenceCrawlRegression, verifyReferenceGolden(allocator, scratch, "v99"));
 }
 
 test "formatV15CompletionSummary uses gate captures only" {

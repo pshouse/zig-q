@@ -1,0 +1,113 @@
+# version=1.1.0
+# seed=42
+dst scenario=reference_crawl seed=42
+step load_floor 1
+step creation_roll
+stat_rolls: 1=13 2=5 3=12 4=10 5=14 6=12
+step assign_stats
+step choose_race pick=2
+step choose_class pick=1
+step creation_finish name=George
+step spawn id=0 at (49,49)
+step command move east
+moved to (49,50)
+step command move south
+moved to (50,50)
+step command move east
+moved to (50,51)
+step command descend
+descended to floor 2
+step command move south
+moved to (48,49)
+step command move south
+moved to (49,49)
+step command move south
+moved to (50,49)
+step command attack goblin_0
+attack entity_0->goblin_0 roll=5 mod=1 vs AC 15 miss
+step command end turn
+attack goblin_0->entity_0 roll=16 mod=-1 vs AC 12 hit damage=1 hp=12/13
+turn: entity_0
+step command attack goblin_0
+attack entity_0->goblin_0 roll=13 mod=1 vs AC 15 miss
+step command end turn
+attack goblin_0->entity_0 roll=6 mod=-1 vs AC 12 miss
+turn: entity_0
+step command attack goblin_0
+attack entity_0->goblin_0 roll=7 mod=1 vs AC 15 miss
+step command end turn
+attack goblin_0->entity_0 roll=8 mod=-1 vs AC 12 miss
+turn: entity_0
+step command attack goblin_0
+attack entity_0->goblin_0 roll=8 mod=1 vs AC 15 miss
+step command end turn
+attack goblin_0->entity_0 roll=6 mod=-1 vs AC 12 miss
+turn: entity_0
+step command attack goblin_0
+attack entity_0->goblin_0 roll=19 mod=1 vs AC 15 hit damage=13 hp=0/7
+goblin_0 is slain
+step command save
+saved slot 1 seed=42 entities=4 rng_offset=35
+step command load 1
+loaded slot 1 seed=42 entities=4 rng_offset=35
+step command move south
+moved to (51,49)
+step command move south
+moved to (52,49)
+step command move east
+moved to (52,50)
+step command descend
+descended to floor 3
+step command move south
+moved to (53,42)
+step command move south
+moved to (54,42)
+step command move south
+moved to (55,42)
+step command attack goblin_0
+attack entity_0->goblin_0 roll=4 mod=1 vs AC 15 miss
+step command end turn
+attack goblin_0->entity_0 roll=9 mod=-1 vs AC 12 miss
+turn: entity_0
+step command attack goblin_0
+attack entity_0->goblin_0 roll=18 mod=1 vs AC 15 hit damage=10 hp=0/7
+goblin_0 is slain
+step command look
+look floor=3 center=(55,42) radius=5
+...........
+.......##.#
+.......##.#
+...........
+...........
+.....@...>.
+...####....
+...####....
+...#######.
+...#######.
+...########
+nearby:
+  bandage at (54,42) (get bandage)
+  antidote at (54,40) (get antidote)
+  rations at (53,43) (get rations)
+  leather armour at (55,42) (get leather armour)
+  rations at (58,39) (get rations)
+  antidote at (53,39) (get antidote)
+  leather armour at (53,43) (get leather armour)
+  corpse goblin_0 at (55,41) holds short sword (get from corpse)
+step command stats
+character George race=dwarf class=barbarian
+STR: 12
+DEX: 14
+CON: 12
+INT: 12
+WIS: 5
+CHA: 13
+HP: 12
+AC: 12
+movement: 30
+encumbrance: 3 of 60
+hunger=26 fatigue=26 exhaustion=1
+conditions: exhaustion, exhaustion=1
+step command exit
+step exit
+dst_end entities=2 cells=1 ticks=26 rng_offset=39

@@ -317,4 +317,19 @@ pub fn build(b: *std.Build) void {
     const consumer_test_run = b.addRunArtifact(consumer_test_exe);
     const consumer_test_step = b.step("consumer-test", "Run public zig_q API integration tests");
     consumer_test_step.dependOn(&consumer_test_run.step);
+
+    // Regenerate the committed reference_crawl golden that the release gate checks against.
+    // Run this only when a change intentionally alters the reference crawl, then commit
+    // references/reference_crawl.txt. The transcript is version-pinned to 1.1.0.
+    const update_golden = b.addSystemCommand(&.{
+        "cmd", "/c",
+        "if not exist references mkdir references && " ++
+            "zig-out\\bin\\zig-q-dst.exe reference_crawl 42 --semver 1.1.0 > references\\reference_crawl.txt",
+    });
+    update_golden.step.dependOn(b.getInstallStep());
+    const update_golden_step = b.step(
+        "update-reference-golden",
+        "Regenerate references/reference_crawl.txt from the current build",
+    );
+    update_golden_step.dependOn(&update_golden.step);
 }
