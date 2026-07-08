@@ -656,6 +656,11 @@ fn tickPlayerAction(ctx: *Context, count: u32, writer: anytype) !void {
 
 fn finishExploreAction(ctx: *Context, writer: anytype) !void {
     if (combat.isInCombat(ctx.w)) return;
+    // When explore AI is disabled (piped REPL, reference/trap scenarios), no player
+    // action advances monsters or triggers ambushes. This must gate every finish path
+    // — moves and non-move actions (get/loot/use/wait/open/close/wound) alike — so a
+    // scripted run behaves the same regardless of which command the player issues.
+    if (!ctx.w.explore_ai_on_move) return;
     const notice_before: ?SurvivalNoticeState = if (ctx.w.store.get(ctx.player_id)) |ent|
         SurvivalNoticeState.capture(ent)
     else
@@ -670,8 +675,8 @@ fn finishExploreAction(ctx: *Context, writer: anytype) !void {
 }
 
 fn finishExploreMove(ctx: *Context, writer: anytype) !void {
-    if (combat.isInCombat(ctx.w)) return;
-    if (!ctx.w.explore_ai_on_move) return;
+    // The explore_ai_on_move / combat gates live in finishExploreAction; moves add the
+    // floor-1 exemption (no wandering monsters on the handcrafted starting floor).
     if (ctx.w.floor_index < 2) return;
     try finishExploreAction(ctx, writer);
 }
@@ -1844,6 +1849,43 @@ test "finish explore action prints exhaustion after monster tick" {
     var fbs = std.io.fixedBufferStream(&buf);
     try finishExploreAction(&ctx, fbs.writer());
     try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "exhaustion level 1") != null);
+}
+
+test "non-move action does not advance monster AI when explore_ai_on_move is off" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(2);
+    w.explore_ai_on_move = false;
+    var draft: session.CreationDraft = .{};
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    var ctx = Context{ .allocator = allocator, .w = &w, .draft = &draft, .player_id = player_id };
+    const monster_id = try w.spawnMonster(.goblin, loc.Loc.init(51, 49), "goblin_0");
+    const goblin_start = w.store.get(monster_id).?.loc;
+    // A pickable item on the player's tile so `get` reaches finishExploreAction.
+    try w.floor_objects.addItem(allocator, .item, loc.Loc.init(49, 49), "bandage", .bandage);
+
+    var buf: [512]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("get"), fbs.writer());
+    const out = fbs.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, out, "picked up bandage") != null);
+    // Flag off: the goblin must hold still and no ambush may start, exactly like a move.
+    const after_off = w.store.get(monster_id).?.loc;
+    try std.testing.expectEqual(goblin_start.x, after_off.x);
+    try std.testing.expectEqual(goblin_start.y, after_off.y);
+    try std.testing.expect(!combat.isInCombat(&w));
+    try std.testing.expect(std.mem.indexOf(u8, out, "moved") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "ambush") == null);
+
+    // Control: with the flag on, the same setup advances the goblin, proving the guard
+    // above is real and not passing only because the monster could never move here.
+    w.explore_ai_on_move = true;
+    try w.floor_objects.addItem(allocator, .item, loc.Loc.init(49, 49), "bandage", .bandage);
+    fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("get"), fbs.writer());
+    const after_on = w.store.get(monster_id).?.loc;
+    try std.testing.expect(after_on.x != goblin_start.x or after_on.y != goblin_start.y);
 }
 
 test "bare equip prints usage" {
