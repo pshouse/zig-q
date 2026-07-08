@@ -1,7 +1,11 @@
-//! Line-of-sight on the cardinal grid (Bresenham).
+//! Line-of-sight on the cardinal grid (Bresenham) and trap spotting checks.
 const std = @import("std");
 const loc = @import("loc.zig");
 const terrain = @import("terrain.zig");
+const rng = @import("rng.zig");
+
+/// Base DC to spot a trap at distance 0; +1 per tile of Manhattan distance.
+pub const trap_spot_dc_base: i32 = 12;
 
 fn tileBlocksLos(map: *const terrain.TerrainMap, at: loc.Loc) bool {
     if (map.get(at)) |tile| return tile == .wall;
@@ -72,11 +76,35 @@ pub fn inRadius(center: loc.Loc, target: loc.Loc, radius: u8) bool {
     return adx <= r_extent and ady <= r_extent;
 }
 
+pub fn manhattanDistance(a: loc.Loc, b: loc.Loc) u64 {
+    const dx = @as(i64, @intCast(a.x)) - @as(i64, @intCast(b.x));
+    const dy = @as(i64, @intCast(a.y)) - @as(i64, @intCast(b.y));
+    const adx: u64 = @intCast(if (dx < 0) -dx else dx);
+    const ady: u64 = @intCast(if (dy < 0) -dy else dy);
+    return adx + ady;
+}
+
+/// d20 + WIS mod vs DC (base + distance). Consumes one RNG roll.
+pub fn spotTrapCheck(wis_mod: i32, distance: u64, rng_state: *rng.SeededRng) bool {
+    const roll: i32 = rng_state.rollDie(20);
+    const dc = trap_spot_dc_base + @as(i32, @intCast(distance));
+    return roll + wis_mod >= dc;
+}
+
 test "axis aligned south has los in open chamber" {
     const allocator = std.testing.allocator;
     var map = terrain.TerrainMap.init(allocator);
     defer map.deinit();
     try std.testing.expect(hasLineOfSight(&map, loc.Loc.init(49, 49), loc.Loc.init(50, 49)));
+}
+
+test "spotTrapCheck uses d20 plus wis mod against distance-scaled dc" {
+    var rng_state = rng.SeededRng.init(42);
+    // mod +11 at distance 0: DC 12, worst roll 1 still succeeds.
+    try std.testing.expect(spotTrapCheck(11, 0, &rng_state));
+    rng_state = rng.SeededRng.init(42);
+    // mod -4 at distance 6: DC 18, best roll 20 still fails.
+    try std.testing.expect(!spotTrapCheck(-4, 6, &rng_state));
 }
 
 test "wall blocks los" {
