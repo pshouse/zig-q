@@ -110,6 +110,8 @@ zig build dst -- @scenarios/reference_crawl.txt 42
 - **playthrough** — harvested from `transcripts/session-1783208416-seed42.txt` (dragonborn crawl)
 - **descend_crawl** — floor 1 creation/explore, `descend` to procedural floor 2, look/stats
 - **reference_crawl** — floor 1→3 descent, goblin fights, save/load on floor 2 (seed 42 regression)
+- **combat_flee** — exhausted fighter attacks then `flee`s; adjacent goblin gets one opportunity attack, combat ends
+- **catch_breath** — exhausted fighter trades combat turns to `catch breath`, shedding fatigue as the goblin counters
 - **rest_floor** — rest sheds fatigue only to the floor (20); only sleep clears exhaustion (survival-economy guard)
 - **@scenarios/*.txt** — data-driven step files (`load_floor`, `command`, `spawn`, …)
 

@@ -5,7 +5,7 @@
 //! **Character setup:** `session.bootstrapCharacter` (rolls stats and builds a draft character).
 //! **Dungeon crawl:** `dungeon.floor1_spawn`, `dungeon.walkSpawnToFloor1Stairs`.
 //! **Movement:** `movement.moveEntity`.
-//! **Combat:** `combat.attack`, `combat.endTurn`, `combat.isInCombat`.
+//! **Combat:** `combat.attack`, `combat.endTurn`, `combat.flee`, `combat.catchBreath`, `combat.isInCombat`.
 //! **Persistence:** `sqlite_store.saveSlot`, `sqlite_store.loadSlot`, `sqlite_store.deleteDb`.
 //! **Scripted testing:** `dst.runNamedScenario`, `repl.runScripted`, `fuzz.run`.
 //! **Release identity:** `version.semver` (also recorded as `# version=<semver>` in REPL/DST transcripts).

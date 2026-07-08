@@ -17,6 +17,9 @@ pub const sleep_ticks: u32 = 24;
 
 pub const hunger_restore_food: u16 = 50;
 pub const fatigue_restore_rest: u16 = 30;
+/// Fatigue shed by the in-combat `catch breath` action. Partial, emergency relief:
+/// less than a `rest`, and the turn still passes to the enemy, so it is a real tradeoff.
+pub const fatigue_restore_catch_breath: u16 = 8;
 
 /// Lowest fatigue a short `rest` can reach. A rest sheds `fatigue_restore_rest`
 /// but never crosses below this floor, which sits at the top of exhaustion tier 1

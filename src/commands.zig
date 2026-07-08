@@ -49,6 +49,8 @@ pub const Command = union(enum) {
     attack,
     attack_target: []const u8,
     end_turn,
+    flee,
+    catch_breath,
     descend,
     save,
     save_slot: u32,
@@ -109,6 +111,11 @@ pub fn parseLine(line: []const u8) Command {
     if (std.mem.eql(u8, trimmed, "stats")) return .stats;
     if (std.mem.eql(u8, trimmed, "attack")) return .attack;
     if (std.mem.eql(u8, trimmed, "end turn")) return .end_turn;
+    if (std.mem.eql(u8, trimmed, "flee")) return .flee;
+    if (std.mem.eql(u8, trimmed, "disengage")) return .flee;
+    if (std.mem.eql(u8, trimmed, "retreat")) return .flee;
+    if (std.mem.eql(u8, trimmed, "catch breath")) return .catch_breath;
+    if (std.mem.eql(u8, trimmed, "recover")) return .catch_breath;
     if (std.mem.eql(u8, trimmed, "descend")) return .descend;
     if (std.mem.eql(u8, trimmed, "wait")) return .wait;
     if (std.mem.eql(u8, trimmed, "food")) return .food;
@@ -1230,6 +1237,40 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                 else => |e| return e,
             };
         },
+        .flee => {
+            if (!isSpawned(ctx)) {
+                try writer.print("no player spawned\n", .{});
+                return .continue_repl;
+            }
+            combat.flee(ctx.w, ctx.player_id, writer) catch |err| switch (err) {
+                error.NotInCombat => {
+                    try writer.print("not in combat\n", .{});
+                    return .continue_repl;
+                },
+                error.NotYourTurn => {
+                    try writer.print("not your turn\n", .{});
+                    return .continue_repl;
+                },
+                else => |e| return e,
+            };
+        },
+        .catch_breath => {
+            if (!isSpawned(ctx)) {
+                try writer.print("no player spawned\n", .{});
+                return .continue_repl;
+            }
+            combat.catchBreath(ctx.w, ctx.player_id, writer) catch |err| switch (err) {
+                error.NotInCombat => {
+                    try writer.print("not in combat\n", .{});
+                    return .continue_repl;
+                },
+                error.NotYourTurn => {
+                    try writer.print("not your turn\n", .{});
+                    return .continue_repl;
+                },
+                else => |e| return e,
+            };
+        },
         .save => {
             if (!isSpawned(ctx)) {
                 try writer.print("no player spawned\n", .{});
@@ -1552,6 +1593,64 @@ test "end turn via execute advances initiative" {
     _ = try execute(&ctx, parseLine("end turn"), fbs.writer());
     const out = fbs.getWritten();
     try std.testing.expect(std.mem.indexOf(u8, out, "turn:") != null or std.mem.indexOf(u8, out, "attack ") != null);
+}
+
+test "flee via execute ends combat" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+
+    var ctx = try combatTestCtx(allocator, &w);
+    w.store.get(ctx.player_id).?.max_hp = 30;
+    w.store.get(ctx.player_id).?.current_hp = 30;
+    _ = try execute(&ctx, parseLine("attack goblin_0"), std.io.null_writer);
+    try std.testing.expect(combat.isInCombat(&w));
+
+    var buf: [512]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("flee"), fbs.writer());
+    try std.testing.expect(!combat.isInCombat(&w));
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "flees from combat") != null);
+}
+
+test "flee aliases disengage and retreat parse to flee" {
+    try std.testing.expect(parseLine("flee") == .flee);
+    try std.testing.expect(parseLine("disengage") == .flee);
+    try std.testing.expect(parseLine("retreat") == .flee);
+    try std.testing.expect(parseLine("catch breath") == .catch_breath);
+    try std.testing.expect(parseLine("recover") == .catch_breath);
+}
+
+test "flee out of combat via execute reports not in combat" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+
+    var ctx = try combatTestCtx(allocator, &w);
+    var buf: [128]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("flee"), fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "not in combat") != null);
+}
+
+test "catch breath via execute recovers fatigue and keeps fighting" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+
+    var ctx = try combatTestCtx(allocator, &w);
+    const player = w.store.get(ctx.player_id).?;
+    player.max_hp = 40;
+    player.current_hp = 40;
+    player.fatigue = 42;
+    _ = survival.syncExhaustion(player);
+    _ = try execute(&ctx, parseLine("attack goblin_0"), std.io.null_writer);
+
+    var buf: [512]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("catch breath"), fbs.writer());
+    try std.testing.expect(w.store.get(ctx.player_id).?.fatigue < 42);
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "catches their breath") != null);
 }
 
 test "move allowed on player turn during combat via execute" {

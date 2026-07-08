@@ -750,6 +750,56 @@ pub const crawl_start_scenario = Scenario{
     },
 };
 
+/// Exhausted (fatigue 60 → level 3, attacks at disadvantage), the player attacks once and
+/// then `flee`s: an adjacent goblin gets one opportunity attack and combat ends, giving the
+/// escape hatch a tired player otherwise lacks.
+pub const combat_flee_scenario = Scenario{
+    .name = "combat_flee",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 },
+        .{ .choose_class = 1 },
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .spawn_monster = .{ .kind = .goblin, .name = "goblin_0", .x = 50, .y = 49 } },
+        .{ .set_fatigue = .{ .entity = "entity_0", .value = 60 } },
+        .{ .command = "time" },
+        .{ .command = "attack goblin_0" },
+        .{ .command = "flee" },
+        .{ .command = "conditions" },
+        .{ .command = "time" },
+        .{ .command = "exit" },
+    },
+};
+
+/// The `catch breath` recovery action: exhausted at fatigue 60 (level 3), the player trades
+/// two combat turns to shed fatigue and ease exhaustion back down while the goblin counters.
+pub const catch_breath_scenario = Scenario{
+    .name = "catch_breath",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 },
+        .{ .choose_class = 1 },
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .spawn_monster = .{ .kind = .goblin, .name = "goblin_0", .x = 50, .y = 49 } },
+        .{ .set_fatigue = .{ .entity = "entity_0", .value = 60 } },
+        .{ .command = "time" },
+        .{ .command = "attack goblin_0" },
+        .{ .command = "catch breath" },
+        .{ .command = "catch breath" },
+        .{ .command = "time" },
+        .{ .command = "conditions" },
+        .{ .command = "exit" },
+    },
+};
+
 fn floor1ProfileForScenario(name: []const u8) dungeon.Floor1Profile {
     if (std.mem.eql(u8, name, "descend_crawl")) return .v09;
     if (std.mem.eql(u8, name, "descend_crawl_file")) return .v09;
@@ -1073,6 +1123,10 @@ pub fn scenarioByName(name: []const u8, seed: u64) ?Scenario {
         return Scenario{ .name = "trap_floor", .seed = seed, .steps = trap_floor_scenario.steps };
     if (std.mem.eql(u8, name, "deep_floor"))
         return Scenario{ .name = "deep_floor", .seed = seed, .steps = deep_floor_scenario.steps };
+    if (std.mem.eql(u8, name, "combat_flee"))
+        return Scenario{ .name = "combat_flee", .seed = seed, .steps = combat_flee_scenario.steps };
+    if (std.mem.eql(u8, name, "catch_breath"))
+        return Scenario{ .name = "catch_breath", .seed = seed, .steps = catch_breath_scenario.steps };
     return null;
 }
 
@@ -1467,6 +1521,21 @@ test "dst deep_floor scenario is byte-identical across runs" {
     const out = try expectScenarioDeterministic(allocator, "deep_floor", 65536);
     try std.testing.expect(std.mem.indexOf(u8, out, "depth_report floor=2 plan_monsters=3 plan_loot=4") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "depth_report floor=5 plan_monsters=5 plan_loot=8") != null);
+}
+
+test "dst combat_flee scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "combat_flee", 65536);
+    try std.testing.expect(std.mem.indexOf(u8, out, "flees from combat") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "opportunity attack goblin_0->entity_0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "combat ended") != null);
+}
+
+test "dst catch_breath scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "catch_breath", 65536);
+    try std.testing.expect(std.mem.indexOf(u8, out, "catches their breath") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "exhaustion eased") != null);
 }
 
 test "demo output is deterministic for fixed seed" {
