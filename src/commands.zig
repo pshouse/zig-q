@@ -19,6 +19,18 @@ const inventory = @import("inventory.zig");
 const world_objects = @import("world_objects.zig");
 const survival = @import("survival.zig");
 
+/// Target for the `get`/`loot` command family. All of `get`, `loot`,
+/// `get from corpse`, and `loot X` funnel through one command with this payload.
+pub const GetTarget = struct {
+    /// Named target: an item id/category token, or the literal `"corpse"` for
+    /// the adjacent corpse's loot. `null` means "nearest nearby object".
+    name: ?[]const u8 = null,
+    /// When picking the nearest object (`name == null`), prefer an adjacent
+    /// corpse's loot before a floor item. Set by the bare `loot` verb; bare
+    /// `get` leaves it false and takes whichever object is nearest in order.
+    prefer_corpse: bool = false,
+};
+
 pub const Command = union(enum) {
     look,
     time,
@@ -48,7 +60,7 @@ pub const Command = union(enum) {
     wait,
     conditions_cmd,
     inventory_cmd,
-    get_item: ?[]const u8,
+    get_item: GetTarget,
     drop_item: []const u8,
     examine_item: []const u8,
     equip_item: []const u8,
@@ -105,17 +117,17 @@ pub fn parseLine(line: []const u8) Command {
     if (std.mem.eql(u8, trimmed, "conditions")) return .conditions_cmd;
     if (std.mem.eql(u8, trimmed, "inventory")) return .inventory_cmd;
     if (std.mem.eql(u8, trimmed, "inv")) return .inventory_cmd;
-    if (std.mem.eql(u8, trimmed, "get")) return .{ .get_item = null };
-    if (std.mem.eql(u8, trimmed, "get from corpse")) return .{ .get_item = "corpse" };
-    if (std.mem.eql(u8, trimmed, "loot")) return .{ .get_item = null };
-    if (std.mem.eql(u8, trimmed, "loot from corpse")) return .{ .get_item = "corpse" };
+    if (std.mem.eql(u8, trimmed, "get")) return .{ .get_item = .{} };
+    if (std.mem.eql(u8, trimmed, "get from corpse")) return .{ .get_item = .{ .name = "corpse" } };
+    if (std.mem.eql(u8, trimmed, "loot")) return .{ .get_item = .{ .prefer_corpse = true } };
+    if (std.mem.eql(u8, trimmed, "loot from corpse")) return .{ .get_item = .{ .name = "corpse" } };
     if (std.mem.startsWith(u8, trimmed, "loot ")) {
         const arg = std.mem.trim(u8, trimmed[5..], " \t");
-        if (arg.len > 0) return .{ .get_item = arg };
+        if (arg.len > 0) return .{ .get_item = .{ .name = arg } };
     }
     if (std.mem.startsWith(u8, trimmed, "get ")) {
         const arg = std.mem.trim(u8, trimmed[4..], " \t");
-        if (arg.len > 0) return .{ .get_item = arg };
+        if (arg.len > 0) return .{ .get_item = .{ .name = arg } };
     }
     if (std.mem.startsWith(u8, trimmed, "drop ")) {
         const arg = std.mem.trim(u8, trimmed[5..], " \t");
@@ -239,7 +251,7 @@ fn cmdInventory(ctx: *Context, writer: anytype) !Result {
     return .continue_repl;
 }
 
-fn cmdGet(ctx: *Context, name: ?[]const u8, writer: anytype) !Result {
+fn cmdGet(ctx: *Context, target: GetTarget, writer: anytype) !Result {
     if (combat.isInCombat(ctx.w)) {
         try writer.print("cannot loot during combat\n", .{});
         return .continue_repl;
@@ -254,7 +266,7 @@ fn cmdGet(ctx: *Context, name: ?[]const u8, writer: anytype) !Result {
     var corpse_label: ?[]const u8 = null;
     var empty_corpse_near = false;
 
-    if (name) |n| {
+    if (target.name) |n| {
         if (std.mem.eql(u8, n, "corpse")) {
             for (ctx.w.floor_objects.objects.items) |*obj| {
                 if (obj.kind != .corpse) continue;
@@ -283,19 +295,38 @@ fn cmdGet(ctx: *Context, name: ?[]const u8, writer: anytype) !Result {
             }
         }
     } else {
-        for (ctx.w.floor_objects.objects.items) |*obj| {
-            if (obj.kind != .item and obj.kind != .corpse) continue;
-            if (!tileNearPlayer(ctx.w, ctx.player_id, obj.x, obj.y)) continue;
-            if (obj.item) |loot| {
-                picked = loot;
-                remove_pos = loc.Loc.init(obj.x, obj.y);
-                if (obj.kind == .corpse) {
+        // Bare `loot` prefers an adjacent corpse's gear (the interesting loot)
+        // before falling back to a floor item; bare `get` skips this pass and
+        // takes whichever nearby object comes first in object order.
+        if (target.prefer_corpse) {
+            for (ctx.w.floor_objects.objects.items) |*obj| {
+                if (obj.kind != .corpse) continue;
+                if (!tileNearPlayer(ctx.w, ctx.player_id, obj.x, obj.y)) continue;
+                if (obj.item) |loot| {
+                    picked = loot;
+                    remove_pos = loc.Loc.init(obj.x, obj.y);
                     picked_from_corpse = true;
                     corpse_label = obj.label;
+                    break;
                 }
-                break;
+                empty_corpse_near = true;
             }
-            if (obj.kind == .corpse) empty_corpse_near = true;
+        }
+        if (picked == null) {
+            for (ctx.w.floor_objects.objects.items) |*obj| {
+                if (obj.kind != .item and obj.kind != .corpse) continue;
+                if (!tileNearPlayer(ctx.w, ctx.player_id, obj.x, obj.y)) continue;
+                if (obj.item) |loot| {
+                    picked = loot;
+                    remove_pos = loc.Loc.init(obj.x, obj.y);
+                    if (obj.kind == .corpse) {
+                        picked_from_corpse = true;
+                        corpse_label = obj.label;
+                    }
+                    break;
+                }
+                if (obj.kind == .corpse) empty_corpse_near = true;
+            }
         }
     }
 
@@ -983,7 +1014,7 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
             try writer.writeAll("\n");
         },
         .inventory_cmd => return cmdInventory(ctx, writer),
-        .get_item => |name| return cmdGet(ctx, name, writer),
+        .get_item => |target| return cmdGet(ctx, target, writer),
         .drop_item => |name| return cmdDrop(ctx, name, writer),
         .examine_item => |name| return cmdExamine(ctx, name, writer),
         .equip_usage => {
@@ -1284,18 +1315,25 @@ test "expandInput infers look shorthand" {
     try std.testing.expectEqualStrings("look", parts[0]);
 }
 
-test "parseLine accepts loot aliases for get" {
+test "parseLine maps get and loot verbs" {
+    // Bare `loot` prefers a corpse; bare `get` does not.
     const loot_cmd = parseLine("loot");
     try std.testing.expect(loot_cmd == .get_item);
-    try std.testing.expect(loot_cmd.get_item == null);
+    try std.testing.expect(loot_cmd.get_item.name == null);
+    try std.testing.expect(loot_cmd.get_item.prefer_corpse);
+
+    const get_cmd = parseLine("get");
+    try std.testing.expect(get_cmd == .get_item);
+    try std.testing.expect(get_cmd.get_item.name == null);
+    try std.testing.expect(!get_cmd.get_item.prefer_corpse);
 
     const corpse_cmd = parseLine("loot from corpse");
     try std.testing.expect(corpse_cmd == .get_item);
-    try std.testing.expectEqualStrings("corpse", corpse_cmd.get_item.?);
+    try std.testing.expectEqualStrings("corpse", corpse_cmd.get_item.name.?);
 
     const bandage_cmd = parseLine("loot bandage");
     try std.testing.expect(bandage_cmd == .get_item);
-    try std.testing.expectEqualStrings("bandage", bandage_cmd.get_item.?);
+    try std.testing.expectEqualStrings("bandage", bandage_cmd.get_item.name.?);
 }
 
 test "expandInput infers move shorthand" {
@@ -1902,6 +1940,49 @@ test "loot from corpse leaves empty corpse on floor" {
     try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "corpse goblin_0 at (50,49)") != null);
     try std.testing.expect(w.floor_objects.at(loc.Loc.init(50, 49)) != null);
     try std.testing.expect(w.floor_objects.at(loc.Loc.init(50, 49)).?.item == null);
+}
+
+test "bare loot prefers adjacent corpse over floor item" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    var draft: session.CreationDraft = .{};
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    var ctx = Context{ .allocator = allocator, .w = &w, .draft = &draft, .player_id = player_id };
+    // Floor item added first: a bare `get` (or the old `loot`) would grab it
+    // before the corpse, since it takes the first nearby object in order.
+    try w.floor_objects.addItem(allocator, .item, loc.Loc.init(48, 49), "leather_armour", .leather_armour);
+    try w.floor_objects.addItem(allocator, .corpse, loc.Loc.init(50, 49), "goblin_0", .short_sword);
+
+    var buf: [256]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("loot"), fbs.writer());
+    // `loot` takes the corpse's gear, leaving the floor item untouched.
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "picked up short sword from goblin_0") != null);
+    try std.testing.expect(w.floor_objects.at(loc.Loc.init(50, 49)).?.item == null);
+    try std.testing.expect(w.floor_objects.at(loc.Loc.init(48, 49)) != null);
+    try std.testing.expect(w.floor_objects.at(loc.Loc.init(48, 49)).?.item.? == .leather_armour);
+}
+
+test "bare loot falls back to floor item when no corpse loot" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    var draft: session.CreationDraft = .{};
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    var ctx = Context{ .allocator = allocator, .w = &w, .draft = &draft, .player_id = player_id };
+    // Only a floor item is adjacent (plus an already-empty corpse): `loot`
+    // still picks up the floor item rather than reporting nothing.
+    try w.floor_objects.addItem(allocator, .corpse, loc.Loc.init(50, 49), "goblin_0", null);
+    try w.floor_objects.addItem(allocator, .item, loc.Loc.init(48, 49), "leather_armour", .leather_armour);
+
+    var buf: [256]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("loot"), fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "picked up leather armour") != null);
+    try std.testing.expect(w.floor_objects.at(loc.Loc.init(48, 49)) == null);
 }
 
 test "examine corpse reports empty skeleton" {
