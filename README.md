@@ -2,7 +2,7 @@
 
 A Zig prototype for deterministic **dungeon crawl** simulation: character creation, dungeon tiles, level-1 combat sheet (HP/AC), turn-based combat, and SQLite save/load.
 
-**Requires Zig 0.15+** (tested on 0.15.2). **Version:** `1.5.3` — deterministic dungeon crawl through crawl completeness (see ROADMAP.md).
+**Requires Zig 0.15+** (tested on 0.15.2). **Version:** `1.5.4` — deterministic dungeon crawl through crawl completeness (see ROADMAP.md).
 
 SQLite is bundled via the amalgamation in `deps/sqlite3/` (no system SQLite install required).
 
@@ -51,7 +51,7 @@ The REPL loads **floor 1** dungeon tiles, rolls six stats on start, then accepts
 
 **Exploration commands:** `look`, `time`, `move <north|south|east|west>`, `m <dir>`, `wait`, `food`, `rest`, `sleep`, `conditions`, `descend` (on stairs/door tile), `help`, `help gear`, `exit`
 
-**Gear commands:** `get [item]`, `get from corpse`, `loot` (alias), `drop <item>`, `inventory`, `examine <item>`, `equip <item>`, `use <item>`. `look` lists nearby items and corpses; stand adjacent to pick up.
+**Gear commands:** `get [item]` (nearest floor item), `get from corpse` / `loot from corpse` (an adjacent corpse's gear), `loot` (an adjacent corpse's gear first, else the nearest floor item), `drop <item>`, `inventory`, `examine <item>`, `equip <item>`, `use <item>`. `look` lists nearby items and corpses; stand adjacent to pick up.
 
 **Combat commands:** `attack [target]`, `end turn` (melee d20 + STR mod vs AC; monsters counter on their turn)
 
@@ -112,6 +112,7 @@ zig build dst -- @scenarios/reference_crawl.txt 42
 - **reference_crawl** — floor 1→3 descent, goblin fights, save/load on floor 2 (seed 42 regression)
 - **combat_flee** — exhausted fighter attacks then `flee`s; adjacent goblin gets one opportunity attack, combat ends
 - **catch_breath** — exhausted fighter trades combat turns to `catch breath`, shedding fatigue as the goblin counters
+- **rest_floor** — rest sheds fatigue only to the floor (20); only sleep clears exhaustion (survival-economy guard)
 - **@scenarios/*.txt** — data-driven step files (`load_floor`, `command`, `spawn`, …)
 
 Floors 2+ are generated deterministically from `(seed, floor_index)`; floor 1 stays handcrafted for regression.
@@ -174,6 +175,7 @@ zig build run -- --help
 | Version | Theme |
 |---------|--------|
 | **1.4.0** | Survival clock: hunger, fatigue, exhaustion, food/rest/sleep, poison DoT |
+| **1.5.4** | Survival economy: `rest` floored at fatigue 20; only `sleep` fully clears exhaustion (sleep no longer strictly dominated) |
 | **1.5.3** | Review fixes: look no longer perturbs combat RNG, unique deep-floor monster names, honest cross-wave gate |
 | **1.5.2** | DoT HP notices for poison/starvation ticks |
 | **1.5.1** | v1.5 crawl + WIS-gated trap spotting in `look` |

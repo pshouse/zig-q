@@ -21,6 +21,13 @@ pub const fatigue_restore_rest: u16 = 30;
 /// less than a `rest`, and the turn still passes to the enemy, so it is a real tradeoff.
 pub const fatigue_restore_catch_breath: u16 = 8;
 
+/// Lowest fatigue a short `rest` can reach. A rest sheds `fatigue_restore_rest`
+/// but never crosses below this floor, which sits at the top of exhaustion tier 1
+/// (`fatigueExhaustion`): rest keeps you out of the penalty tiers (3+) but can never
+/// fully clear exhaustion. Only `sleep` resets fatigue to 0, so sleep — despite its
+/// ambush/unconscious risk — is the only route to a pristine, maximum-runway state.
+pub const rest_fatigue_floor: u16 = 20;
+
 /// Rations given at spawn so early floors are survivable before loot sources appear.
 pub const starter_rations: u8 = 2;
 /// One bandage in the starter kit for mundane out-of-combat healing.
@@ -104,6 +111,23 @@ pub fn syncSurvival(ent: *entity.Entity) SurvivalChange {
     const starving = syncStarving(ent);
     const exhaustion = syncExhaustion(ent);
     return .{ .exhaustion = exhaustion, .starving = starving };
+}
+
+/// Apply a short rest's fatigue relief. Sheds `fatigue_restore_rest`, clamped so
+/// fatigue never drops below `rest_fatigue_floor` and is never *raised* (resting
+/// while already below the floor is a no-op). Rest can lift you out of the penalty
+/// tiers but can never fully clear exhaustion — that requires `applySleep`.
+pub fn applyRest(ent: *entity.Entity) ExhaustionChange {
+    const relieved = ent.fatigue -| fatigue_restore_rest;
+    ent.fatigue = @min(ent.fatigue, @max(relieved, rest_fatigue_floor));
+    return syncExhaustion(ent);
+}
+
+/// Apply a full sleep's fatigue reset. Sleep is the only action that returns
+/// fatigue to 0 and thus fully clears exhaustion (see `rest_fatigue_floor`).
+pub fn applySleep(ent: *entity.Entity) ExhaustionChange {
+    ent.fatigue = 0;
+    return syncExhaustion(ent);
 }
 
 pub fn exhaustionEffectHint(level: u3) ?[]const u8 {
@@ -355,6 +379,55 @@ test "starving notice on apply and clear" {
     const out = fbs.getWritten();
     try std.testing.expect(std.mem.indexOf(u8, out, "you are starving") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "no longer starving") != null);
+}
+
+fn testEntity() entity.Entity {
+    var ent: entity.Entity = undefined;
+    ent.conditions = @import("types.zig").ConditionSet.initEmpty();
+    ent.exhaustion_level = 0;
+    ent.current_hp = 10;
+    ent.max_hp = 10;
+    ent.hunger = 0;
+    ent.fatigue = 0;
+    ent.sleeping = false;
+    return ent;
+}
+
+test "rest sheds fatigue but floors at rest_fatigue_floor" {
+    var ent = testEntity();
+    ent.fatigue = 60; // exhaustion tier 3 (penalty tier)
+    _ = applyRest(&ent);
+    try std.testing.expectEqual(@as(u16, 30), ent.fatigue); // 60 - 30
+    _ = applyRest(&ent);
+    try std.testing.expectEqual(rest_fatigue_floor, ent.fatigue); // 30 - 30 -> floored at 20
+    _ = applyRest(&ent);
+    try std.testing.expectEqual(rest_fatigue_floor, ent.fatigue); // already at floor -> unchanged
+    // Rest lifts you out of the penalty tiers but never fully clears exhaustion.
+    try std.testing.expectEqual(@as(u3, 1), conditions.exhaustionLevel(&ent));
+    try std.testing.expect(conditions.has(&ent, .exhaustion));
+}
+
+test "rest never raises fatigue that is already below the floor" {
+    var ent = testEntity();
+    ent.fatigue = 5;
+    _ = applyRest(&ent);
+    try std.testing.expectEqual(@as(u16, 5), ent.fatigue); // no-op, not raised to 20
+    try std.testing.expectEqual(@as(u3, 0), conditions.exhaustionLevel(&ent));
+}
+
+test "only sleep resets fatigue to zero and clears exhaustion" {
+    var ent = testEntity();
+    ent.fatigue = 80;
+    // No amount of resting reaches level 0 — it bottoms out at the floor.
+    var guard: u8 = 0;
+    while (guard < 8) : (guard += 1) _ = applyRest(&ent);
+    try std.testing.expectEqual(rest_fatigue_floor, ent.fatigue);
+    try std.testing.expect(conditions.has(&ent, .exhaustion));
+    // Sleep is the only full reset.
+    _ = applySleep(&ent);
+    try std.testing.expectEqual(@as(u16, 0), ent.fatigue);
+    try std.testing.expectEqual(@as(u3, 0), conditions.exhaustionLevel(&ent));
+    try std.testing.expect(!conditions.has(&ent, .exhaustion));
 }
 
 test "ticks increase hunger" {
