@@ -17,6 +17,9 @@ pub const sleep_ticks: u32 = 24;
 
 pub const hunger_restore_food: u16 = 50;
 pub const fatigue_restore_rest: u16 = 30;
+/// Fatigue shed by the in-combat `catch breath` action. Partial, emergency relief:
+/// less than a `rest`, and the turn still passes to the enemy, so it is a real tradeoff.
+pub const fatigue_restore_catch_breath: u16 = 8;
 
 /// Rations given at spawn so early floors are survivable before loot sources appear.
 pub const starter_rations: u8 = 2;

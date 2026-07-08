@@ -340,6 +340,39 @@ pub fn performAttack(
     }
 }
 
+/// A single free swing at the fleeing player from an adjacent hostile. Mirrors the hit
+/// math of `performAttack` but costs no turn and no clock tick — it is a reaction, not an
+/// action, so it does not advance the survival clock or initiative.
+fn opportunityAttack(
+    w: *world.World,
+    attacker: *const entity.Entity,
+    target_id: entity.EntityId,
+    writer: anytype,
+) !void {
+    const target = w.store.get(target_id) orelse return;
+    const roll = attackRoll(w, attacker);
+    const mod = attackModifier(attacker, target);
+    const ac = targetAc(target);
+    const hit = @as(i32, roll) + mod >= @as(i32, @intCast(ac));
+
+    try writer.print("opportunity attack {s}->{s} roll={} mod={} vs AC {} ", .{
+        attacker.name, target.name, roll, mod, ac,
+    });
+
+    if (!hit) {
+        try writer.print("miss\n", .{});
+        return;
+    }
+
+    const dmg = rollDamage(w, attacker);
+    applyDamage(target, @intCast(dmg));
+    try writer.print("hit damage={} hp={}/{}\n", .{ dmg, target.current_hp, target.max_hp });
+    if (!isAlive(target)) {
+        try writer.print("{s} is slain\n", .{target.name});
+        if (!target.is_monster) w.markPlayerDead(target_id);
+    }
+}
+
 fn processMonsterTurns(w: *world.World, writer: anytype) !void {
     const combat = w.combat orelse return;
     while (true) {
@@ -382,7 +415,12 @@ pub fn endTurn(w: *world.World, actor_id: entity.EntityId, writer: anytype) !voi
     if (!isInCombat(w)) return error.NotInCombat;
     const active = activeTurn(w) orelse return error.NoActiveTurn;
     if (active != actor_id) return error.NotYourTurn;
+    try passTurnToOpponents(w, writer);
+}
 
+/// Advance past the actor's turn and resolve the monster counters that follow. Shared by
+/// `endTurn` and `catchBreath` so their turn-handoff output stays byte-identical.
+fn passTurnToOpponents(w: *world.World, writer: anytype) !void {
     advanceTurn(w);
     if (livingParticipants(w) <= 1) {
         endCombat(w);
@@ -401,6 +439,84 @@ pub fn endTurn(w: *world.World, actor_id: entity.EntityId, writer: anytype) !voi
     } else {
         try writer.print("combat ended\n", .{});
     }
+}
+
+/// Player disengages from combat. Each adjacent living hostile gets one opportunity attack
+/// (resolved in stable entity-id order) as the cost, then combat ends and the disengage
+/// itself costs one clock tick. This is the escape hatch: once out of combat the player can
+/// walk off, break line of sight around a corner, or reach stairs and `descend`.
+pub fn flee(w: *world.World, actor_id: entity.EntityId, writer: anytype) !void {
+    if (!isInCombat(w)) return error.NotInCombat;
+    const active = activeTurn(w) orelse return error.NoActiveTurn;
+    if (active != actor_id) return error.NotYourTurn;
+
+    const player = w.store.get(actor_id) orelse return error.AttackerNotFound;
+    try writer.print("{s} flees from combat\n", .{player.name});
+
+    var ids: [32]entity.EntityId = undefined;
+    var n: usize = 0;
+    for (w.store.entities.items) |*ent| {
+        if (!ent.is_monster) continue;
+        if (!isAlive(ent)) continue;
+        if (!isAdjacent(player.loc, ent.loc)) continue;
+        if (n < ids.len) {
+            ids[n] = ent.id;
+            n += 1;
+        }
+    }
+    std.mem.sort(entity.EntityId, ids[0..n], {}, std.sort.asc(entity.EntityId));
+
+    var i: usize = 0;
+    while (i < n) : (i += 1) {
+        const attacker = w.store.get(ids[i]) orelse continue;
+        if (!isAlive(attacker)) continue;
+        try opportunityAttack(w, attacker, actor_id, writer);
+        if (w.isPlayerDead()) break;
+    }
+
+    if (w.isPlayerDead()) {
+        endCombat(w);
+        return;
+    }
+
+    // Disengaging costs a moment. Resolve the tick while still in combat so an exhaustion
+    // or DoT death lands in the combat context (matching `performAttack`'s death handling).
+    const before_ex = conditions.exhaustionLevel(player);
+    const before_hp = player.current_hp;
+    w.tickAction(1);
+    if (w.store.get(actor_id)) |p| {
+        try survival.printHpDotNotice(before_hp, p, writer);
+        try survival.printExhaustionNotice(before_ex, conditions.exhaustionLevel(p), writer);
+    }
+    if (w.isPlayerDead()) {
+        endCombat(w);
+        return;
+    }
+
+    endCombat(w);
+    try writer.print("combat ended\n", .{});
+}
+
+/// In-combat recovery: the player catches their breath, shedding a little fatigue (and
+/// possibly easing exhaustion), but yields the turn so monsters still counterattack. Softens
+/// the exhaustion→disadvantage attrition loop without escaping the fight.
+pub fn catchBreath(w: *world.World, actor_id: entity.EntityId, writer: anytype) !void {
+    if (!isInCombat(w)) return error.NotInCombat;
+    const active = activeTurn(w) orelse return error.NoActiveTurn;
+    if (active != actor_id) return error.NotYourTurn;
+
+    const player = w.store.get(actor_id) orelse return error.AttackerNotFound;
+    const before_ex = conditions.exhaustionLevel(player);
+    if (player.fatigue >= survival.fatigue_restore_catch_breath) {
+        player.fatigue -= survival.fatigue_restore_catch_breath;
+    } else {
+        player.fatigue = 0;
+    }
+    _ = survival.syncExhaustion(player);
+    try writer.print("{s} catches their breath (fatigue={})\n", .{ player.name, player.fatigue });
+    try survival.printExhaustionNotice(before_ex, conditions.exhaustionLevel(player), writer);
+
+    try passTurnToOpponents(w, writer);
 }
 
 test "distant named attack does not enter combat" {
@@ -524,4 +640,95 @@ test "combat end restores exploring status" {
     try std.testing.expect(w.combat == null);
     try std.testing.expect(w.store.get(player_id).?.char.status == .exploring);
     try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "is slain") != null);
+}
+
+test "flee ends combat and provokes an opportunity attack" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    const goblin_id = try w.spawnMonster(.goblin, loc.Loc.init(50, 49), "goblin_0");
+    // Enough HP to survive the parting swing so we can assert the exploring status.
+    w.store.get(player_id).?.max_hp = 30;
+    w.store.get(player_id).?.current_hp = 30;
+    try enterCombat(&w, player_id, goblin_id);
+    try std.testing.expect(isInCombat(&w));
+
+    var buf: [512]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    try flee(&w, player_id, fbs.writer());
+
+    try std.testing.expect(!isInCombat(&w));
+    try std.testing.expect(w.store.get(player_id).?.char.status == .exploring);
+    const out = fbs.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, out, "flees from combat") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "opportunity attack goblin_0->entity_0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "combat ended") != null);
+}
+
+test "flee outside combat errors" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    var buf: [128]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    try std.testing.expectError(error.NotInCombat, flee(&w, player_id, fbs.writer()));
+}
+
+test "flee provokes each adjacent hostile in id order" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    w.store.get(player_id).?.max_hp = 60;
+    w.store.get(player_id).?.current_hp = 60;
+    const g0 = try w.spawnMonster(.goblin, loc.Loc.init(50, 49), "goblin_0");
+    _ = try w.spawnMonster(.goblin, loc.Loc.init(48, 49), "goblin_1");
+    try enterCombat(&w, player_id, g0);
+
+    var buf: [512]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    try flee(&w, player_id, fbs.writer());
+    const out = fbs.getWritten();
+    const idx0 = std.mem.indexOf(u8, out, "goblin_0->entity_0");
+    const idx1 = std.mem.indexOf(u8, out, "goblin_1->entity_0");
+    try std.testing.expect(idx0 != null and idx1 != null);
+    try std.testing.expect(idx0.? < idx1.?);
+    try std.testing.expect(!isInCombat(&w));
+}
+
+test "catch breath sheds fatigue and eases exhaustion" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    const goblin_id = try w.spawnMonster(.goblin, loc.Loc.init(50, 49), "goblin_0");
+    const player = w.store.get(player_id).?;
+    player.max_hp = 60;
+    player.current_hp = 60;
+    player.fatigue = 42; // exhaustion level 2 (55 > 42 >= 40)
+    _ = survival.syncExhaustion(player);
+    try std.testing.expectEqual(@as(u3, 2), conditions.exhaustionLevel(player));
+    try enterCombat(&w, player_id, goblin_id);
+
+    var buf: [512]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    try catchBreath(&w, player_id, fbs.writer());
+    // 42 - 8 = 34 (level 1); a single monster counter ticks it to 35, still level 1.
+    try std.testing.expect(w.store.get(player_id).?.fatigue < 42);
+    try std.testing.expect(conditions.exhaustionLevel(w.store.get(player_id).?) < 2);
+    const out = fbs.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, out, "catches their breath") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "exhaustion eased to level 1") != null);
+}
+
+test "catch breath outside combat errors" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    var buf: [128]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    try std.testing.expectError(error.NotInCombat, catchBreath(&w, player_id, fbs.writer()));
 }
