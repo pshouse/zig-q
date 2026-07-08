@@ -233,15 +233,28 @@ pub const MonsterPlan = struct {
     count: usize,
 };
 
+// `slot` is the global spawn index (< MonsterPlan capacity of 6), so mapping each
+// slot to a distinct suffix keeps every spawned monster's name unique. Collapsing
+// higher slots to a shared name let two live monsters share a name, which made one
+// of them untargetable by name (combat.findTarget stops at the first exact match).
 fn monsterName(kind: monsters.Kind, slot: usize) []const u8 {
     return switch (kind) {
         .goblin => switch (slot) {
             0 => "goblin_0",
             1 => "goblin_1",
             2 => "goblin_2",
-            else => "goblin_3",
+            3 => "goblin_3",
+            4 => "goblin_4",
+            else => "goblin_5",
         },
-        .skeleton => if (slot == 0) "skeleton_0" else "skeleton_1",
+        .skeleton => switch (slot) {
+            0 => "skeleton_0",
+            1 => "skeleton_1",
+            2 => "skeleton_2",
+            3 => "skeleton_3",
+            4 => "skeleton_4",
+            else => "skeleton_5",
+        },
     };
 }
 

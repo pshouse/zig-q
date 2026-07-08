@@ -60,6 +60,7 @@ pub fn main() !void {
         try zig_q.repl.runRepl(allocator, cli.seed, stdin, stdout, .{
             .record = cli.record,
             .semver = cli.semver,
+            .playtest = cli.playtest,
         });
         return;
     }

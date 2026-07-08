@@ -108,6 +108,10 @@ pub const World = struct {
         while (i < plan.count) : (i += 1) {
             const spawn = plan.spawns[i];
             if (!self.terrain.isWalkable(spawn.position)) continue;
+            // Skip tiles already holding an entity (the player or an earlier monster)
+            // so denser depth-scaled plans cannot stack two monsters on one tile —
+            // matching placeFloorLoot / placeFloorTraps.
+            if (self.tile_map.entityCountAt(spawn.position) > 0) continue;
             _ = try self.spawnMonster(spawn.kind, spawn.position, spawn.name);
         }
     }

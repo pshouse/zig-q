@@ -2,7 +2,7 @@
 
 **Product:** deterministic, scriptable **dungeon crawl** engine — create a character, descend floors, fight monsters, persist progress. No dialogue trees.
 
-**Current release:** `1.5.2` (v1.5 crawl completeness, perception-gated traps, DoT HP notices).
+**Current release:** `1.5.3` (v1.5 crawl completeness + post-release review fixes).
 
 ---
 
@@ -308,6 +308,7 @@ DST `playthrough` runs without `unknown command` for these inputs. Harvested tra
 | 1.5 | Bandage heal, procedural traps, depth-scaled crawl |
 | 1.5.1 | Trap `look` listing gated on WIS perception check (d20 + mod vs DC 12 + distance) |
 | 1.5.2 | Poison/starvation DoT prints HP loss each tick (`poison deals N hp; hp=X/Y`) |
+| 1.5.3 | Review fixes: `look` uses a local RNG copy (no combat-stream coupling), unique deep-floor monster names, monster tile-occupancy guard, honest cross-wave gate, `wound` gated behind `--playtest` |
 
 ## Version history (planned)
 

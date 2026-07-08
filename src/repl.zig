@@ -8,12 +8,14 @@ const version = @import("version.zig");
 pub const RunOpts = struct {
     record: ?transcript.RecordOpts = null,
     semver: ?[]const u8 = null,
+    playtest: bool = false,
 };
 
 pub const ReplCli = struct {
     seed: u64 = 42,
     record: ?transcript.RecordOpts = null,
     semver: ?[]const u8 = null,
+    playtest: bool = false,
 };
 
 /// Parse REPL args after `--repl`: `[seed] [--record [path]]` in any order.
@@ -45,6 +47,10 @@ pub fn parseReplCli(args: []const []const u8) !ReplCli {
             result.semver = args[i + 1];
             if (result.record) |*rec| rec.semver = result.semver;
             i += 1;
+            continue;
+        }
+        if (std.mem.eql(u8, arg, "--playtest")) {
+            result.playtest = true;
             continue;
         }
         if (arg[0] == '-') return error.UnknownArgument;
@@ -82,6 +88,7 @@ pub fn runRepl(
         .w = &w,
         .draft = &draft,
         .help_profile = .repl_v11,
+        .playtest = opts.playtest,
     };
 
     var recording: ?transcript.Session = null;
@@ -148,6 +155,7 @@ pub fn runReplScript(
         .w = &w,
         .draft = &draft,
         .help_profile = .repl_v11,
+        .playtest = opts.playtest,
     };
 
     var recording: ?transcript.Session = null;
@@ -227,6 +235,14 @@ test "parseReplCli accepts --semver override" {
     const cli = try parseReplCli(&.{ "42", "--record", "--semver", "0.6.0-dev" });
     try std.testing.expectEqualStrings("0.6.0-dev", cli.semver.?);
     try std.testing.expectEqualStrings("0.6.0-dev", cli.record.?.semver.?);
+}
+
+test "parseReplCli gates playtest behind --playtest" {
+    const on = try parseReplCli(&.{ "42", "--playtest" });
+    try std.testing.expectEqual(@as(u64, 42), on.seed);
+    try std.testing.expect(on.playtest);
+    const off = try parseReplCli(&.{"42"});
+    try std.testing.expect(!off.playtest);
 }
 
 test "repl recording captures session transcript" {

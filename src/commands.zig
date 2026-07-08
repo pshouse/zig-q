@@ -77,6 +77,9 @@ pub const Context = struct {
     save_path: []const u8 = sqlite_store.default_path,
     help_profile: help_text.Profile = .repl_v11,
     look_list_nearby: bool = true,
+    /// Enables debug/playtest-only commands (e.g. `wound`). Off in the shipped REPL;
+    /// the release gate turns it on via `--repl --playtest` for bandage-heal capture.
+    playtest: bool = false,
 };
 
 pub fn parseLine(line: []const u8) Command {
@@ -669,6 +672,10 @@ fn finishExploreMove(ctx: *Context, writer: anytype) !void {
 }
 
 fn cmdWound(ctx: *Context, writer: anytype) !Result {
+    if (!ctx.playtest) {
+        try writer.print("unknown command: wound\n", .{});
+        return .continue_repl;
+    }
     if (combat.isInCombat(ctx.w)) {
         try writer.print("cannot wound during combat\n", .{});
         return .continue_repl;
@@ -1647,6 +1654,7 @@ test "wound and bandage via execute on minimal repl path" {
     try w.loadFloor(1);
 
     var ctx = try descendTestCtx(allocator, &w);
+    ctx.playtest = true;
     const ent = w.store.get(ctx.player_id).?;
     try std.testing.expect(ent.inventory.findStack(.bandage).?.count == 1);
     const max_hp = ent.max_hp;

@@ -89,13 +89,17 @@ fn tileDistance(a: loc.Loc, b: loc.Loc) u64 {
 }
 
 pub fn formatVisibleFloorObjects(
-    w: *world.World,
+    w: *const world.World,
     viewer: *const entity.Entity,
     center: loc.Loc,
     radius: u8,
     writer: anytype,
 ) !void {
     const items_mod = @import("items.zig");
+    // Trap spotting rolls a d20, but `look` must not perturb the shared world RNG
+    // that combat draws from. Roll from a local copy so inspection stays free of
+    // gameplay side effects (and is idempotent for a given world state).
+    var spot_rng = w.rng;
     var listed = false;
     for (w.floor_objects.objects.items) |obj| {
         const pos = loc.Loc.init(obj.x, obj.y);
@@ -105,7 +109,7 @@ pub fn formatVisibleFloorObjects(
                 if (w.has_dungeon and !perception.hasLineOfSight(&w.terrain, center, pos)) continue;
                 const distance = perception.manhattanDistance(center, pos);
                 const wis_mod = character.abilityModifier(character.statByAbbr(viewer.char, "WIS"));
-                if (!perception.spotTrapCheck(wis_mod, distance, &w.rng)) continue;
+                if (!perception.spotTrapCheck(wis_mod, distance, &spot_rng)) continue;
             },
             else => {},
         }
@@ -162,7 +166,7 @@ pub fn formatVisibleEntities(
 }
 
 pub fn renderLook(
-    w: *world.World,
+    w: *const world.World,
     player_id: entity.EntityId,
     list_nearby: bool,
     writer: anytype,

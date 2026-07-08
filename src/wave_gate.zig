@@ -153,7 +153,7 @@ pub fn formatV15CompletionSummary(
     }
 
     return std.fmt.allocPrint(allocator,
-        \\zig-q v1.5.2 release complete
+        \\zig-q v{s} release complete
         \\
         \\{s}
         \\
@@ -163,7 +163,7 @@ pub fn formatV15CompletionSummary(
         \\
         \\new dst scenarios: {s}
         \\
-    , .{ footer, depth_lines.items, scenarios.items });
+    , .{ version.semver, footer, depth_lines.items, scenarios.items });
 }
 
 pub fn writeV15CompletionSummary(
@@ -192,49 +192,53 @@ pub fn writeV15CompletionSummary(
     try writeCapture(out_path, text);
 }
 
-fn bootstrapPriorWaveReferenceCaptures(allocator: std.mem.Allocator, scratch: []const u8, v15_prefix: []const u8) !void {
-    const src_leaf = try std.fmt.allocPrint(allocator, "{s}_dst_reference_crawl_a.txt", .{v15_prefix});
-    defer allocator.free(src_leaf);
-    const src_path = try joinPath(allocator, scratch, src_leaf);
-    defer allocator.free(src_path);
-    const data = try std.fs.cwd().readFileAlloc(allocator, src_path, 16 * 1024 * 1024);
-    defer allocator.free(data);
-
-    const prior = [_][]const u8{ "v11", "v12", "v13", "v14" };
-    for (prior) |prefix| {
-        const leaf_a = try std.fmt.allocPrint(allocator, "{s}_dst_reference_crawl_a.txt", .{prefix});
-        defer allocator.free(leaf_a);
-        const leaf_b = try std.fmt.allocPrint(allocator, "{s}_dst_reference_crawl_b.txt", .{prefix});
-        defer allocator.free(leaf_b);
-        const path_a = try joinPath(allocator, scratch, leaf_a);
-        defer allocator.free(path_a);
-        const path_b = try joinPath(allocator, scratch, leaf_b);
-        defer allocator.free(path_b);
-        try writeCapture(path_a, data);
-        try writeCapture(path_b, data);
-    }
-}
-
-fn crossWaveReferenceV11V15(allocator: std.mem.Allocator, scratch: []const u8) !?[]const u8 {
-    var first_hash: ?[64]u8 = null;
+/// Compares the reference_crawl captures of whichever of v11..v15 are actually
+/// present in `scratch` (each written by that wave's own gate run). Returns a
+/// status line on success. A genuine byte mismatch between two present captures
+/// is a regression and returns `error.CrossWaveReferenceMismatch` so the gate
+/// fails; when prior-wave captures are absent it reports INCOMPLETE rather than
+/// fabricating a pass. `error.CrossWaveReferenceMissing` means nothing was found.
+fn crossWaveReference(allocator: std.mem.Allocator, scratch: []const u8) ![]const u8 {
     const prefixes = [_][]const u8{ "v11", "v12", "v13", "v14", "v15" };
+    var present: std.ArrayList(u8) = .empty;
+    defer present.deinit(allocator);
+    var missing: std.ArrayList(u8) = .empty;
+    defer missing.deinit(allocator);
+    var first_hash: ?[64]u8 = null;
+
     for (prefixes) |prefix| {
         const leaf = try std.fmt.allocPrint(allocator, "{s}_dst_reference_crawl_a.txt", .{prefix});
         defer allocator.free(leaf);
         const ref_path = try joinPath(allocator, scratch, leaf);
         defer allocator.free(ref_path);
-        const data = std.fs.cwd().readFileAlloc(allocator, ref_path, 16 * 1024 * 1024) catch return null;
+        const data = std.fs.cwd().readFileAlloc(allocator, ref_path, 16 * 1024 * 1024) catch |err| switch (err) {
+            error.FileNotFound => {
+                if (missing.items.len > 0) try missing.appendSlice(allocator, ",");
+                try missing.appendSlice(allocator, prefix);
+                continue;
+            },
+            else => return err,
+        };
         defer allocator.free(data);
         var h: [64]u8 = undefined;
         sha256Hex(data, &h);
         if (first_hash) |fh| {
-            if (!std.mem.eql(u8, &fh, &h)) return null;
+            if (!std.mem.eql(u8, &fh, &h)) return error.CrossWaveReferenceMismatch;
         } else {
             first_hash = h;
         }
+        if (present.items.len > 0) try present.appendSlice(allocator, "==");
+        try present.appendSlice(allocator, prefix);
     }
-    return try std.fmt.allocPrint(allocator, "cross_wave_reference: v11==v12==v13==v14==v15 ref_hash={s}\n", .{
-        first_hash.?[0..],
+
+    const hash = first_hash orelse return error.CrossWaveReferenceMissing;
+    if (missing.items.len == 0) {
+        return try std.fmt.allocPrint(allocator, "cross_wave_reference: {s} ref_hash={s}\n", .{
+            present.items, hash[0..],
+        });
+    }
+    return try std.fmt.allocPrint(allocator, "cross_wave_reference: {s} ref_hash={s} (INCOMPLETE: missing {s})\n", .{
+        present.items, hash[0..], missing.items,
     });
 }
 
@@ -259,12 +263,7 @@ pub fn appendVerificationFooter(
         std.fs.cwd().access(verify_path, .{}) catch break :blk false;
         break :blk true;
     };
-    if (summary.wave >= 15) {
-        const file = try std.fs.cwd().createFile(verify_path, .{});
-        defer file.close();
-        try file.writeAll(footer);
-        try file.writeAll("\n");
-    } else if (summary.wave == 11 or !verify_exists) {
+    if (summary.wave == 11 or !verify_exists) {
         const header = if (summary.wave == 11)
             try std.fmt.allocPrint(allocator, "=== zig-q 1.x gate verification ===\n", .{})
         else
@@ -284,13 +283,12 @@ pub fn appendVerificationFooter(
     }
 
     if (summary.wave == 15) {
-        if (try crossWaveReferenceV11V15(allocator, scratch)) |cross| {
-            defer allocator.free(cross);
-            const file = try std.fs.cwd().openFile(verify_path, .{ .mode = .read_write });
-            defer file.close();
-            try file.seekFromEnd(0);
-            try file.writeAll(cross);
-        }
+        const cross = try crossWaveReference(allocator, scratch);
+        defer allocator.free(cross);
+        const file = try std.fs.cwd().openFile(verify_path, .{ .mode = .read_write });
+        defer file.close();
+        try file.seekFromEnd(0);
+        try file.writeAll(cross);
     } else if (summary.wave == 14) {
         var hash_match = true;
         var first_hash: ?[64]u8 = null;
@@ -325,7 +323,12 @@ pub fn appendVerificationFooter(
     }
 
     if (summary.wave == 15) {
-        try writeV15CompletionSummary(allocator, scratch, summary);
+        // Convenience artifact only: the verification file is already fully written,
+        // so a missing/oversized capture here must not corrupt it or fail the gate
+        // with a misattributed error.
+        writeV15CompletionSummary(allocator, scratch, summary) catch |err| {
+            std.log.warn("v15 completion summary skipped: {s}", .{@errorName(err)});
+        };
     }
 }
 
@@ -401,23 +404,34 @@ fn runZigReplScript(allocator: std.mem.Allocator, seed: u64, script: []const u8)
     const zig = try zigExe(allocator);
     defer allocator.free(zig);
 
-    const argv = [_][]const u8{ zig, "build", "run", "--", "--repl", seed_str };
+    const argv = [_][]const u8{ zig, "build", "run", "--", "--repl", seed_str, "--playtest" };
     var child = std.process.Child.init(&argv, allocator);
     child.stdin_behavior = .Pipe;
     child.stdout_behavior = .Pipe;
     child.stderr_behavior = .Pipe;
     try child.spawn();
 
+    // Feed stdin on a separate thread so the child's stdout is drained concurrently.
+    // Writing the whole script before reading would deadlock once the child's echoed
+    // output fills the OS pipe buffer while we're still blocked writing stdin.
     const stdin_pipe = child.stdin orelse return error.MissingStdin;
-    try stdin_pipe.writeAll(script);
-    stdin_pipe.close();
     child.stdin = null;
+    const Feeder = struct {
+        pipe: std.fs.File,
+        data: []const u8,
+        fn run(f: @This()) void {
+            f.pipe.writeAll(f.data) catch {};
+            f.pipe.close();
+        }
+    };
+    const feeder = try std.Thread.spawn(.{}, Feeder.run, .{Feeder{ .pipe = stdin_pipe, .data = script }});
 
     var stdout_list: std.ArrayList(u8) = .empty;
     defer stdout_list.deinit(allocator);
     var stderr_list: std.ArrayList(u8) = .empty;
     defer stderr_list.deinit(allocator);
     try child.collectOutput(allocator, &stdout_list, &stderr_list, max_capture_bytes);
+    feeder.join();
 
     const term = try child.wait();
     const exit_code: u32 = switch (term) {
@@ -759,10 +773,6 @@ pub fn runWave(
         try captureDstPair(allocator, wave, scratch, plan.prefix, scenario);
     }
 
-    if (wave == 15) {
-        try bootstrapPriorWaveReferenceCaptures(allocator, scratch, plan.prefix);
-    }
-
     try captureDstAll(allocator, wave, scratch, plan.prefix, plan.all_scenarios);
 
     const fuzz_leaf = try std.fmt.allocPrint(allocator, "{s}_fuzz.log", .{plan.prefix});
@@ -845,16 +855,18 @@ test "parseTestCounts reads 144/144 from build summary" {
     try std.testing.expectEqual(@as(u32, 144), counts.total);
 }
 
-test "crossWaveReferenceV11V15 returns null when prefix files are absent" {
+test "crossWaveReference errors when all prefix files are absent" {
     const allocator = std.testing.allocator;
-    const cross = try crossWaveReferenceV11V15(allocator, "zig_q_missing_cross_wave_scratch");
-    try std.testing.expect(cross == null);
+    try std.testing.expectError(
+        error.CrossWaveReferenceMissing,
+        crossWaveReference(allocator, "zig_q_missing_cross_wave_scratch"),
+    );
 }
 
 test "formatV15CompletionSummary uses gate captures only" {
     const allocator = std.testing.allocator;
-    const footer = "gate-v15: build_bytes=0 tests=192/192 version=1.5.2 ref_hash=abc fuzz=10000";
-    const deep_floor = "step depth_report floor=2 monsters=3 loot=4\nstep depth_report floor=5 monsters=5 loot=8\n";
+    const footer = "gate-v15: build_bytes=0 tests=192/192 version=1.5.3 ref_hash=abc fuzz=10000";
+    const deep_floor = "step depth_report floor=2 plan_monsters=3 plan_loot=4\nstep depth_report floor=5 plan_monsters=5 plan_loot=8\n";
     const repl =
         \\> used bandage; healed 5 hp
         \\> HP: 12
@@ -864,8 +876,8 @@ test "formatV15CompletionSummary uses gate captures only" {
     defer allocator.free(out);
 
     try std.testing.expect(std.mem.indexOf(u8, out, "192/192") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "loot=4") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "loot=8") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "plan_loot=4") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "plan_loot=8") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "healed 5 hp") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "heal_bandage") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "trap_floor") != null);
