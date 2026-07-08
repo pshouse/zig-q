@@ -106,7 +106,7 @@ pub const create_scenario = Scenario{
     },
 };
 
-/// Harvested from transcripts/session-1783208416-seed42.txt (recorded playthrough).
+/// Harvested from transcripts/harvested-playthrough-seed42.txt (recorded playthrough).
 pub const playthrough_scenario = Scenario{
     .name = "playthrough",
     .seed = 42,

@@ -274,7 +274,7 @@ test "repl recording captures session transcript" {
 
 test "harvested playthrough transcript is deterministic" {
     const allocator = std.testing.allocator;
-    const path = "transcripts/session-1783208416-seed42.txt";
+    const path = "transcripts/harvested-playthrough-seed42.txt";
 
     const harvested = try transcript.harvestFile(allocator, path);
     defer transcript.freeCommands(allocator, harvested.commands);

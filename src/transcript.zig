@@ -101,10 +101,20 @@ pub const Header = struct {
     version: ?[]const u8 = null,
 };
 
+/// A UTF-8 byte-order mark. Some editors and PowerShell `>` redirection prepend
+/// one; a harvested transcript captured that way on Windows would otherwise hide
+/// its leading `# seed=` header behind the BOM bytes.
+const utf8_bom = "\xEF\xBB\xBF";
+
+fn stripBom(text: []const u8) []const u8 {
+    if (std.mem.startsWith(u8, text, utf8_bom)) return text[utf8_bom.len..];
+    return text;
+}
+
 /// Parse `# seed=` and `# version=` lines from a recorded transcript header.
 pub fn parseHeader(text: []const u8) Header {
     var result: Header = .{};
-    var iter = std.mem.splitScalar(u8, text, '\n');
+    var iter = std.mem.splitScalar(u8, stripBom(text), '\n');
     while (iter.next()) |line| {
         const trimmed = std.mem.trim(u8, line, " \t\r");
         if (std.mem.eql(u8, trimmed, "# ---")) break;
@@ -119,19 +129,44 @@ pub fn parseHeader(text: []const u8) Header {
     return result;
 }
 
-/// Extract every `> command` input line from a transcript (playthrough harvest).
+/// Extract the input commands from a harvest source. Two shapes are accepted:
+///   * a recorded REPL transcript, where inputs are the `> command` lines
+///     interleaved with program output — only those lines are taken; and
+///   * a harvested script (what `--harvest` prints), where every non-comment
+///     line is already a bare command.
+/// A leading UTF-8 BOM and `#`-prefixed header/comment lines are ignored. When
+/// any `> ` line is present the transcript shape wins, so re-harvesting a real
+/// recorded session never mistakes its output lines for commands (and `--harvest`
+/// stays idempotent on its own output).
 pub fn harvestCommands(allocator: std.mem.Allocator, text: []const u8) ![]const []const u8 {
+    const body = stripBom(text);
+
+    var has_prompt = false;
+    var scan = std.mem.splitScalar(u8, body, '\n');
+    while (scan.next()) |line| {
+        if (std.mem.startsWith(u8, std.mem.trim(u8, line, " \t\r"), "> ")) {
+            has_prompt = true;
+            break;
+        }
+    }
+
     var lines: std.ArrayList([]const u8) = .empty;
     errdefer {
         for (lines.items) |line| allocator.free(line);
         lines.deinit(allocator);
     }
 
-    var iter = std.mem.splitScalar(u8, text, '\n');
+    var iter = std.mem.splitScalar(u8, body, '\n');
     while (iter.next()) |line| {
         const trimmed = std.mem.trim(u8, line, " \t\r");
-        if (!std.mem.startsWith(u8, trimmed, "> ")) continue;
-        const cmd = std.mem.trim(u8, trimmed[2..], " \t\r");
+        if (trimmed.len == 0) continue;
+        if (std.mem.startsWith(u8, trimmed, "#")) continue; // header/comment
+        const cmd = if (std.mem.startsWith(u8, trimmed, "> "))
+            std.mem.trim(u8, trimmed[2..], " \t\r")
+        else if (has_prompt)
+            continue // program output inside a recorded transcript
+        else
+            trimmed; // bare command from a harvested script
         if (cmd.len == 0) continue;
         try lines.append(allocator, try allocator.dupe(u8, cmd));
     }

@@ -72,7 +72,7 @@ Terrain regenerates from seed on load (documented regen-only persistence for lay
 
 ## Shipped — REPL UX from playthrough harvest (v0.8+)
 
-Source: `transcripts/session-1783208416-seed42.txt` (seed 42). `expandInput()` / `executeLine()` expand shorthands before `parseLine`; REPL, DST, and fuzz use the real path.
+Source: `transcripts/harvested-playthrough-seed42.txt` (seed 42). `expandInput()` / `executeLine()` expand shorthands before `parseLine`; REPL, DST, and fuzz use the real path.
 
 | Input (as typed) | Expansion |
 |------------------|-----------|

@@ -2074,13 +2074,15 @@ test "drop while wielded clears weapon slot and restores innate die" {
     var fbs = std.io.fixedBufferStream(&buf);
     _ = try execute(&ctx, parseLine("equip short sword"), fbs.writer());
     try std.testing.expectEqual(.short_sword, ent.inventory.weapon.?);
-    try std.testing.expectEqual(@as(u8, 6), ent.inventory.weaponDamageDie(ent));
+    // Under the upgrade-only rule the barbarian's innate d12 outclasses the
+    // short sword's d6, so wielding it leaves the effective die at d12.
+    try std.testing.expectEqual(@as(u8, 12), ent.inventory.weaponDamageDie(ent));
 
     fbs = std.io.fixedBufferStream(&buf);
     _ = try execute(&ctx, parseLine("drop short sword"), fbs.writer());
     try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "dropped short sword") != null);
     try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "unequipped short sword") != null);
-    // Slot released, bag empty of it, damage die falls back to the barbarian's d12.
+    // Slot released, bag empty of it, damage die stays the barbarian's d12.
     try std.testing.expect(ent.inventory.weapon == null);
     try std.testing.expect(!ent.inventory.has(.short_sword));
     try std.testing.expectEqual(@as(u8, 12), ent.inventory.weaponDamageDie(ent));
@@ -2127,10 +2129,11 @@ test "drop one of two wielded copies keeps weapon slot" {
     var fbs = std.io.fixedBufferStream(&buf);
     _ = try execute(&ctx, parseLine("drop short sword"), fbs.writer());
     try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "unequipped short sword") == null);
-    // A copy remains, so the wield stays consistent and the die is unchanged.
+    // A copy remains, so the wield stays consistent and the die is unchanged
+    // (the barbarian's innate d12 still outclasses the short sword's d6).
     try std.testing.expectEqual(.short_sword, ent.inventory.weapon.?);
     try std.testing.expect(ent.inventory.has(.short_sword));
-    try std.testing.expectEqual(@as(u8, 6), ent.inventory.weaponDamageDie(ent));
+    try std.testing.expectEqual(@as(u8, 12), ent.inventory.weaponDamageDie(ent));
 }
 
 test "loot from corpse leaves empty corpse on floor" {

@@ -107,7 +107,7 @@ zig build dst -- @scenarios/reference_crawl.txt 42
 - **crawl_start** — floor 1 dungeon, creation, spawn, look, wall block, stats
 - **brawl** — floor 1, creation, spawn, goblin fight, attack/end turn, stats
 - **save_roundtrip** — floor 1 crawl, save/load slot 1, continue with look/stats/move
-- **playthrough** — harvested from `transcripts/session-1783208416-seed42.txt` (dragonborn crawl)
+- **playthrough** — harvested from `transcripts/harvested-playthrough-seed42.txt` (dragonborn crawl)
 - **descend_crawl** — floor 1 creation/explore, `descend` to procedural floor 2, look/stats
 - **reference_crawl** — floor 1→3 descent, goblin fights, save/load on floor 2 (seed 42 regression)
 - **combat_flee** — exhausted fighter attacks then `flee`s; adjacent goblin gets one opportunity attack, combat ends
@@ -124,7 +124,7 @@ Two consecutive runs with the same scenario and seed produce byte-identical tran
 After a recorded REPL session (`--record`), extract input commands for regression:
 
 ```bash
-zig build run -- --harvest transcripts/session-1783208416-seed42.txt
+zig build run -- --harvest transcripts/harvested-playthrough-seed42.txt
 ```
 
 Each `> command` line becomes one output line (seed header included). The harvested script is wired into the `playthrough` DST scenario and a REPL determinism test.
