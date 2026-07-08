@@ -108,6 +108,10 @@ pub const World = struct {
         while (i < plan.count) : (i += 1) {
             const spawn = plan.spawns[i];
             if (!self.terrain.isWalkable(spawn.position)) continue;
+            // Skip tiles already holding an entity (the player or an earlier monster)
+            // so denser depth-scaled plans cannot stack two monsters on one tile —
+            // matching placeFloorLoot / placeFloorTraps.
+            if (self.tile_map.entityCountAt(spawn.position) > 0) continue;
             _ = try self.spawnMonster(spawn.kind, spawn.position, spawn.name);
         }
     }
@@ -155,6 +159,7 @@ pub const World = struct {
         try self.relocatePlayer(player_id, self.floor_spawn);
         try self.placeFloorMonsters();
         try self.placeFloorLoot();
+        try self.placeFloorTraps();
         self.tick();
     }
 
@@ -173,6 +178,18 @@ pub const World = struct {
                 @import("items.zig").idTag(spawn.item),
                 spawn.item,
             );
+        }
+    }
+
+    pub fn placeFloorTraps(self: *World) !void {
+        if (self.floor_index < 2) return;
+        const plan = dungeon.planTrapSpawns(self.seed, self.floor_index, self.floor_spawn, &self.terrain);
+        var i: usize = 0;
+        while (i < plan.count) : (i += 1) {
+            const spawn = plan.spawns[i];
+            if (!self.terrain.isWalkable(spawn.position)) continue;
+            if (self.tile_map.entityCountAt(spawn.position) > 0) continue;
+            try self.floor_objects.add(self.allocator, .trap, spawn.position, spawn.label);
         }
     }
 

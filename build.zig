@@ -235,6 +235,23 @@ pub fn build(b: *std.Build) void {
     const evidence_v14_step = b.step("evidence-v14", "Emit v1.4 survival-clock verification transcript");
     evidence_v14_step.dependOn(&evidence_v14_run.step);
 
+    const evidence_v15_exe = b.addExecutable(.{
+        .name = "zig-q-evidence-v15",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/evidence_v15_main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zig_q", .module = zig_q_mod },
+            },
+        }),
+    });
+    b.installArtifact(evidence_v15_exe);
+
+    const evidence_v15_run = b.addRunArtifact(evidence_v15_exe);
+    const evidence_v15_step = b.step("evidence-v15", "Emit v1.5 crawl-completeness verification transcript");
+    evidence_v15_step.dependOn(&evidence_v15_run.step);
+
     const wave_gate_exe = b.addExecutable(.{
         .name = "zig-q-wave-gate",
         .root_module = b.createModule(.{
@@ -248,9 +265,9 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(wave_gate_exe);
 
-    const gate_scratch = "C:\\Users\\admin\\AppData\\Local\\Temp\\grok-goal-ed9bbd58ab86\\implementer";
+    const gate_scratch = "C:\\Users\\admin\\AppData\\Local\\Temp\\grok-goal-1322f48c036d\\implementer";
 
-    inline for (.{ 11, 12, 13, 14 }) |wave| {
+    inline for (.{ 11, 12, 13, 14, 15 }) |wave| {
         const prefix = b.fmt("v{d}", .{wave});
         const build_log = b.fmt("{s}\\{s}_build.log", .{ gate_scratch, prefix });
 

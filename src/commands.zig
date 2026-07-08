@@ -60,6 +60,7 @@ pub const Command = union(enum) {
     open_dir: movement.Direction,
     close_dir: movement.Direction,
     use_item: []const u8,
+    wound,
     unknown: []const u8,
 };
 
@@ -76,6 +77,9 @@ pub const Context = struct {
     save_path: []const u8 = sqlite_store.default_path,
     help_profile: help_text.Profile = .repl_v11,
     look_list_nearby: bool = true,
+    /// Enables debug/playtest-only commands (e.g. `wound`). Off in the shipped REPL;
+    /// the release gate turns it on via `--repl --playtest` for bandage-heal capture.
+    playtest: bool = false,
 };
 
 pub fn parseLine(line: []const u8) Command {
@@ -174,6 +178,7 @@ pub fn parseLine(line: []const u8) Command {
         const arg = std.mem.trim(u8, trimmed[4..], " \t");
         if (arg.len > 0) return .{ .use_item = arg };
     }
+    if (std.mem.eql(u8, trimmed, "wound")) return .wound;
 
     if (std.mem.eql(u8, trimmed, "assign")) return .assign_usage;
     if (std.mem.startsWith(u8, trimmed, "assign ")) {
@@ -617,15 +622,18 @@ fn isSpawned(ctx: *const Context) bool {
 const SurvivalNoticeState = struct {
     exhaustion: u3,
     starving: bool,
+    current_hp: u32,
 
     fn capture(ent: *const entity.Entity) SurvivalNoticeState {
         return .{
             .exhaustion = conditions.exhaustionLevel(ent),
             .starving = conditions.has(ent, .starving),
+            .current_hp = ent.current_hp,
         };
     }
 
     fn printChanges(self: SurvivalNoticeState, ent: *const entity.Entity, writer: anytype) !void {
+        try survival.printHpDotNotice(self.current_hp, ent, writer);
         try survival.printExhaustionNotice(self.exhaustion, conditions.exhaustionLevel(ent), writer);
         try survival.printStarvingNotice(self.starving, conditions.has(ent, .starving), writer);
     }
@@ -663,6 +671,31 @@ fn finishExploreMove(ctx: *Context, writer: anytype) !void {
     try finishExploreAction(ctx, writer);
 }
 
+fn cmdWound(ctx: *Context, writer: anytype) !Result {
+    if (!ctx.playtest) {
+        try writer.print("unknown command: wound\n", .{});
+        return .continue_repl;
+    }
+    if (combat.isInCombat(ctx.w)) {
+        try writer.print("cannot wound during combat\n", .{});
+        return .continue_repl;
+    }
+    const ent = ctx.w.store.get(ctx.player_id) orelse {
+        try writer.print("no player spawned\n", .{});
+        return .continue_repl;
+    };
+    if (ent.current_hp <= 1) {
+        try writer.print("already at minimum hp\n", .{});
+        return .continue_repl;
+    }
+    const loss: u32 = @min(3, ent.current_hp - 1);
+    ent.current_hp -= loss;
+    try writer.print("wounded for playtest; hp={}/{}\n", .{ ent.current_hp, ent.max_hp });
+    try tickPlayerAction(ctx, 1, writer);
+    try finishExploreAction(ctx, writer);
+    return .continue_repl;
+}
+
 fn cmdUse(ctx: *Context, name: []const u8, writer: anytype) !Result {
     const ent = ctx.w.store.get(ctx.player_id) orelse {
         try writer.print("no player spawned\n", .{});
@@ -681,6 +714,22 @@ fn cmdUse(ctx: *Context, name: []const u8, writer: anytype) !Result {
         _ = ent.inventory.remove(id, 1);
         conditions.remove(ent, .poisoned);
         try writer.print("used antidote; poison cleared\n", .{});
+        try tickPlayerAction(ctx, 1, writer);
+        try finishExploreAction(ctx, writer);
+        return .continue_repl;
+    }
+    if (id == .bandage) {
+        if (combat.isInCombat(ctx.w)) {
+            try writer.print("cannot use bandage during combat\n", .{});
+            return .continue_repl;
+        }
+        if (ent.current_hp >= ent.max_hp) {
+            try writer.print("you are not wounded\n", .{});
+            return .continue_repl;
+        }
+        _ = ent.inventory.remove(id, 1);
+        const applied = items.applyBandageHeal(ent);
+        try writer.print("used bandage; healed {} hp\n", .{applied});
         try tickPlayerAction(ctx, 1, writer);
         try finishExploreAction(ctx, writer);
         return .continue_repl;
@@ -923,6 +972,7 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
             try finishExploreAction(ctx, writer);
         },
         .use_item => |name| return cmdUse(ctx, name, writer),
+        .wound => return cmdWound(ctx, writer),
         .conditions_cmd => {
             const ent = ctx.w.store.get(ctx.player_id) orelse {
                 try writer.print("no player spawned\n", .{});
@@ -1016,9 +1066,10 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
             };
             ctx.w.stageCharacter(char);
             ctx.player_id = try ctx.w.spawnStagedPlayer(loc.Loc.init(49, 49), "entity_0");
-            try writer.print("spawned id={} at (49,49) (rations x{})\n", .{
+            try writer.print("spawned id={} at (49,49) (rations x{} bandage x{})\n", .{
                 ctx.player_id,
                 survival.starter_rations,
+                survival.starter_bandage,
             });
         },
         .stats => {
@@ -1580,6 +1631,74 @@ test "descend via execute from normal spawn reaches floor 2" {
     evidence_format.printDescendEvidence(w.floor_index, gen.layout_hash, gen.walkable_count, monster_count);
 }
 
+test "applyBandageHeal restores flat bandage_heal on wounded player" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+
+    const ctx = try descendTestCtx(allocator, &w);
+    const ent = w.store.get(ctx.player_id).?;
+    const max_hp = ent.max_hp;
+    ent.current_hp = max_hp - items.bandage_heal;
+
+    const applied = items.applyBandageHeal(ent);
+    try std.testing.expectEqual(items.bandage_heal, applied);
+    try std.testing.expectEqual(max_hp, ent.current_hp);
+}
+
+test "wound and bandage via execute on minimal repl path" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+
+    var ctx = try descendTestCtx(allocator, &w);
+    ctx.playtest = true;
+    const ent = w.store.get(ctx.player_id).?;
+    try std.testing.expect(ent.inventory.findStack(.bandage).?.count == 1);
+    const max_hp = ent.max_hp;
+
+    var buf: [512]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, .wound, fbs.writer());
+    _ = try execute(&ctx, .wound, fbs.writer());
+    const after_wound_hp = w.store.get(ctx.player_id).?.current_hp;
+    try std.testing.expect(max_hp - after_wound_hp >= items.bandage_heal);
+
+    _ = try execute(&ctx, parseLine("use bandage"), fbs.writer());
+    _ = try execute(&ctx, .stats, fbs.writer());
+
+    const out = fbs.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, out, "wounded for playtest") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "used bandage; healed 5 hp") != null);
+    try std.testing.expectEqual(after_wound_hp + items.bandage_heal, w.store.get(ctx.player_id).?.current_hp);
+    try std.testing.expect(!ent.inventory.has(.bandage));
+}
+
+test "use bandage via execute heals flat bandage_heal and consumes item" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+
+    var ctx = try descendTestCtx(allocator, &w);
+    const ent = w.store.get(ctx.player_id).?;
+    try std.testing.expect(ent.inventory.findStack(.bandage).?.count == 1);
+    const max_hp = ent.max_hp;
+    const before_hp = max_hp - items.bandage_heal;
+    ent.current_hp = before_hp;
+
+    var buf: [512]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("use bandage"), fbs.writer());
+    const out = fbs.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, out, "used bandage; healed 5 hp") != null);
+    try std.testing.expectEqual(before_hp + items.bandage_heal, ent.current_hp);
+    try std.testing.expectEqual(max_hp, ent.current_hp);
+    try std.testing.expect(!ent.inventory.has(.bandage));
+}
+
 test "descend blocked during combat via execute" {
     const allocator = std.testing.allocator;
     var w = try world.World.init(allocator, 42);
@@ -1681,6 +1800,25 @@ test "get requires adjacent floor item" {
     _ = try execute(&ctx, parseLine("get leather armour"), fbs.writer());
     try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "nothing to pick up") != null);
     try std.testing.expect(w.floor_objects.at(loc.Loc.init(52, 49)) != null);
+}
+
+test "wait prints poison hp dot after tick" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    var draft: session.CreationDraft = .{};
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    var ctx = Context{ .allocator = allocator, .w = &w, .draft = &draft, .player_id = player_id };
+    const player = w.store.get(player_id).?;
+    player.max_hp = 13;
+    player.current_hp = 10;
+    conditions.apply(player, .poisoned);
+
+    var buf: [256]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, .wait, fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "poison deals 1 hp; hp=9/13") != null);
 }
 
 test "finish explore action prints exhaustion after monster tick" {

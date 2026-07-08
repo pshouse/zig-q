@@ -12,7 +12,7 @@ pub fn main() !void {
 
     const stdout = io_out.stdoutWriter();
     if (args.len < 2) {
-        try stdout.print("usage: wave-gate <11|12|13|14> [--skip-build] [scratch_dir]\n", .{});
+        try stdout.print("usage: wave-gate <11|12|13|14|15> [--skip-build] [scratch_dir]\n", .{});
         return error.InvalidArguments;
     }
 

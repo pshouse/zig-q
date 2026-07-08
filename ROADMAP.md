@@ -2,7 +2,7 @@
 
 **Product:** deterministic, scriptable **dungeon crawl** engine — create a character, descend floors, fight monsters, persist progress. No dialogue trees.
 
-**Current release:** `1.4.0` (foundation, gear, living dungeon AI, survival clock).
+**Current release:** `1.5.3` (v1.5 crawl completeness + post-release review fixes).
 
 ---
 
@@ -228,6 +228,28 @@ DST `playthrough` runs without `unknown command` for these inputs. Harvested tra
 
 ---
 
+## v1.5 — Crawl completeness: heal, traps, depth
+
+**Theme:** Finish the mundane consumable loop; generated floors feel deeper.
+
+| Deliver | Notes |
+|---------|--------|
+| Bandage heal | `use bandage` restores flat HP when wounded, explore-only, consumes item; one bandage in starter kit |
+| Procedural traps | Seed-fixed `poison_trap` placement on descend (`floor_index >= 2`); step trigger via explore |
+| Depth scaling | `planMonsterSpawns` / `planFloorLoot` scale with `floor_index` (deeper = denser) |
+
+**DST scenarios**
+
+| Name | Proves |
+|------|--------|
+| `heal_bandage` | wound → `use bandage` → HP restored; item consumed |
+| `trap_floor` | descend places trap; step triggers `poisoned` |
+| `deep_floor` | floor 5 plan totals exceed floor 2 baseline (seed 42) |
+
+**Acceptance:** prior DST goldens byte-identical ×2; `reference_crawl` unchanged; `evidence-v15` markers pass.
+
+---
+
 ## Conditions roadmap (mundane only)
 
 | Condition | Wave | Source |
@@ -247,7 +269,7 @@ DST `playthrough` runs without `unknown command` for these inputs. Harvested tra
 
 ---
 
-## Backlog (post-1.4)
+## Backlog (post-1.5)
 
 | Idea | Notes |
 |------|--------|
@@ -279,12 +301,17 @@ DST `playthrough` runs without `unknown command` for these inputs. Harvested tra
 | 0.8 | SQLite save/load, DST save_roundtrip |
 | 0.9 | Seeded floor generation, descend, scenario files |
 | 1.0 | Public API, reference crawl 1→3, evidence-v10, fuzz-corpus |
+| 1.1 | Foundation: world objects, LOS, conditions, permadeath, save v2 |
+| 1.2 | Mundane gear, encumbrance, corpse loot |
+| 1.3 | Monster AI, doors, traps |
+| 1.4 | Hunger, sleep, exhaustion, survival clock |
+| 1.5 | Bandage heal, procedural traps, depth-scaled crawl |
+| 1.5.1 | Trap `look` listing gated on WIS perception check (d20 + mod vs DC 12 + distance) |
+| 1.5.2 | Poison/starvation DoT prints HP loss each tick (`poison deals N hp; hp=X/Y`) |
+| 1.5.3 | Review fixes: `look` uses a local RNG copy (no combat-stream coupling), unique deep-floor monster names, monster tile-occupancy guard, honest cross-wave gate, `wound` gated behind `--playtest` |
 
 ## Version history (planned)
 
 | Version | Theme |
 |---------|--------|
-| 1.1 | Foundation: world objects, LOS, conditions registry, permadeath, save v2 |
-| 1.2 | Mundane items, weapons, armour, encumbrance, corpse loot |
-| 1.3 | Monster AI, doors, traps, noise |
-| 1.4 | Hunger, sleep, exhaustion, survival clock |
+| 1.6+ | Skeleton bones sink, locked doors, permadeath summary |

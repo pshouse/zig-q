@@ -5,6 +5,7 @@ const entity = @import("entity.zig");
 const terrain = @import("terrain.zig");
 const conditions = @import("conditions.zig");
 const perception = @import("perception.zig");
+const character = @import("character.zig");
 
 const DescendTile = struct {
     pos: loc.Loc,
@@ -89,15 +90,29 @@ fn tileDistance(a: loc.Loc, b: loc.Loc) u64 {
 
 pub fn formatVisibleFloorObjects(
     w: *const world.World,
+    viewer: *const entity.Entity,
     center: loc.Loc,
     radius: u8,
     writer: anytype,
 ) !void {
     const items_mod = @import("items.zig");
+    // Trap spotting rolls a d20, but `look` must not perturb the shared world RNG
+    // that combat draws from. Roll from a local copy so inspection stays free of
+    // gameplay side effects (and is idempotent for a given world state).
+    var spot_rng = w.rng;
     var listed = false;
     for (w.floor_objects.objects.items) |obj| {
         const pos = loc.Loc.init(obj.x, obj.y);
         if (!inViewport(center, radius, pos)) continue;
+        switch (obj.kind) {
+            .trap => {
+                if (w.has_dungeon and !perception.hasLineOfSight(&w.terrain, center, pos)) continue;
+                const distance = perception.manhattanDistance(center, pos);
+                const wis_mod = character.abilityModifier(character.statByAbbr(viewer.char, "WIS"));
+                if (!perception.spotTrapCheck(wis_mod, distance, &spot_rng)) continue;
+            },
+            else => {},
+        }
         if (!listed) {
             try writer.writeAll("nearby:\n");
             listed = true;
@@ -174,7 +189,7 @@ pub fn renderLook(
     try renderViewport(w, ent.loc, radius, writer);
     if (w.has_dungeon) try formatOnDescendTile(w, ent.loc, writer);
     if (list_nearby) {
-        try formatVisibleFloorObjects(w, ent.loc, radius, writer);
+        try formatVisibleFloorObjects(w, ent, ent.loc, radius, writer);
         try formatVisibleEntities(w, player_id, ent.loc, radius, writer);
     }
 }
@@ -209,6 +224,44 @@ test "dungeon look shows walls" {
     const out = fbs.getWritten();
     try std.testing.expect(std.mem.indexOf(u8, out, "look floor=1") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "#") != null);
+}
+
+test "look omits trap when perception check fails" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    const id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    const ent = w.store.get(id).?;
+    for (ent.char.attributes.items) |*attr| {
+        if (std.mem.eql(u8, attr.abbr, "WIS")) attr.stat = 3;
+    }
+    w.rng = @import("rng.zig").SeededRng.init(42);
+    try w.floor_objects.add(allocator, .trap, loc.Loc.init(49, 50), "poison_trap");
+
+    var buf: [4096]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    try renderLook(&w, id, true, fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "trap at") == null);
+}
+
+test "look lists trap when perception check succeeds" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    const id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    const ent = w.store.get(id).?;
+    for (ent.char.attributes.items) |*attr| {
+        if (std.mem.eql(u8, attr.abbr, "WIS")) attr.stat = 32;
+    }
+    w.rng = @import("rng.zig").SeededRng.init(42);
+    try w.floor_objects.add(allocator, .trap, loc.Loc.init(49, 49), "poison_trap");
+
+    var buf: [4096]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    try renderLook(&w, id, true, fbs.writer());
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "trap at (49,49)") != null);
 }
 
 test "look lists nearby floor items when enabled" {

@@ -8,12 +8,14 @@ const version = @import("version.zig");
 pub const RunOpts = struct {
     record: ?transcript.RecordOpts = null,
     semver: ?[]const u8 = null,
+    playtest: bool = false,
 };
 
 pub const ReplCli = struct {
     seed: u64 = 42,
     record: ?transcript.RecordOpts = null,
     semver: ?[]const u8 = null,
+    playtest: bool = false,
 };
 
 /// Parse REPL args after `--repl`: `[seed] [--record [path]]` in any order.
@@ -47,6 +49,10 @@ pub fn parseReplCli(args: []const []const u8) !ReplCli {
             i += 1;
             continue;
         }
+        if (std.mem.eql(u8, arg, "--playtest")) {
+            result.playtest = true;
+            continue;
+        }
         if (arg[0] == '-') return error.UnknownArgument;
         result.seed = try std.fmt.parseInt(u64, arg, 10);
     }
@@ -71,6 +77,8 @@ pub fn runRepl(
     var w = try world.World.init(allocator, seed);
     defer w.deinit();
     try w.loadFloor(1);
+    // Piped scripts skip explore AI so ambush does not block scripted verification paths.
+    w.explore_ai_on_move = std.fs.File.stdin().isTty();
 
     var draft: session.CreationDraft = .{};
     _ = session.draftRoll(&w, &draft);
@@ -80,6 +88,7 @@ pub fn runRepl(
         .w = &w,
         .draft = &draft,
         .help_profile = .repl_v11,
+        .playtest = opts.playtest,
     };
 
     var recording: ?transcript.Session = null;
@@ -136,6 +145,7 @@ pub fn runReplScript(
     var w = try world.World.init(allocator, seed);
     defer w.deinit();
     try w.loadFloor(1);
+    w.explore_ai_on_move = false;
 
     var draft: session.CreationDraft = .{};
     _ = session.draftRoll(&w, &draft);
@@ -145,6 +155,7 @@ pub fn runReplScript(
         .w = &w,
         .draft = &draft,
         .help_profile = .repl_v11,
+        .playtest = opts.playtest,
     };
 
     var recording: ?transcript.Session = null;
@@ -224,6 +235,14 @@ test "parseReplCli accepts --semver override" {
     const cli = try parseReplCli(&.{ "42", "--record", "--semver", "0.6.0-dev" });
     try std.testing.expectEqualStrings("0.6.0-dev", cli.semver.?);
     try std.testing.expectEqualStrings("0.6.0-dev", cli.record.?.semver.?);
+}
+
+test "parseReplCli gates playtest behind --playtest" {
+    const on = try parseReplCli(&.{ "42", "--playtest" });
+    try std.testing.expectEqual(@as(u64, 42), on.seed);
+    try std.testing.expect(on.playtest);
+    const off = try parseReplCli(&.{"42"});
+    try std.testing.expect(!off.playtest);
 }
 
 test "repl recording captures session transcript" {

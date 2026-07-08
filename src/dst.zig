@@ -45,6 +45,8 @@ pub const Step = union(enum) {
     give_item: struct { entity: []const u8, item: @import("items.zig").Id, count: u8 },
     set_hunger: struct { entity: []const u8, value: u16 },
     set_fatigue: struct { entity: []const u8, value: u16 },
+    set_hp: struct { entity: []const u8, current: u32 },
+    depth_report: u32,
 };
 
 fn findEntityByName(w: *world.World, name: []const u8) ?*entity.Entity {
@@ -554,6 +556,71 @@ pub const flee_scenario = Scenario{
     },
 };
 
+pub const heal_bandage_scenario = Scenario{
+    .name = "heal_bandage",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 },
+        .{ .choose_class = 1 },
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .give_item = .{ .entity = "entity_0", .item = .bandage, .count = 1 } },
+        .{ .set_hp = .{ .entity = "entity_0", .current = 5 } },
+        .{ .command = "use bandage" },
+        .{ .command = "stats" },
+        .{ .command = "exit" },
+    },
+};
+
+pub const trap_floor_scenario = Scenario{
+    .name = "trap_floor",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 },
+        .{ .choose_class = 1 },
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .command = "move east" },
+        .{ .command = "move south" },
+        .{ .command = "move east" },
+        .{ .command = "descend" },
+        .list_floor_objects,
+        .{ .command = "move south" },
+        .{ .command = "move south" },
+        .{ .command = "move south" },
+        .{ .command = "move south" },
+        .{ .command = "move south" },
+        .{ .command = "move south" },
+        .{ .command = "move east" },
+        .{ .command = "move east" },
+        .{ .command = "conditions" },
+        .{ .command = "exit" },
+    },
+};
+
+pub const deep_floor_scenario = Scenario{
+    .name = "deep_floor",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 },
+        .{ .choose_class = 1 },
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .depth_report = 2 },
+        .{ .depth_report = 5 },
+        .{ .command = "exit" },
+    },
+};
+
 pub const trap_trigger_scenario = Scenario{
     .name = "trap_trigger",
     .seed = 42,
@@ -661,6 +728,7 @@ fn floor1ProfileForScenario(name: []const u8) dungeon.Floor1Profile {
     if (std.mem.eql(u8, name, "descend_crawl_file")) return .v09;
     if (std.mem.eql(u8, name, "reference_crawl")) return .v09;
     if (std.mem.eql(u8, name, "reference_crawl_file")) return .v09;
+    if (std.mem.eql(u8, name, "trap_floor")) return .v09;
     if (std.mem.startsWith(u8, name, "reference_crawl")) return .v09;
     return .v08;
 }
@@ -706,7 +774,8 @@ pub const Harness = struct {
             self.* = try Harness.init(self.allocator, scenario.seed);
         }
         self.w.floor1_profile = floor1ProfileForScenario(scenario.name);
-        self.explore_ai_on_move = !std.mem.startsWith(u8, scenario.name, "reference_crawl");
+        self.explore_ai_on_move = !std.mem.startsWith(u8, scenario.name, "reference_crawl") and
+            !std.mem.eql(u8, scenario.name, "trap_floor");
         self.w.explore_ai_on_move = self.explore_ai_on_move;
 
         for (scenario.steps) |step| {
@@ -895,6 +964,23 @@ pub const Harness = struct {
                 _ = survival.syncExhaustion(ent);
                 try writer.print("step set_fatigue {s} value={}\n", .{ cfg.entity, cfg.value });
             },
+            .set_hp => |cfg| {
+                const ent = findEntityByName(&self.w, cfg.entity) orelse return error.EntityNotFound;
+                ent.current_hp = @min(cfg.current, ent.max_hp);
+                try writer.print("step set_hp {s} current={}\n", .{ cfg.entity, ent.current_hp });
+            },
+            .depth_report => |floor_index| {
+                var layout_map = terrain.TerrainMap.init(self.allocator);
+                defer layout_map.deinit();
+                const gen = try dungeon.generateFloor(&layout_map, self.w.seed, floor_index);
+                const monsters = dungeon.planMonsterSpawns(self.w.seed, floor_index, gen.spawn);
+                const loot = dungeon.planFloorLoot(self.w.seed, floor_index, gen.spawn, &layout_map);
+                try writer.print("step depth_report floor={} plan_monsters={} plan_loot={}\n", .{
+                    floor_index,
+                    monsters.count,
+                    loot.count,
+                });
+            },
         }
     }
 };
@@ -952,6 +1038,12 @@ pub fn scenarioByName(name: []const u8, seed: u64) ?Scenario {
         return Scenario{ .name = "sleep_cycle", .seed = seed, .steps = sleep_cycle_scenario.steps };
     if (std.mem.eql(u8, name, "reference_survive"))
         return Scenario{ .name = "reference_survive", .seed = seed, .steps = reference_survive_scenario.steps };
+    if (std.mem.eql(u8, name, "heal_bandage"))
+        return Scenario{ .name = "heal_bandage", .seed = seed, .steps = heal_bandage_scenario.steps };
+    if (std.mem.eql(u8, name, "trap_floor"))
+        return Scenario{ .name = "trap_floor", .seed = seed, .steps = trap_floor_scenario.steps };
+    if (std.mem.eql(u8, name, "deep_floor"))
+        return Scenario{ .name = "deep_floor", .seed = seed, .steps = deep_floor_scenario.steps };
     return null;
 }
 
@@ -1312,6 +1404,28 @@ test "dst reference_survive scenario is byte-identical across runs" {
     try std.testing.expect(std.mem.indexOf(u8, out, "ate rations") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "saved slot") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "loaded slot") != null);
+}
+
+test "dst heal_bandage scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "heal_bandage", 65536);
+    try std.testing.expect(std.mem.indexOf(u8, out, "used bandage; healed") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "HP:") != null);
+}
+
+test "dst trap_floor scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "trap_floor", 131072);
+    try std.testing.expect(std.mem.indexOf(u8, out, "floor_object trap") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "trap triggered") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "poisoned") != null);
+}
+
+test "dst deep_floor scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "deep_floor", 65536);
+    try std.testing.expect(std.mem.indexOf(u8, out, "depth_report floor=2 plan_monsters=3 plan_loot=4") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "depth_report floor=5 plan_monsters=5 plan_loot=8") != null);
 }
 
 test "demo output is deterministic for fixed seed" {

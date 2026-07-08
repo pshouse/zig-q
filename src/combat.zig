@@ -320,15 +320,20 @@ pub fn performAttack(
         try writer.print("miss\n", .{});
     }
     var player_ex_before: ?u3 = null;
+    var player_hp_before: ?u32 = null;
     if (w.combat) |c| {
         if (w.store.get(c.player_id)) |player| {
             player_ex_before = conditions.exhaustionLevel(player);
+            player_hp_before = player.current_hp;
         }
     }
     w.tickAction(1);
-    if (player_ex_before) |before| {
-        if (w.combat) |c| {
-            if (w.store.get(c.player_id)) |player| {
+    if (w.combat) |c| {
+        if (w.store.get(c.player_id)) |player| {
+            if (player_hp_before) |hp_before| {
+                try survival.printHpDotNotice(hp_before, player, writer);
+            }
+            if (player_ex_before) |before| {
                 try survival.printExhaustionNotice(before, conditions.exhaustionLevel(player), writer);
             }
         }
