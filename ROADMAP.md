@@ -2,7 +2,7 @@
 
 **Product:** deterministic, scriptable **dungeon crawl** engine — create a character, descend floors, fight monsters, persist progress. No dialogue trees.
 
-**Current release:** `1.5.1` (v1.5 crawl completeness + WIS-gated trap spotting in look).
+**Current release:** `1.5.2` (v1.5 crawl completeness, perception-gated traps, DoT HP notices).
 
 ---
 
@@ -307,6 +307,7 @@ DST `playthrough` runs without `unknown command` for these inputs. Harvested tra
 | 1.4 | Hunger, sleep, exhaustion, survival clock |
 | 1.5 | Bandage heal, procedural traps, depth-scaled crawl |
 | 1.5.1 | Trap `look` listing gated on WIS perception check (d20 + mod vs DC 12 + distance) |
+| 1.5.2 | Poison/starvation DoT prints HP loss each tick (`poison deals N hp; hp=X/Y`) |
 
 ## Version history (planned)
 

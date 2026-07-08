@@ -153,7 +153,7 @@ pub fn formatV15CompletionSummary(
     }
 
     return std.fmt.allocPrint(allocator,
-        \\zig-q v1.5.1 release complete
+        \\zig-q v1.5.2 release complete
         \\
         \\{s}
         \\
@@ -853,7 +853,7 @@ test "crossWaveReferenceV11V15 returns null when prefix files are absent" {
 
 test "formatV15CompletionSummary uses gate captures only" {
     const allocator = std.testing.allocator;
-    const footer = "gate-v15: build_bytes=0 tests=189/189 version=1.5.1 ref_hash=abc fuzz=10000";
+    const footer = "gate-v15: build_bytes=0 tests=192/192 version=1.5.2 ref_hash=abc fuzz=10000";
     const deep_floor = "step depth_report floor=2 monsters=3 loot=4\nstep depth_report floor=5 monsters=5 loot=8\n";
     const repl =
         \\> used bandage; healed 5 hp
@@ -863,7 +863,7 @@ test "formatV15CompletionSummary uses gate captures only" {
     const out = try formatV15CompletionSummary(allocator, footer, deep_floor, repl);
     defer allocator.free(out);
 
-    try std.testing.expect(std.mem.indexOf(u8, out, "189/189") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "192/192") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "loot=4") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "loot=8") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "healed 5 hp") != null);

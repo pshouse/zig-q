@@ -44,7 +44,7 @@ test "evidence v15 crawl completeness markers" {
     var fbs = std.io.fixedBufferStream(&buf);
     try run(std.testing.allocator, fbs.writer());
     const out = fbs.getWritten();
-    try evidence_format.expectMarkerLineTrue(out, "marker # version=1.5.1: true");
+    try evidence_format.expectMarkerLineTrue(out, "marker # version=1.5.2: true");
     try evidence_format.expectMarkerLineTrue(out, "marker # version=1.1.0: true");
     try evidence_format.expectMarkerLineTrue(out, "marker used bandage; healed: true");
     try evidence_format.expectMarkerLineTrue(out, "marker floor_object trap: true");
