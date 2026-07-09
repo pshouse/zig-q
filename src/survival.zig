@@ -113,14 +113,29 @@ pub fn syncSurvival(ent: *entity.Entity) SurvivalChange {
     return .{ .exhaustion = exhaustion, .starving = starving };
 }
 
-/// Apply a short rest's fatigue relief. Sheds `fatigue_restore_rest`, clamped so
-/// fatigue never drops below `rest_fatigue_floor` and is never *raised* (resting
-/// while already below the floor is a no-op). Rest can lift you out of the penalty
-/// tiers but can never fully clear exhaustion — that requires `applySleep`.
-pub fn applyRest(ent: *entity.Entity) ExhaustionChange {
-    const relieved = ent.fatigue -| fatigue_restore_rest;
+/// Shed `amount` fatigue, clamped so fatigue never drops below `rest_fatigue_floor`
+/// and is never *raised* (shedding while already below the floor is a no-op). Every
+/// waking recovery action must route through this clamp so no combination of them
+/// can reach fatigue 0 — that stays exclusive to `applySleep`.
+fn shedFatigueFloored(ent: *entity.Entity, amount: u16) ExhaustionChange {
+    const relieved = ent.fatigue -| amount;
     ent.fatigue = @min(ent.fatigue, @max(relieved, rest_fatigue_floor));
     return syncExhaustion(ent);
+}
+
+/// Apply a short rest's fatigue relief. Sheds `fatigue_restore_rest` down to the
+/// floor: rest can lift you out of the penalty tiers but can never fully clear
+/// exhaustion — that requires `applySleep`.
+pub fn applyRest(ent: *entity.Entity) ExhaustionChange {
+    return shedFatigueFloored(ent, fatigue_restore_rest);
+}
+
+/// Apply the in-combat `catch breath` fatigue relief. Sheds
+/// `fatigue_restore_catch_breath` with the same floor as `applyRest` — otherwise
+/// spamming it against a weak monster would out-recover `sleep` and hollow the
+/// rest-vs-sleep distinction.
+pub fn applyCatchBreath(ent: *entity.Entity) ExhaustionChange {
+    return shedFatigueFloored(ent, fatigue_restore_catch_breath);
 }
 
 /// Apply a full sleep's fatigue reset. Sleep is the only action that returns
@@ -412,6 +427,26 @@ test "rest never raises fatigue that is already below the floor" {
     ent.fatigue = 5;
     _ = applyRest(&ent);
     try std.testing.expectEqual(@as(u16, 5), ent.fatigue); // no-op, not raised to 20
+    try std.testing.expectEqual(@as(u3, 0), conditions.exhaustionLevel(&ent));
+}
+
+test "catch breath sheds fatigue but floors at rest_fatigue_floor" {
+    var ent = testEntity();
+    ent.fatigue = 60;
+    _ = applyCatchBreath(&ent);
+    try std.testing.expectEqual(@as(u16, 52), ent.fatigue); // 60 - 8, above the floor
+    ent.fatigue = 24;
+    _ = applyCatchBreath(&ent);
+    try std.testing.expectEqual(rest_fatigue_floor, ent.fatigue); // 24 - 8 -> floored at 20, not 16
+    _ = applyCatchBreath(&ent);
+    try std.testing.expectEqual(rest_fatigue_floor, ent.fatigue); // already at floor -> unchanged
+}
+
+test "catch breath never raises fatigue that is already below the floor" {
+    var ent = testEntity();
+    ent.fatigue = 10;
+    _ = applyCatchBreath(&ent);
+    try std.testing.expectEqual(@as(u16, 10), ent.fatigue); // no-op, not raised to 20
     try std.testing.expectEqual(@as(u3, 0), conditions.exhaustionLevel(&ent));
 }
 
