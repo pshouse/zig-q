@@ -855,6 +855,59 @@ test "verifyReferenceGolden matches the committed golden and flags a regression"
     try std.testing.expectError(error.ReferenceCrawlRegression, verifyReferenceGolden(allocator, scratch, "v99"));
 }
 
+test "live reference_crawl output matches the committed golden" {
+    // Runs the real scenario through the in-process DST harness (the same path the
+    // zig-q-dst exe drives) and pins it to references/reference_crawl.txt. This is what
+    // catches a silent drift of the frozen crawl during `zig build test`, instead of
+    // only at gate-vNN time. The null semver override is equivalent to the exe's
+    // `--semver 1.1.0`: version.transcriptSemver pins reference_crawl unconditionally.
+    const dst = @import("dst.zig");
+    const allocator = std.testing.allocator;
+
+    var buf: [131072]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    try dst.runNamedScenario(allocator, "reference_crawl", 42, fbs.writer(), null);
+    const fresh = fbs.getWritten();
+    try std.testing.expect(fresh.len > 0);
+
+    const golden = std.fs.cwd().readFileAlloc(allocator, reference_golden_path, 16 * 1024 * 1024) catch |err| switch (err) {
+        error.FileNotFound => {
+            std.debug.print(
+                "missing {s}; regenerate it with `zig build update-reference-golden` and commit it\n",
+                .{reference_golden_path},
+            );
+            return error.ReferenceGoldenMissing;
+        },
+        else => return err,
+    };
+    defer allocator.free(golden);
+
+    if (!eqlIgnoringCr(fresh, golden)) {
+        var fresh_lines = std.mem.splitScalar(u8, fresh, '\n');
+        var golden_lines = std.mem.splitScalar(u8, golden, '\n');
+        var line_no: usize = 1;
+        while (true) : (line_no += 1) {
+            const f_raw = fresh_lines.next();
+            const g_raw = golden_lines.next();
+            if (f_raw == null and g_raw == null) break;
+            const f = std.mem.trimRight(u8, f_raw orelse "<end of output>", "\r");
+            const g = std.mem.trimRight(u8, g_raw orelse "<end of golden>", "\r");
+            if (!std.mem.eql(u8, f, g)) {
+                std.debug.print("first difference at line {d}:\n  golden: {s}\n  fresh:  {s}\n", .{ line_no, g, f });
+                break;
+            }
+        }
+        std.debug.print(
+            "reference_crawl (seed 42) no longer matches {s}.\n" ++
+                "The frozen reference crawl is part of the determinism contract (see CLAUDE.md);\n" ++
+                "changing it must be intentional and version-gated. If it is, regenerate the\n" ++
+                "golden with `zig build update-reference-golden` and commit the result.\n",
+            .{reference_golden_path},
+        );
+        return error.ReferenceCrawlRegression;
+    }
+}
+
 test "formatV15CompletionSummary uses gate captures only" {
     const allocator = std.testing.allocator;
     const footer = "gate-v15: build_bytes=0 tests=192/192 version=1.5.3 ref_hash=abc fuzz=10000";
