@@ -61,6 +61,7 @@ pub fn main() !void {
             .record = cli.record,
             .semver = cli.semver,
             .playtest = cli.playtest,
+            .live_ai = cli.live_ai,
         });
         return;
     }
@@ -72,9 +73,11 @@ pub fn main() !void {
             \\  zig build run -- --version [--semver <version>]
             \\                                           Print semver and exit
             \\  zig build run -- --demo [seed]             Non-interactive demo (default seed 42)
-            \\  zig build run -- --repl [seed] [--record [path]] [--semver <version>]
+            \\  zig build run -- --repl [seed] [--record [path]] [--semver <version>] [--live-ai]
             \\  zig build run -- --repl --record [seed]    Same; numeric after --record is seed
             \\                                           Interactive REPL (default seed 42)
+            \\                                           --live-ai keeps explore AI on for piped
+            \\                                           scripts (deterministic; off by default)
             \\  zig build dst -- bootstrap [seed]          DST harness: bootstrap scenario
             \\  zig build dst -- explore [seed]            DST harness: explore scenario
             \\  zig build dst -- create [seed]             DST harness: character creation scenario

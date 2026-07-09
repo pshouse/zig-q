@@ -357,6 +357,10 @@ pub fn assertInvariantsTracked(
         if (ent.max_hp > 0 and ent.current_hp > ent.max_hp) return error.HpAboveMax;
         if (ent.conditions.has(.dead) and ent.current_hp != 0) return error.DeadWithPositiveHp;
         if (!ent.conditions.has(.dead) and ent.max_hp > 0 and ent.current_hp == 0) return error.AliveWithZeroHp;
+        // Monsters are exempt from survival pressure (survival.onTick): accrued
+        // hunger/fatigue means the exemption regressed and the floor's population
+        // is quietly ticking toward corpseless exhaustion death.
+        if (ent.is_monster and (ent.hunger != 0 or ent.fatigue != 0)) return error.MonsterSurvivalPressure;
         accounted += 1;
         // Slain monsters are deliberately taken off the tile map (the corpse becomes
         // a floor object and the tile stops blocking movement); a dead player stays
@@ -503,6 +507,19 @@ test "invariants reject hp outside zero max range" {
     ent.current_hp = 0;
     ent.conditions = @import("types.zig").ConditionSet.initEmpty();
     try std.testing.expectError(error.AliveWithZeroHp, assertInvariants(&w, id));
+}
+
+test "invariants reject monsters under survival pressure" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    const id = try w.spawnMonster(.goblin, loc.Loc.init(50, 49), "goblin_0");
+    try assertInvariants(&w, entity.invalid_id);
+    w.store.get(id).?.fatigue = 1;
+    try std.testing.expectError(error.MonsterSurvivalPressure, assertInvariants(&w, entity.invalid_id));
+    w.store.get(id).?.fatigue = 0;
+    w.store.get(id).?.hunger = 1;
+    try std.testing.expectError(error.MonsterSurvivalPressure, assertInvariants(&w, entity.invalid_id));
 }
 
 test "invariants reject dead player without permadeath flag" {
