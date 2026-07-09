@@ -553,6 +553,41 @@ pub const rest_floor_scenario = Scenario{
     },
 };
 
+/// Seed 42: regression for sleep-from-moderate-fatigue. cmdSleep runs all 24
+/// ticks before applySleep resets fatigue, so a sleep started at fatigue 60
+/// climbs through exhaustion tier 4 ("HP max halved", fatigue 70-84) mid-sleep.
+/// The halving is a recovery cap, not a drain: George wakes at full HP — the
+/// removed onTick clamp used to cut him to half permanently. The bandage legs
+/// pin the cap's actual bite: at tier 4 healing stops at effectiveMaxHp, a
+/// bandage that cannot heal is refused (not consumed), and once exhaustion
+/// clears the same bandage heals past the old cap.
+pub const exhausted_sleep_scenario = Scenario{
+    .name = "exhausted_sleep",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 },
+        .{ .choose_class = 1 },
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .set_fatigue = .{ .entity = "entity_0", .value = 60 } },
+        .{ .command = "stats" }, // HP: 13 before sleeping
+        .{ .command = "sleep" }, // fatigue peaks at 84 (tier 4) before the reset
+        .{ .command = "stats" }, // HP: 13 — sleeping cost nothing
+        .{ .set_fatigue = .{ .entity = "entity_0", .value = 75 } }, // tier 4 while awake
+        .{ .set_hp = .{ .entity = "entity_0", .current = 3 } },
+        .{ .give_item = .{ .entity = "entity_0", .item = .bandage, .count = 1 } },
+        .{ .command = "use bandage" }, // heals 3, stopping at the halved cap (6)
+        .{ .command = "use bandage" }, // at the cap: refused, bandage kept
+        .{ .set_fatigue = .{ .entity = "entity_0", .value = 0 } }, // exhaustion clears
+        .{ .command = "use bandage" }, // cap lifted: full 5 hp heal resumes
+        .{ .command = "stats" },
+        .{ .command = "exit" },
+    },
+};
+
 /// Seed 42: survival needs walkthrough with save/load; byte-stable DST transcript.
 pub const reference_survive_scenario = Scenario{
     .name = "reference_survive",
@@ -1507,6 +1542,8 @@ pub fn scenarioByName(name: []const u8, seed: u64) ?Scenario {
         return Scenario{ .name = "sleep_cycle", .seed = seed, .steps = sleep_cycle_scenario.steps };
     if (std.mem.eql(u8, name, "rest_floor"))
         return Scenario{ .name = "rest_floor", .seed = seed, .steps = rest_floor_scenario.steps };
+    if (std.mem.eql(u8, name, "exhausted_sleep"))
+        return Scenario{ .name = "exhausted_sleep", .seed = seed, .steps = exhausted_sleep_scenario.steps };
     if (std.mem.eql(u8, name, "reference_survive"))
         return Scenario{ .name = "reference_survive", .seed = seed, .steps = reference_survive_scenario.steps };
     if (std.mem.eql(u8, name, "monster_endurance"))
@@ -1935,6 +1972,23 @@ test "dst rest_floor scenario is byte-identical across runs" {
     try std.testing.expect(std.mem.indexOf(u8, out, "exhaustion=1") != null);
     // Only sleep resets fatigue to 0.
     try std.testing.expect(std.mem.indexOf(u8, out, "slept (ticks=") != null);
+}
+
+test "dst exhausted_sleep scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "exhausted_sleep", 65536);
+    defer allocator.free(out);
+    // Sleep crossed the tier-4 band; the fatigue reset landed...
+    try std.testing.expect(std.mem.indexOf(u8, out, "slept (ticks=24 fatigue=0)") != null);
+    // ...and no HP was confiscated anywhere in the run: with no combat, poison,
+    // or starvation here, any "lost N hp" line is the old onTick clamp resurfacing.
+    try std.testing.expect(std.mem.indexOf(u8, out, "lost ") == null);
+    // At tier 4 healing stops at the halved cap (13 -> 6): 3 hp, not bandage_heal.
+    try std.testing.expect(std.mem.indexOf(u8, out, "used bandage; healed 3 hp") != null);
+    // At the cap the bandage is refused outright.
+    try std.testing.expect(std.mem.indexOf(u8, out, "too exhausted to heal (hp=6 capped at 6)") != null);
+    // Exhaustion cleared, the full flat heal resumes.
+    try std.testing.expect(std.mem.indexOf(u8, out, "used bandage; healed 5 hp") != null);
 }
 
 test "dst reference_survive scenario is byte-identical across runs" {
