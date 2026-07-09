@@ -113,6 +113,7 @@ zig build dst -- @scenarios/reference_crawl.txt 42
 - **combat_flee** — exhausted fighter attacks then `flee`s; adjacent goblin gets one opportunity attack, combat ends
 - **catch_breath** — exhausted fighter trades combat turns to `catch breath`, shedding fatigue as the goblin counters
 - **rest_floor** — rest sheds fatigue only to the floor (20); only sleep clears exhaustion (survival-economy guard)
+- **starve_out** — starvation drains HP to 0 outside combat; permadeath gate blocks further play (walking-dead guard)
 - **@scenarios/*.txt** — data-driven step files (`load_floor`, `command`, `spawn`, …)
 
 Floors 2+ are generated deterministically from `(seed, floor_index)`; floor 1 stays handcrafted for regression.

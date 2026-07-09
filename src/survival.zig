@@ -199,9 +199,10 @@ fn applyHpDot(w: *world.World, ent: *entity.Entity, amount: u32) void {
     if (ent.current_hp == 0) return;
     ent.current_hp -|= amount;
     if (ent.current_hp == 0) {
-        if (w.combat) |c| {
-            if (ent.id == c.player_id) w.markPlayerDead(ent.id);
-        }
+        // Permadeath is authoritative regardless of combat state: starving or
+        // succumbing to poison in the open must end the run just like a killing
+        // blow, or the player lingers as a walking dead actor.
+        if (!ent.is_monster) w.markPlayerDead(ent.id);
         conditions.markDead(ent);
     }
 }
@@ -221,9 +222,9 @@ pub fn onTick(w: *world.World, ent: *entity.Entity) void {
     clampHpToEffectiveMax(ent);
 
     if (conditions.exhaustionLevel(ent) >= 6) {
-        if (w.combat) |c| {
-            if (ent.id == c.player_id) w.markPlayerDead(ent.id);
-        }
+        // Same permadeath rule as applyHpDot: collapse from exhaustion ends the
+        // run whether or not a fight is in progress.
+        if (!ent.is_monster) w.markPlayerDead(ent.id);
         conditions.markDead(ent);
     }
 }
@@ -310,6 +311,45 @@ test "starving deals hp damage each tick" {
     onTick(&w, &ent);
     try std.testing.expectEqual(@as(u32, 9), ent.current_hp);
     try std.testing.expect(conditions.has(&ent, .starving));
+}
+
+test "starvation death outside combat is permadeath" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    const id = try w.spawnTestPlayer(@import("loc.zig").Loc.init(49, 49));
+    const ent = w.store.get(id).?;
+    ent.hunger = hunger_max;
+    ent.current_hp = 1;
+    w.tick();
+    try std.testing.expect(conditions.isDead(ent));
+    try std.testing.expect(w.isPlayerDead());
+}
+
+test "exhaustion collapse outside combat is permadeath" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    const id = try w.spawnTestPlayer(@import("loc.zig").Loc.init(49, 49));
+    const ent = w.store.get(id).?;
+    ent.fatigue = fatigue_max;
+    w.tick();
+    try std.testing.expect(conditions.isDead(ent));
+    try std.testing.expectEqual(@as(u32, 0), ent.current_hp);
+    try std.testing.expect(w.isPlayerDead());
+}
+
+test "monster survival death does not trigger permadeath" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    const id = try w.spawnMonster(.goblin, @import("loc.zig").Loc.init(50, 49), "goblin_0");
+    const ent = w.store.get(id).?;
+    conditions.apply(ent, .poisoned);
+    ent.current_hp = 1;
+    w.tick();
+    try std.testing.expect(conditions.isDead(ent));
+    try std.testing.expect(!w.isPlayerDead());
 }
 
 test "food reduces hunger" {

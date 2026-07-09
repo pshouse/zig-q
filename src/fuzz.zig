@@ -342,6 +342,12 @@ pub fn assertInvariantsTracked(
             const player = w.store.get(player_id) orelse return error.MissingPlayer;
             if (!conditions.isDead(player)) return error.DeadFlagMismatch;
         }
+    } else if (player_id != entity.invalid_id) {
+        // Reverse direction: a player entity carrying `.dead` while the world
+        // flag is unset is the walking-dead permadeath violation.
+        if (w.store.get(player_id)) |player| {
+            if (player.conditions.has(.dead)) return error.WalkingDeadPlayer;
+        }
     }
 
     if (w.has_dungeon) {
@@ -448,6 +454,17 @@ test "invariants reject hp outside zero max range" {
     ent.current_hp = 0;
     ent.conditions = @import("types.zig").ConditionSet.initEmpty();
     try std.testing.expectError(error.AliveWithZeroHp, assertInvariants(&w, id));
+}
+
+test "invariants reject dead player without permadeath flag" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    const id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    conditions.markDead(w.store.get(id).?);
+    try std.testing.expectError(error.WalkingDeadPlayer, assertInvariants(&w, id));
+    w.markPlayerDead(id);
+    try assertInvariants(&w, id);
 }
 
 test "invariants hold for known creation script" {
