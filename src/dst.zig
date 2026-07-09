@@ -467,6 +467,31 @@ pub const starve_scenario = Scenario{
     },
 };
 
+/// Seed 42: the walking-dead permadeath guard. Starvation drains the last HP
+/// while no combat is in progress; the run must still end — every command after
+/// the fatal tick hits the permadeath gate exactly as if a monster had landed
+/// the killing blow.
+pub const starve_out_scenario = Scenario{
+    .name = "starve_out",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 },
+        .{ .choose_class = 1 },
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .set_hunger = .{ .entity = "entity_0", .value = 100 } },
+        .{ .set_hp = .{ .entity = "entity_0", .current = 3 } },
+        .{ .tick = 3 }, // starvation DoT out of combat: hp 3 -> 0
+        .{ .command = "move east" }, // blocked: permadeath gate
+        .{ .command = "look" }, // blocked: permadeath gate
+        .{ .command = "stats" }, // allowed for the dead: shows permadeath status
+        .{ .command = "exit" },
+    },
+};
+
 pub const sleep_cycle_scenario = Scenario{
     .name = "sleep_cycle",
     .seed = 42,
@@ -1111,6 +1136,8 @@ pub fn scenarioByName(name: []const u8, seed: u64) ?Scenario {
         return Scenario{ .name = "survive", .seed = seed, .steps = survive_scenario.steps };
     if (std.mem.eql(u8, name, "starve"))
         return Scenario{ .name = "starve", .seed = seed, .steps = starve_scenario.steps };
+    if (std.mem.eql(u8, name, "starve_out"))
+        return Scenario{ .name = "starve_out", .seed = seed, .steps = starve_out_scenario.steps };
     if (std.mem.eql(u8, name, "sleep_cycle"))
         return Scenario{ .name = "sleep_cycle", .seed = seed, .steps = sleep_cycle_scenario.steps };
     if (std.mem.eql(u8, name, "rest_floor"))
@@ -1467,6 +1494,16 @@ test "dst starve scenario is byte-identical across runs" {
     try std.testing.expect(std.mem.indexOf(u8, out, "hunger=100") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "starving") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "moved to") != null);
+}
+
+test "dst starve_out scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "starve_out", 131072);
+    // Death lands via the tick step with no combat in progress, yet the gate holds.
+    try std.testing.expect(std.mem.indexOf(u8, out, "you are dead (permadeath)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "status: dead (permadeath)") != null);
+    // The post-death move must be blocked, not executed.
+    try std.testing.expect(std.mem.indexOf(u8, out, "moved to") == null);
 }
 
 test "dst sleep_cycle scenario is byte-identical across runs" {
