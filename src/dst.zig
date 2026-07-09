@@ -611,6 +611,32 @@ pub const monster_endurance_scenario = Scenario{
     },
 };
 
+/// Seed 42: a poisoned goblin bleeds out from survival DoT with no fight in
+/// progress. The death must mirror a combat kill: the corpse (with loot) shows
+/// up in `nearby:`, the goblin leaves the viewport and tile map, and the
+/// player can walk onto the freed tile.
+pub const bleed_out_scenario = Scenario{
+    .name = "bleed_out",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 },
+        .{ .choose_class = 1 },
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .spawn_monster = .{ .kind = .goblin, .name = "goblin_0", .x = 50, .y = 49 } },
+        .{ .apply_condition = .{ .entity = "goblin_0", .condition = .poisoned } },
+        .{ .set_hp = .{ .entity = "goblin_0", .current = 2 } },
+        .{ .tick = 2 }, // poison DoT out of combat: hp 2 -> 0, corpse drops
+        .{ .command = "look" },
+        .{ .command = "move south" }, // onto the corpse tile — no longer blocked
+        .list_floor_objects,
+        .{ .command = "exit" },
+    },
+};
+
 pub const hunt_scenario = Scenario{
     .name = "hunt",
     .seed = 42,
@@ -1461,6 +1487,8 @@ pub fn scenarioByName(name: []const u8, seed: u64) ?Scenario {
         return Scenario{ .name = "reference_survive", .seed = seed, .steps = reference_survive_scenario.steps };
     if (std.mem.eql(u8, name, "monster_endurance"))
         return Scenario{ .name = "monster_endurance", .seed = seed, .steps = monster_endurance_scenario.steps };
+    if (std.mem.eql(u8, name, "bleed_out"))
+        return Scenario{ .name = "bleed_out", .seed = seed, .steps = bleed_out_scenario.steps };
     if (std.mem.eql(u8, name, "heal_bandage"))
         return Scenario{ .name = "heal_bandage", .seed = seed, .steps = heal_bandage_scenario.steps };
     if (std.mem.eql(u8, name, "trap_floor"))
@@ -1901,6 +1929,18 @@ test "dst monster_endurance scenario is byte-identical across runs" {
     try std.testing.expect(std.mem.indexOf(u8, out, "step tick count=45 total=135") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "attack entity_0->goblin_0 roll=") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "no valid attack target") == null);
+}
+
+test "dst bleed_out scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "bleed_out", 65536);
+    defer allocator.free(out);
+    // The DoT death must mirror a combat kill: corpse with loot in `nearby:`,
+    // goblin gone from `visible:`, and its tile no longer blocking movement.
+    try std.testing.expect(std.mem.indexOf(u8, out, "corpse goblin_0 at (50,49) holds short sword") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "goblin_0 (goblin)") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "moved to (50,49)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "floor_object corpse (50,49) goblin_0") != null);
 }
 
 test "dst heal_bandage scenario is byte-identical across runs" {

@@ -124,6 +124,7 @@ zig build dst -- @scenarios/reference_crawl.txt 42
 - **save_v4_roundtrip** — schema v4 `danger_tier` survives save/load
 - **survival_economy** — food-vs-ticks audit per generated floor: planned rations, spawn→stairs distance, minimum crossing cost (danger floors guarantee ≥ 1 ration)
 - **monster_endurance** — goblin outlives 135 ticks of world clock and is still attackable; regression for monsters dying of exhaustion (survival pressure is player-only)
+- **bleed_out** — poisoned goblin dies of DoT outside combat; the death mirrors a combat kill (corpse with loot drops, tile map frees, player walks onto the tile)
 - **@scenarios/*.txt** — data-driven step files (`load_floor`, `command`, `spawn`, …)
 
 Floors 2+ are generated deterministically from `(seed, floor_index)`; floor 1 stays handcrafted for regression.
