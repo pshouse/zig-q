@@ -852,6 +852,30 @@ pub const combat_reposition_scenario = Scenario{
     },
 };
 
+/// Seed 42: viewport glyph legend. Live monsters render as kind letters
+/// (g goblin, s skeleton) instead of the old ambiguous `*`; a monster that
+/// dies out of combat (survival death spawns no corpse and leaves the entity
+/// in the tile map) stops rendering entirely instead of posing as a threat.
+pub const glyph_look_scenario = Scenario{
+    .name = "glyph_look",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 },
+        .{ .choose_class = 1 },
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .spawn_monster = .{ .kind = .goblin, .name = "goblin_0", .x = 50, .y = 49 } },
+        .{ .spawn_monster = .{ .kind = .skeleton, .name = "skeleton_0", .x = 49, .y = 50 } },
+        .look,
+        .{ .set_hp = .{ .entity = "skeleton_0", .current = 0 } },
+        .look,
+        .{ .command = "exit" },
+    },
+};
+
 fn floor1ProfileForScenario(name: []const u8) dungeon.Floor1Profile {
     if (std.mem.eql(u8, name, "descend_crawl")) return .v09;
     if (std.mem.eql(u8, name, "descend_crawl_file")) return .v09;
@@ -1183,6 +1207,8 @@ pub fn scenarioByName(name: []const u8, seed: u64) ?Scenario {
         return Scenario{ .name = "catch_breath", .seed = seed, .steps = catch_breath_scenario.steps };
     if (std.mem.eql(u8, name, "combat_reposition"))
         return Scenario{ .name = "combat_reposition", .seed = seed, .steps = combat_reposition_scenario.steps };
+    if (std.mem.eql(u8, name, "glyph_look"))
+        return Scenario{ .name = "glyph_look", .seed = seed, .steps = glyph_look_scenario.steps };
     return null;
 }
 
@@ -1476,7 +1502,9 @@ test "dst hunt scenario is byte-identical across runs" {
     const out = try expectScenarioDeterministic(allocator, "hunt", 131072);
     try std.testing.expect(std.mem.indexOf(u8, out, "waited") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "look floor=1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "*") != null);
+    // The hunting goblin is visible in the grid as its kind glyph.
+    try std.testing.expect(std.mem.indexOf(u8, out, ".g.") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "*") == null);
 }
 
 test "dst flee scenario is byte-identical across runs" {
@@ -1616,6 +1644,21 @@ test "dst combat_reposition scenario is byte-identical across runs" {
     try std.testing.expect(std.mem.indexOf(u8, out[move_away..move_back], "attack goblin_0->") == null);
     // Stepping back adjacent revives the exchange, proving combat never ended.
     try std.testing.expect(std.mem.indexOf(u8, out[move_back..], "attack goblin_0->entity_0") != null);
+}
+
+test "dst glyph_look scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "glyph_look", 65536);
+    // Live monsters render as kind glyphs in the viewport grid, never `*`.
+    try std.testing.expect(std.mem.indexOf(u8, out, "#.@s#") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "#.g.#") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "*") == null);
+    // After the skeleton dies out of combat (no corpse object, entity still in
+    // the tile map) it stops rendering; the live goblin keeps its glyph.
+    const after_death = out[std.mem.indexOf(u8, out, "step set_hp").?..];
+    try std.testing.expect(std.mem.indexOf(u8, after_death, "@s") == null);
+    try std.testing.expect(std.mem.indexOf(u8, after_death, "#.@.#") != null);
+    try std.testing.expect(std.mem.indexOf(u8, after_death, "#.g.#") != null);
 }
 
 test "demo output is deterministic for fixed seed" {

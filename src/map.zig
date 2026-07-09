@@ -57,6 +57,13 @@ pub const TileMap = struct {
         return list.items.len;
     }
 
+    /// Ids in placement order — stable, so glyph choice for a shared tile is
+    /// deterministic.
+    pub fn idsAt(self: *const TileMap, position: loc.Loc) []const entity.EntityId {
+        const list = self.cells.get(position) orelse return &.{};
+        return list.items;
+    }
+
     pub fn occupiedCellCount(self: *const TileMap) usize {
         return self.cells.count();
     }

@@ -38,6 +38,24 @@ pub fn formatOnDescendTile(w: *const world.World, center: loc.Loc, writer: anyty
 }
 
 
+/// Grid glyph for the first live entity on the tile: monsters render as their
+/// kind letter (monsters.glyph), anything else as `fallback`. Dead entities
+/// never render — a monster that dies out of combat stays in the tile map, and
+/// drawing it would be indistinguishable from a live threat (actual corpses
+/// are floor objects, reported by the `nearby:` list, not the grid).
+fn liveEntityGlyph(w: *const world.World, tile: loc.Loc, fallback: u8) ?u8 {
+    const monsters = @import("monsters.zig");
+    for (w.tile_map.idsAt(tile)) |id| {
+        const ent = w.store.get(id) orelse continue;
+        if (conditions.isDead(ent)) continue;
+        if (ent.is_monster) {
+            if (monsters.glyphForName(ent.char.name)) |g| return g;
+        }
+        return fallback;
+    }
+    return null;
+}
+
 pub fn renderViewport(w: *const world.World, center: loc.Loc, radius: u8, writer: anytype) !void {
     const r0 = center.x;
     const c0 = center.y;
@@ -49,20 +67,19 @@ pub fn renderViewport(w: *const world.World, center: loc.Loc, radius: u8, writer
         var c: u64 = 0;
         while (c < c_extent * 2 + 1) : (c += 1) {
             const tile = loc.Loc.init(r0 -% r_extent +% r, c0 -% c_extent +% c);
-            const count = w.tile_map.entityCountAt(tile);
             if (tile.x == center.x and tile.y == center.y) {
                 try writer.print("@", .{});
             } else if (w.has_dungeon) {
                 const t = w.terrain.get(tile) orelse terrain.Tile.floor;
                 if (t == .wall or t == .door or t == .stairs) {
                     try writer.print("{c}", .{t.renderChar()});
-                } else if (count > 0) {
-                    try writer.print("*", .{});
+                } else if (liveEntityGlyph(w, tile, '*')) |g| {
+                    try writer.print("{c}", .{g});
                 } else {
                     try writer.print(".", .{});
                 }
-            } else if (count > 0) {
-                try writer.print("#", .{});
+            } else if (liveEntityGlyph(w, tile, '#')) |g| {
+                try writer.print("{c}", .{g});
             } else {
                 try writer.print(".", .{});
             }
@@ -308,6 +325,43 @@ test "look reports standing on stairs" {
     var fbs = std.io.fixedBufferStream(&buf);
     try renderLook(&w, id, false, fbs.writer());
     try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "you are on stairs down") != null);
+}
+
+test "viewport renders live monsters as kind glyphs, not *" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    _ = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    _ = try w.spawnMonster(.goblin, loc.Loc.init(50, 49), "goblin_0");
+    _ = try w.spawnMonster(.skeleton, loc.Loc.init(49, 50), "skeleton_0");
+
+    var buf: [256]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    try renderViewport(&w, loc.Loc.init(49, 49), 1, fbs.writer());
+    const out = fbs.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, out, "@s") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "g") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "*") == null);
+}
+
+test "viewport skips dead entities left in the tile map" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    _ = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    const id = try w.spawnMonster(.goblin, loc.Loc.init(50, 49), "goblin_0");
+    // Survival deaths mark the entity dead without removing it from the tile
+    // map (unlike combat kills) — the grid must not show it as a live threat.
+    conditions.markDead(w.store.get(id).?);
+
+    var buf: [256]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    try renderViewport(&w, loc.Loc.init(49, 49), 1, fbs.writer());
+    const out = fbs.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, out, "g") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "*") == null);
 }
 
 test "look lists visible entity names when enabled" {

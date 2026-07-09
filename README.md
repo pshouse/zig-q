@@ -115,6 +115,7 @@ zig build dst -- @scenarios/reference_crawl.txt 42
 - **combat_reposition** — step out of the goblin's reach mid-combat, then `end turn` / `catch breath`; the unreachable goblin forfeits its counter (crash regression), re-engage proves combat stayed live
 - **rest_floor** — rest sheds fatigue only to the floor (20); only sleep clears exhaustion (survival-economy guard)
 - **starve_out** — starvation drains HP to 0 outside combat; permadeath gate blocks further play (walking-dead guard)
+- **glyph_look** — viewport glyph legend: live monsters render as kind letters (`g` goblin, `s` skeleton), dead ones stop rendering; `*` no longer marks monsters
 - **@scenarios/*.txt** — data-driven step files (`load_floor`, `command`, `spawn`, …)
 
 Floors 2+ are generated deterministically from `(seed, floor_index)`; floor 1 stays handcrafted for regression.

@@ -63,6 +63,24 @@ pub fn armorClass(kind: Kind) u32 {
     return block(kind).ac;
 }
 
+/// Viewport glyph for a live monster of this kind. Lowercase letters are
+/// reserved for monsters (`@` player, `*` other entities, `#`/`.`/`>`/`+`
+/// terrain); adding a Kind forces a glyph choice here.
+pub fn glyph(kind: Kind) u8 {
+    return switch (kind) {
+        .goblin => 'g',
+        .skeleton => 's',
+    };
+}
+
+/// Entities carry their kind only as `char.name` (set from `block().name`,
+/// preserved verbatim across save/load), so the renderer resolves glyphs by
+/// name. Returns null for non-monster names.
+pub fn glyphForName(name: []const u8) ?u8 {
+    const kind = std.meta.stringToEnum(Kind, name) orelse return null;
+    return glyph(kind);
+}
+
 test "goblin block stats" {
     const b = block(.goblin);
     try std.testing.expectEqual(@as(u32, 7), b.max_hp);
@@ -73,6 +91,22 @@ test "skeleton block stats" {
     const b = block(.skeleton);
     try std.testing.expectEqual(@as(u32, 13), b.max_hp);
     try std.testing.expectEqual(@as(u32, 13), b.ac);
+}
+
+test "every kind maps block name to its enum tag" {
+    // glyphForName resolves via the tag name while entities store block().name;
+    // the two must stay identical or spawned monsters lose their glyph.
+    for (std.enums.values(Kind)) |kind| {
+        try std.testing.expectEqualStrings(@tagName(kind), block(kind).name);
+    }
+}
+
+test "glyph mapping per kind" {
+    try std.testing.expectEqual(@as(u8, 'g'), glyph(.goblin));
+    try std.testing.expectEqual(@as(u8, 's'), glyph(.skeleton));
+    try std.testing.expectEqual(@as(?u8, 'g'), glyphForName("goblin"));
+    try std.testing.expectEqual(@as(?u8, 's'), glyphForName("skeleton"));
+    try std.testing.expectEqual(@as(?u8, null), glyphForName("George"));
 }
 
 test "spawnMonster skeleton uses skeleton ac in combat" {
