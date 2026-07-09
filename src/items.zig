@@ -142,10 +142,14 @@ pub fn idTag(id: Id) []const u8 {
     return @tagName(id);
 }
 
-/// Applies flat bandage healing; returns HP restored (capped by room to max_hp).
-pub fn applyBandageHeal(ent: *entity.Entity) u16 {
-    if (ent.current_hp >= ent.max_hp) return 0;
-    const room: u32 = ent.max_hp - ent.current_hp;
+/// Applies flat bandage healing; returns HP restored. Healing never raises HP
+/// above `hp_cap` (the caller passes `survival.effectiveMaxHp`, the exhaustion
+/// recovery ceiling — a parameter so item mechanics stay below the survival
+/// layer) nor above `max_hp`.
+pub fn applyBandageHeal(ent: *entity.Entity, hp_cap: u32) u16 {
+    const cap = @min(hp_cap, ent.max_hp);
+    if (ent.current_hp >= cap) return 0;
+    const room: u32 = cap - ent.current_hp;
     const applied: u32 = @min(@as(u32, bandage_heal), room);
     ent.current_hp += applied;
     return @intCast(applied);

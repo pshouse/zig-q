@@ -824,8 +824,15 @@ fn cmdUse(ctx: *Context, name: []const u8, writer: anytype) !Result {
             try writer.print("you are not wounded\n", .{});
             return .continue_repl;
         }
+        // Exhaustion tier 4+ halves the recovery ceiling (survival.effectiveMaxHp).
+        // A bandage that cannot heal is refused, not consumed.
+        const heal_cap = survival.effectiveMaxHp(ent);
+        if (ent.current_hp >= heal_cap) {
+            try writer.print("too exhausted to heal (hp={} capped at {})\n", .{ ent.current_hp, heal_cap });
+            return .continue_repl;
+        }
         _ = ent.inventory.remove(id, 1);
-        const applied = items.applyBandageHeal(ent);
+        const applied = items.applyBandageHeal(ent, heal_cap);
         try writer.print("used bandage; healed {} hp\n", .{applied});
         try tickPlayerAction(ctx, 1, writer);
         try finishExploreAction(ctx, writer);
@@ -1842,9 +1849,52 @@ test "applyBandageHeal restores flat bandage_heal on wounded player" {
     const max_hp = ent.max_hp;
     ent.current_hp = max_hp - items.bandage_heal;
 
-    const applied = items.applyBandageHeal(ent);
+    const applied = items.applyBandageHeal(ent, survival.effectiveMaxHp(ent));
     try std.testing.expectEqual(items.bandage_heal, applied);
     try std.testing.expectEqual(max_hp, ent.current_hp);
+}
+
+test "applyBandageHeal stops at the exhaustion recovery cap" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+
+    const ctx = try descendTestCtx(allocator, &w);
+    const ent = w.store.get(ctx.player_id).?;
+    ent.fatigue = 75; // exhaustion tier 4: cap = max_hp / 2
+    _ = survival.syncExhaustion(ent);
+    const cap = survival.effectiveMaxHp(ent);
+    try std.testing.expectEqual(ent.max_hp / 2, cap);
+
+    ent.current_hp = cap - 2;
+    const applied = items.applyBandageHeal(ent, cap);
+    try std.testing.expectEqual(@as(u16, 2), applied); // healed to the cap, not bandage_heal
+    try std.testing.expectEqual(cap, ent.current_hp);
+    try std.testing.expectEqual(@as(u16, 0), items.applyBandageHeal(ent, cap)); // at cap: no-op
+    try std.testing.expectEqual(cap, ent.current_hp);
+}
+
+test "use bandage at the exhaustion cap is refused and not consumed" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+
+    var ctx = try descendTestCtx(allocator, &w);
+    const ent = w.store.get(ctx.player_id).?;
+    try std.testing.expect(ent.inventory.findStack(.bandage).?.count == 1);
+    ent.fatigue = 75; // exhaustion tier 4
+    _ = survival.syncExhaustion(ent);
+    ent.current_hp = survival.effectiveMaxHp(ent); // wounded, but at the halved cap
+
+    var buf: [512]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try execute(&ctx, parseLine("use bandage"), fbs.writer());
+    const out = fbs.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, out, "too exhausted to heal") != null);
+    try std.testing.expectEqual(survival.effectiveMaxHp(ent), ent.current_hp);
+    try std.testing.expect(ent.inventory.has(.bandage)); // refused, not consumed
 }
 
 test "wound and bandage via execute on minimal repl path" {

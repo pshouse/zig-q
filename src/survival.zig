@@ -44,6 +44,12 @@ pub fn giveStarterKit(allocator: std.mem.Allocator, ent: *entity.Entity) !void {
     try ent.inventory.add(allocator, .bandage, starter_bandage);
 }
 
+/// Recovery ceiling while exhausted: at exhaustion 4+ ("HP max halved") healing
+/// cannot raise current HP above half max. This is a cap only — crossing into
+/// the tier never drains HP the entity already has. It used to: onTick clamped
+/// current HP to this value, so `sleep` (the only full fatigue reset, whose 24
+/// ticks climb through tier 4 whenever it starts at fatigue >= 46) silently and
+/// permanently cost half your HP — the cap recovered on waking, the HP did not.
 pub fn effectiveMaxHp(ent: *const entity.Entity) u32 {
     var max = ent.max_hp;
     if (conditions.exhaustionLevel(ent) >= 4) {
@@ -244,7 +250,9 @@ pub fn onTick(w: *world.World, ent: *entity.Entity) void {
     if (conditions.has(ent, .starving)) applyHpDot(w, ent, 1);
 
     _ = syncExhaustion(ent);
-    clampHpToEffectiveMax(ent);
+    // Deliberately no clamp of current HP to effectiveMaxHp here: the tier-4
+    // halving caps recovery (see effectiveMaxHp), it does not confiscate HP.
+    // HP loss from exhaustion comes only from the tier-6 collapse below.
 
     if (conditions.exhaustionLevel(ent) >= 6) {
         // Same permadeath rule as applyHpDot: collapse from exhaustion ends the
@@ -252,11 +260,6 @@ pub fn onTick(w: *world.World, ent: *entity.Entity) void {
         if (!ent.is_monster) w.markPlayerDead(ent.id);
         conditions.markDead(ent);
     }
-}
-
-fn clampHpToEffectiveMax(ent: *entity.Entity) void {
-    const cap = effectiveMaxHp(ent);
-    if (ent.current_hp > cap) ent.current_hp = cap;
 }
 
 pub fn eatFood(ent: *entity.Entity, id: items.Id) bool {
@@ -532,6 +535,38 @@ test "only sleep resets fatigue to zero and clears exhaustion" {
     try std.testing.expectEqual(@as(u16, 0), ent.fatigue);
     try std.testing.expectEqual(@as(u3, 0), conditions.exhaustionLevel(&ent));
     try std.testing.expect(!conditions.has(&ent, .exhaustion));
+}
+
+test "crossing exhaustion tier 4 halves the recovery cap but drains no hp" {
+    var ent = testEntity();
+    ent.fatigue = 69; // one tick below tier 4
+    var w: world.World = undefined;
+    w.combat = null;
+    onTick(&w, &ent); // fatigue 70 -> exhaustion 4
+    try std.testing.expectEqual(@as(u3, 4), conditions.exhaustionLevel(&ent));
+    try std.testing.expectEqual(@as(u32, 5), effectiveMaxHp(&ent)); // cap halved (10 -> 5)...
+    try std.testing.expectEqual(@as(u32, 10), ent.current_hp); // ...but current hp intact
+}
+
+test "sleeping through the tier 4 band keeps current hp" {
+    // Reproduces the cmdSleep shape: 24 ticks accrue fatigue first, applySleep
+    // resets it after. Started at fatigue 60 the sleeper peaks at 84 (tier 4);
+    // waking must cost nothing — sleep is the only full fatigue reset, so a
+    // clamp here made recovery itself the thing that halved your HP for good.
+    var ent = testEntity();
+    ent.fatigue = 60;
+    ent.sleeping = true;
+    var w: world.World = undefined;
+    w.combat = null;
+    var i: u32 = 0;
+    while (i < sleep_ticks) : (i += 1) onTick(&w, &ent);
+    try std.testing.expectEqual(@as(u16, 84), ent.fatigue);
+    ent.sleeping = false;
+    _ = applySleep(&ent);
+    try std.testing.expectEqual(@as(u16, 0), ent.fatigue);
+    try std.testing.expectEqual(@as(u3, 0), conditions.exhaustionLevel(&ent));
+    try std.testing.expectEqual(@as(u32, 10), ent.current_hp);
+    try std.testing.expectEqual(@as(u32, 10), effectiveMaxHp(&ent));
 }
 
 test "ticks increase hunger" {
