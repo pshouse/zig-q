@@ -41,6 +41,7 @@ zig build run -- --repl 42
 zig build run -- --repl 42 --record
 zig build run -- --repl --record 42
 zig build run -- --repl 42 --record my-session.txt
+zig build run -- --repl 42 --live-ai
 ```
 
 Use `--record` to save a transcript (default: `transcripts/session-<timestamp>-seed<N>.txt`). A bare number after `--record` is the **seed**, not a filename — use a path like `transcripts/foo.txt` for a custom file. Transcripts include `# version=<semver>`, `# seed=`, and `> command` lines. Override version metadata with `--semver 0.6.0-dev`.
@@ -76,6 +77,8 @@ Piped crawl script (PowerShell):
 ```
 
 Use newline-terminated lines. Each line is echoed as `> <command>` in the transcript.
+
+Piped sessions run with **explore AI off** by default: monsters do not patrol, chase, or ambush between your actions, so scripted verification paths stay stable. Pass `--live-ai` to keep explore AI on in a piped session — monsters roam exactly as in an interactive TTY run. AI draws come from the seeded stream in a fixed order, so a `--live-ai` script is still byte-identical across replays. DST scenarios and wave-gate captures do not use this flag; their golden transcripts are unchanged.
 
 ## DST harness (deterministic simulation testing)
 
