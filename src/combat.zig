@@ -499,22 +499,17 @@ pub fn flee(w: *world.World, actor_id: entity.EntityId, writer: anytype) !void {
 
 /// In-combat recovery: the player catches their breath, shedding a little fatigue (and
 /// possibly easing exhaustion), but yields the turn so monsters still counterattack. Softens
-/// the exhaustion→disadvantage attrition loop without escaping the fight.
+/// the exhaustion→disadvantage attrition loop without escaping the fight. Clamped to
+/// `survival.rest_fatigue_floor` like `rest` — only `sleep` fully clears exhaustion.
 pub fn catchBreath(w: *world.World, actor_id: entity.EntityId, writer: anytype) !void {
     if (!isInCombat(w)) return error.NotInCombat;
     const active = activeTurn(w) orelse return error.NoActiveTurn;
     if (active != actor_id) return error.NotYourTurn;
 
     const player = w.store.get(actor_id) orelse return error.AttackerNotFound;
-    const before_ex = conditions.exhaustionLevel(player);
-    if (player.fatigue >= survival.fatigue_restore_catch_breath) {
-        player.fatigue -= survival.fatigue_restore_catch_breath;
-    } else {
-        player.fatigue = 0;
-    }
-    _ = survival.syncExhaustion(player);
+    const change = survival.applyCatchBreath(player);
     try writer.print("{s} catches their breath (fatigue={})\n", .{ player.name, player.fatigue });
-    try survival.printExhaustionNotice(before_ex, conditions.exhaustionLevel(player), writer);
+    try survival.printExhaustionNotice(change.before, change.after, writer);
 
     try passTurnToOpponents(w, writer);
 }
@@ -755,6 +750,26 @@ test "catch breath sheds fatigue and eases exhaustion" {
     const out = fbs.getWritten();
     try std.testing.expect(std.mem.indexOf(u8, out, "catches their breath") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "exhaustion eased to level 1") != null);
+}
+
+test "catch breath floors at rest_fatigue_floor instead of reaching zero" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    const goblin_id = try w.spawnMonster(.goblin, loc.Loc.init(50, 49), "goblin_0");
+    const player = w.store.get(player_id).?;
+    player.max_hp = 60;
+    player.current_hp = 60;
+    player.fatigue = 24; // a full 8-point shed would land at 16, below the rest floor
+    _ = survival.syncExhaustion(player);
+    try enterCombat(&w, player_id, goblin_id);
+
+    var buf: [512]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    try catchBreath(&w, player_id, fbs.writer());
+    // The fatigue line prints before the monster counter's clock tick, so it is stable.
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "catches their breath (fatigue=20)") != null);
 }
 
 test "catch breath outside combat errors" {
