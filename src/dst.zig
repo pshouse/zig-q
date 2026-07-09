@@ -566,6 +566,39 @@ pub const reference_survive_scenario = Scenario{
     },
 };
 
+/// Seed 42: monsters must outlive a long stretch of the survival clock. Regression
+/// scenario for the leak that ticked hunger/fatigue on monsters and dropped every
+/// floor's population dead of exhaustion ~95 ticks after spawn — corpseless (only
+/// the combat kill path drops corpses) and untargetable. The player's meters are
+/// pinned back between waits so only the goblin is exposed to the clock.
+pub const monster_endurance_scenario = Scenario{
+    .name = "monster_endurance",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 },
+        .{ .choose_class = 1 },
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .spawn_monster = .{ .kind = .goblin, .name = "goblin_0", .x = 50, .y = 49 } },
+        .{ .tick = 45 },
+        .{ .set_hunger = .{ .entity = "entity_0", .value = 0 } },
+        .{ .set_fatigue = .{ .entity = "entity_0", .value = 0 } },
+        .{ .tick = 45 },
+        .{ .set_hunger = .{ .entity = "entity_0", .value = 0 } },
+        .{ .set_fatigue = .{ .entity = "entity_0", .value = 0 } },
+        .{ .tick = 45 },
+        .{ .set_hunger = .{ .entity = "entity_0", .value = 0 } },
+        .{ .set_fatigue = .{ .entity = "entity_0", .value = 0 } },
+        .{ .command = "look" },
+        .{ .command = "attack goblin_0" },
+        .{ .command = "end turn" },
+        .{ .command = "exit" },
+    },
+};
+
 pub const hunt_scenario = Scenario{
     .name = "hunt",
     .seed = 42,
@@ -1171,6 +1204,8 @@ pub fn scenarioByName(name: []const u8, seed: u64) ?Scenario {
         return Scenario{ .name = "rest_floor", .seed = seed, .steps = rest_floor_scenario.steps };
     if (std.mem.eql(u8, name, "reference_survive"))
         return Scenario{ .name = "reference_survive", .seed = seed, .steps = reference_survive_scenario.steps };
+    if (std.mem.eql(u8, name, "monster_endurance"))
+        return Scenario{ .name = "monster_endurance", .seed = seed, .steps = monster_endurance_scenario.steps };
     if (std.mem.eql(u8, name, "heal_bandage"))
         return Scenario{ .name = "heal_bandage", .seed = seed, .steps = heal_bandage_scenario.steps };
     if (std.mem.eql(u8, name, "trap_floor"))
@@ -1565,6 +1600,15 @@ test "dst reference_survive scenario is byte-identical across runs" {
     try std.testing.expect(std.mem.indexOf(u8, out, "ate rations") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "saved slot") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "loaded slot") != null);
+}
+
+test "dst monster_endurance scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "monster_endurance", 131072);
+    // The goblin must outlive 135 ticks of world clock: still visible and attackable.
+    try std.testing.expect(std.mem.indexOf(u8, out, "step tick count=45 total=135") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "attack entity_0->goblin_0 roll=") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "no valid attack target") == null);
 }
 
 test "dst heal_bandage scenario is byte-identical across runs" {
