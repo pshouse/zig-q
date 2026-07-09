@@ -825,6 +825,33 @@ pub const catch_breath_scenario = Scenario{
     },
 };
 
+/// Regression for the mid-combat reposition crash: step out of the goblin's reach and
+/// hand over the turn (`end turn`, then `catch breath`). The unreachable goblin forfeits
+/// its counter instead of erroring the process out; stepping back adjacent proves combat
+/// stayed live and the goblin swings again.
+pub const combat_reposition_scenario = Scenario{
+    .name = "combat_reposition",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 },
+        .{ .choose_class = 1 },
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .spawn_monster = .{ .kind = .goblin, .name = "goblin_0", .x = 50, .y = 49 } },
+        .{ .command = "attack goblin_0" },
+        .{ .command = "move west" },
+        .{ .command = "end turn" },
+        .{ .command = "catch breath" },
+        .{ .command = "move east" },
+        .{ .command = "end turn" },
+        .{ .command = "stats" },
+        .{ .command = "exit" },
+    },
+};
+
 fn floor1ProfileForScenario(name: []const u8) dungeon.Floor1Profile {
     if (std.mem.eql(u8, name, "descend_crawl")) return .v09;
     if (std.mem.eql(u8, name, "descend_crawl_file")) return .v09;
@@ -1154,6 +1181,8 @@ pub fn scenarioByName(name: []const u8, seed: u64) ?Scenario {
         return Scenario{ .name = "combat_flee", .seed = seed, .steps = combat_flee_scenario.steps };
     if (std.mem.eql(u8, name, "catch_breath"))
         return Scenario{ .name = "catch_breath", .seed = seed, .steps = catch_breath_scenario.steps };
+    if (std.mem.eql(u8, name, "combat_reposition"))
+        return Scenario{ .name = "combat_reposition", .seed = seed, .steps = combat_reposition_scenario.steps };
     return null;
 }
 
@@ -1573,6 +1602,20 @@ test "dst catch_breath scenario is byte-identical across runs" {
     const out = try expectScenarioDeterministic(allocator, "catch_breath", 65536);
     try std.testing.expect(std.mem.indexOf(u8, out, "catches their breath") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "exhaustion eased") != null);
+}
+
+test "dst combat_reposition scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "combat_reposition", 65536);
+    // The out-of-reach goblin forfeits: the turn comes straight back to the player
+    // after both `end turn` and `catch breath`, with no goblin counterattack between.
+    try std.testing.expect(std.mem.indexOf(u8, out, "turn: entity_0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "catches their breath") != null);
+    const move_away = std.mem.indexOf(u8, out, "step command move west").?;
+    const move_back = std.mem.indexOf(u8, out, "step command move east").?;
+    try std.testing.expect(std.mem.indexOf(u8, out[move_away..move_back], "attack goblin_0->") == null);
+    // Stepping back adjacent revives the exchange, proving combat never ended.
+    try std.testing.expect(std.mem.indexOf(u8, out[move_back..], "attack goblin_0->entity_0") != null);
 }
 
 test "demo output is deterministic for fixed seed" {

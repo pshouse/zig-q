@@ -23,7 +23,8 @@ pub fn main() !void {
         cfg.world_seed,
     });
 
-    const report = try zig_q.fuzz.run(allocator, cfg);
+    var report = try zig_q.fuzz.run(allocator, cfg);
+    defer report.deinit(allocator);
     if (!report.passed()) {
         const failure = report.failure.?;
         try stdout.print("fuzz failure at iteration={} step={}: {s}\n", .{

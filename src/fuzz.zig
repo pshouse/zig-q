@@ -33,6 +33,14 @@ pub const Report = struct {
     pub fn passed(self: Report) bool {
         return self.failure == null;
     }
+
+    pub fn deinit(self: *Report, allocator: std.mem.Allocator) void {
+        if (self.failure) |failure| {
+            for (failure.script) |line| allocator.free(line);
+            allocator.free(failure.script);
+            self.failure = null;
+        }
+    }
 };
 
 const templates = [_][]const u8{
@@ -78,6 +86,17 @@ const templates = [_][]const u8{
     "disengage",
     "catch breath",
     "recover",
+    // One-line creation: without this, an iteration only reaches a spawned player if
+    // the random walk happens to draw assign/race/class/spawn in order, so nearly all
+    // combat templates below fire against an empty world. Monsters auto-spawn adjacent
+    // on the line after `spawn`, putting the walk one template away from real combat.
+    "assign 6 5 4 3 2 1; race 2; class 1; spawn",
+    // Mid-combat reposition: step out of every hostile's reach, then hand over the
+    // turn. Chained so the random walk reliably reaches the state where the monster
+    // counter must forfeit instead of leaking error.NotAdjacent (process abort).
+    "attack goblin_0; move west; end turn",
+    "attack skeleton_0; move west; catch breath",
+    "attack goblin_0; move north; end turn; move south; end turn",
     "save",
     "save 1",
     "load 1",
@@ -131,18 +150,30 @@ pub fn run(allocator: std.mem.Allocator, cfg: Config) !Report {
             .save_path = fuzz_db,
         };
 
-        var null_out: [1]u8 = undefined;
-        var null_stream = std.io.fixedBufferStream(&null_out);
-
         var osc_tracker: OscillationTracker = .{};
         var step: u32 = 0;
         while (step < cfg.max_commands) : (step += 1) {
             const line = try generateLine(a, &fuzz_rng);
             try script_lines.append(allocator, try allocator.dupe(u8, line));
 
-            const result = commands.executeLine(&ctx, line, null_stream.writer()) catch {
+            // Discard output with a real sink. A bounded buffer here used to fail
+            // every line at its first print (error.NoSpaceLeft), which aborted the
+            // line, skipped the monster respawn below, and silently kept the fuzzer
+            // out of combat entirely.
+            const result = commands.executeLine(&ctx, line, std.io.null_writer) catch |err| {
+                // Combat turn-handoff errors must never escape the command layer:
+                // handlers map the player-facing ones to messages, and
+                // processMonsterTurns skips unreachable/dead combatants. One leaking
+                // here would abort the interactive REPL, so it is a fuzz failure,
+                // not a line to shrug off.
+                switch (err) {
+                    error.NotAdjacent, error.TargetDead, error.AttackerDead => {
+                        return failureReport(allocator, cfg.iterations, iteration, step, err, &script_lines);
+                    },
+                    else => {},
+                }
                 assertInvariantsTracked(&w, ctx.player_id, &osc_tracker) catch |inv_err| {
-                    return failureReport(cfg.iterations, iteration, step, inv_err, &script_lines);
+                    return failureReport(allocator, cfg.iterations, iteration, step, inv_err, &script_lines);
                 };
                 continue;
             };
@@ -153,12 +184,12 @@ pub fn run(allocator: std.mem.Allocator, cfg: Config) !Report {
             }
 
             assertInvariantsTracked(&w, ctx.player_id, &osc_tracker) catch |inv_err| {
-                return failureReport(cfg.iterations, iteration, step, inv_err, &script_lines);
+                return failureReport(allocator, cfg.iterations, iteration, step, inv_err, &script_lines);
             };
 
             if (ctx.player_id != entity.invalid_id and (std.mem.eql(u8, line, "save") or std.mem.startsWith(u8, line, "save "))) {
                 verifySaveRoundtrip(a, fuzz_db, &w, ctx.player_id) catch |inv_err| {
-                    return failureReport(cfg.iterations, iteration, step, inv_err, &script_lines);
+                    return failureReport(allocator, cfg.iterations, iteration, step, inv_err, &script_lines);
                 };
             }
 
@@ -173,19 +204,24 @@ pub fn run(allocator: std.mem.Allocator, cfg: Config) !Report {
 }
 
 fn failureReport(
+    allocator: std.mem.Allocator,
     iterations: u32,
     iteration: u32,
     step: u32,
     err: anyerror,
-    script_lines: *const std.ArrayList([]const u8),
-) Report {
+    script_lines: *std.ArrayList([]const u8),
+) !Report {
+    // Detach the repro script from the list: run()'s deferred cleanup frees
+    // script_lines on return, and handing out `.items` directly left the report
+    // pointing at freed memory — the failure printout segfaulted before it could
+    // show the script. Ownership moves to the Report; free via Report.deinit.
     return .{
         .iterations = iterations,
         .failure = .{
             .iteration = iteration,
             .step = step,
             .message = @errorName(err),
-            .script = script_lines.items,
+            .script = try script_lines.toOwnedSlice(allocator),
         },
     };
 }
@@ -232,11 +268,11 @@ fn verifySaveRoundtrip(
     var before = try save_state.capture(allocator, w, player_id);
     defer before.deinit(allocator);
 
-    var null_buf: [1]u8 = undefined;
-    var null_stream = std.io.fixedBufferStream(&null_buf);
-    try sqlite_store.saveSlot(allocator, path, 1, w, player_id, null_stream.writer());
+    // Discard output with a real sink; a 1-byte buffer fails on the first print
+    // ("saved slot 1"), which reported every roundtrip as a NoSpaceLeft failure.
+    try sqlite_store.saveSlot(allocator, path, 1, w, player_id, std.io.null_writer);
 
-    var loaded = try sqlite_store.loadSlot(allocator, path, 1, null_stream.writer());
+    var loaded = try sqlite_store.loadSlot(allocator, path, 1, std.io.null_writer);
     defer loaded.world.deinit();
 
     var after = try save_state.capture(allocator, &loaded.world, loaded.player_id);
@@ -315,13 +351,25 @@ pub fn assertInvariantsTracked(
         if (!ent.is_monster) players += 1;
     }
     if (players > 1) return error.TooManyPlayers;
-    var on_map: usize = 0;
+    var accounted: usize = 0;
     for (w.store.entities.items) |*ent| {
         // HP must remain within [0, max_hp] (u32 guarantees >= 0; upper bound explicit).
         if (ent.max_hp > 0 and ent.current_hp > ent.max_hp) return error.HpAboveMax;
         if (ent.conditions.has(.dead) and ent.current_hp != 0) return error.DeadWithPositiveHp;
         if (!ent.conditions.has(.dead) and ent.max_hp > 0 and ent.current_hp == 0) return error.AliveWithZeroHp;
-        on_map += 1;
+        accounted += 1;
+        // Slain monsters are deliberately taken off the tile map (the corpse becomes
+        // a floor object and the tile stops blocking movement); a dead player stays
+        // on their tile under permadeath. Everyone else must be indexed exactly
+        // where the store says they stand.
+        if (ent.is_monster and ent.conditions.has(.dead)) {
+            if (w.tile_map.cells.get(ent.loc)) |list| {
+                for (list.items) |eid| {
+                    if (eid == ent.id) return error.DeadMonsterOnMap;
+                }
+            }
+            continue;
+        }
         const list = w.tile_map.cells.get(ent.loc) orelse return error.EntityNotOnMap;
         var found = false;
         for (list.items) |eid| {
@@ -330,7 +378,7 @@ pub fn assertInvariantsTracked(
         if (!found) return error.EntityLocMismatch;
     }
 
-    if (on_map != w.store.count()) return error.EntityCountMismatch;
+    if (accounted != w.store.count()) return error.EntityCountMismatch;
     if (w.store.count() < w.tile_map.occupiedCellCount()) return error.OrphanMapCell;
 
     if (player_id != entity.invalid_id and w.store.get(player_id) == null)
@@ -418,11 +466,12 @@ fn pickChar(fuzz_rng: *rng.SeededRng) u8 {
 }
 
 test "fuzz harness survives seeded iterations" {
-    const r = try run(std.testing.allocator, .{
+    var r = try run(std.testing.allocator, .{
         .seed = 7,
         .iterations = 200,
         .db_path = "zig-q-fuzz-test.sqlite",
     });
+    defer r.deinit(std.testing.allocator);
     try std.testing.expect(r.passed());
 }
 
