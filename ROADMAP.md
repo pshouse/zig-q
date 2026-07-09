@@ -2,7 +2,7 @@
 
 **Product:** deterministic, scriptable **dungeon crawl** engine — create a character, descend floors, fight monsters, persist progress. No dialogue trees.
 
-**Current release:** `1.5.4` (v1.5 crawl completeness + post-release review/balance fixes).
+**Current release:** `1.6.0` (depth danger: initiative, danger-tier lethality, elites, scarce deep loot).
 
 ---
 
@@ -250,6 +250,39 @@ DST `playthrough` runs without `unknown command` for these inputs. Harvested tra
 
 ---
 
+## v1.6 — Depth danger: lethality that scales
+
+**Theme:** deep floors get teeth. Depth adds danger, not just quantity. All lethality changes gated to
+`floor_index >= 4` so every pre-1.6 golden (incl. the frozen `reference_crawl`) stays byte-identical.
+Initiative is the enabler: danger-floor monsters counter after every player attack; ambush seats the
+monster first globally.
+
+| Deliver | Notes |
+|---------|-------|
+| Danger-floor counters | After player `attack` on `danger_tier > 0` participants, monsters take their turns |
+| Ambush first strike | Monster-initiated combat seats the ambusher first (global) |
+| Danger tier | `dangerTier(floor)` (0 below 4, cap 2); +tier attack, +tier dmg min-1, +3·tier HP, +tier/2 AC |
+| Elite variants | `hobgoblin`, `skeleton_warrior` floor 4+ only via separate `eliteRng` stream |
+| Loot scarcity | Cap deep bonus loot; bias away from bandage; ration cap; war_axe/greatsword roster |
+| Save v4 | `EntitySave.danger_tier`; schema 3→4 migration; old saves default 0 |
+| Survival | Live sleep/rest interruption; unconscious blocks move/eat; exhaustion movement cost (below) |
+| Gear | Fine quality `damage_bonus`; equip advisory; equip/unequip costs a turn |
+
+**Movement cost (Track 3):** exhaustion tier ≥ 3 costs an extra clock tick on every player move
+(everywhere). Tiers 1–2 cost an extra tick only on danger floors (`floor_index ≥ 4`) so frozen
+floor 1–3 goldens (incl. `reference_crawl`) stay byte-identical. Display `effectiveMovement` shows
+−1 only at tier ≥ 3.
+
+**DST scenarios:** `deadly_floor`, `elite_brawl`, `scarce_heals`, `save_v4_roundtrip`, `sleep_interrupt`,
+plus backfills (`unequip_cycle`, `drop_clears_slot`, `bare_loot_corpse`, `weaker_weapon`) and orphaned
+`rest_floor` / `combat_flee` / `catch_breath` wired into the wave-16 gate.
+
+**Acceptance:** all pre-1.6 DST goldens byte-identical ×2 except documented `deep_floor` floor-5 loot
+delta; frozen `reference_crawl` untouched; new scenarios byte-identical ×2; `evidence-v16` markers;
+floor-4 monster lands damage on an attack-spamming player.
+
+---
+
 ## Conditions roadmap (mundane only)
 
 | Condition | Wave | Source |
@@ -269,11 +302,16 @@ DST `playthrough` runs without `unknown command` for these inputs. Harvested tra
 
 ---
 
-## Backlog (post-1.5)
+## Backlog (v1.7+)
 
 | Idea | Notes |
 |------|--------|
-| **Skeleton bones loot** | Skeleton corpses (`skeleton_*`) currently hold no item; goblins drop `short_sword`. Add mundane `bones` (light weight) lootable via `get from corpse` / `loot`. **Defer until a use exists** — junk-without-sink is poor UX. Candidate mundane sinks: trap bait (distraction), `rest` combo with `bandage`, future trade/shrine turn-in. Fits no-magic rules; no implement-before-use. Humanoid corpses are walkable; only truly large corpses (e.g. `dragon_*`) block tiles. |
+| **Skeleton bones loot** | Skeleton corpses (`skeleton_*`) currently hold no item; goblins drop `short_sword`. Add mundane `bones` (light weight) lootable via `get from corpse` / `loot`. **Defer until a use exists** — junk-without-sink is poor UX. Candidate sinks: trap bait, rest combo, trade/shrine. |
+| **Locked doors** | Keys exist (`iron_key`); expand locked-door routes beyond the basic open path. |
+| **Permadeath summary** | On death, emit deepest floor / kill counts / cause on the tombstone transcript. |
+| **Ogre / floor-6 / tier-3** | Cut from v1.6 (product max depth 5, dangerTier cap 2). |
+| **Global initiative rework** | Option B: re-bless `reference_crawl` so floors 1–3 also use attack counters. |
+| **Encumbrance rationalization** | Graduated-vs-binary (`isOverloaded` dead code) once heavier gear is common. |
 
 ---
 
@@ -307,6 +345,7 @@ DST `playthrough` runs without `unknown command` for these inputs. Harvested tra
 | 1.4 | Hunger, sleep, exhaustion, survival clock |
 | 1.5 | Bandage heal, procedural traps, depth-scaled crawl |
 | 1.5.1 | Trap `look` listing gated on WIS perception check (d20 + mod vs DC 12 + distance) |
+| 1.6 | Depth danger: counters, danger-tier, elites, scarce heals, save v4 |
 | 1.5.2 | Poison/starvation DoT prints HP loss each tick (`poison deals N hp; hp=X/Y`) |
 | 1.5.3 | Review fixes: `look` uses a local RNG copy (no combat-stream coupling), unique deep-floor monster names, monster tile-occupancy guard, honest cross-wave gate, `wound` gated behind `--playtest` |
 | 1.5.4 | Survival economy: `rest` floored at `rest_fatigue_floor` (fatigue 20 / exhaustion tier 1); only `sleep` resets fatigue to 0, so sleep is no longer strictly dominated by repeated resting. DST `rest_floor` guards the rule |

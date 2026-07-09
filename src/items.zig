@@ -4,6 +4,8 @@ const entity = @import("entity.zig");
 
 pub const Id = enum {
     short_sword,
+    war_axe,
+    greatsword,
     leather_armour,
     wooden_shield,
     antidote,
@@ -33,6 +35,8 @@ pub const Def = struct {
     weight: u8,
     category: Category,
     damage_die: u8 = 0,
+    /// Flat damage modifier (mundane quality, e.g. "fine" +1). Modifier-only: no RNG draws.
+    damage_bonus: i32 = 0,
     ac_bonus: u8 = 0,
     trait: Trait = .none,
     is_food: bool = false,
@@ -51,13 +55,29 @@ pub fn def(id: Id) Def {
             .damage_die = 6,
             .trait = .trip,
         },
+        .war_axe => .{
+            .id = id,
+            .name = "war axe",
+            .weight = 4,
+            .category = .weapon,
+            .damage_die = 10,
+            .damage_bonus = 1, // fine quality
+        },
+        .greatsword => .{
+            .id = id,
+            .name = "greatsword",
+            .weight = 6,
+            .category = .weapon,
+            .damage_die = 12,
+            .damage_bonus = 1, // fine quality
+        },
         .leather_armour => .{
             .id = id,
             .name = "leather armour",
             .weight = 10,
             .category = .armour,
             .ac_bonus = 11,
-            .proficient_classes = &.{"fighter", "barbarian"},
+            .proficient_classes = &.{ "fighter", "barbarian" },
         },
         .wooden_shield => .{
             .id = id,

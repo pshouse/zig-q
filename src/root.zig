@@ -52,6 +52,7 @@ pub const pathfinding = @import("pathfinding.zig");
 pub const doors = @import("doors.zig");
 pub const evidence_v14 = @import("evidence_v14.zig");
 pub const evidence_v15 = @import("evidence_v15.zig");
+pub const evidence_v16 = @import("evidence_v16.zig");
 pub const wave_gate = @import("wave_gate.zig");
 pub const help_text = @import("help_text.zig");
 pub const evidence_format = @import("evidence_format.zig");

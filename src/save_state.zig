@@ -13,9 +13,10 @@ const inventory = @import("inventory.zig");
 const doors = @import("doors.zig");
 const survival = @import("survival.zig");
 
-pub const schema_version: u32 = 3;
+pub const schema_version: u32 = 4;
 pub const schema_version_v1: u32 = 1;
 pub const schema_version_v2: u32 = 2;
+pub const schema_version_v3: u32 = 3;
 
 pub const EntitySave = struct {
     id: entity.EntityId,
@@ -41,6 +42,7 @@ pub const EntitySave = struct {
     current_hp: u32,
     max_hp: u32,
     damage_die: u8,
+    danger_tier: u32 = 0,
     is_monster: bool,
     gear: inventory.GearSave = .{ .bag = &.{} },
 };
@@ -160,6 +162,7 @@ pub fn capture(allocator: std.mem.Allocator, w: *const world.World, player_id: e
             .current_hp = ent.current_hp,
             .max_hp = ent.max_hp,
             .damage_die = ent.damage_die,
+            .danger_tier = ent.danger_tier,
             .is_monster = ent.is_monster,
             .gear = try inventory.toSave(allocator, &ent.inventory),
         });
@@ -311,6 +314,12 @@ pub fn apply(allocator: std.mem.Allocator, save: *const WorldSave) !world.World 
         ent.max_hp = ent_save.max_hp;
         ent.damage_die = ent_save.damage_die;
         ent.is_monster = ent_save.is_monster;
+        // Clamp danger_tier on load: monsters ∈ [0,2]; players always 0.
+        if (ent.is_monster) {
+            ent.danger_tier = if (ent_save.danger_tier > 2) 2 else ent_save.danger_tier;
+        } else {
+            ent.danger_tier = 0;
+        }
         ent.inventory = try inventory.fromSave(allocator, ent_save.gear);
         if (!ent.is_monster) _ = survival.syncStarving(ent);
     }
@@ -359,9 +368,18 @@ pub fn migrateV1ToV2(save: *WorldSave, allocator: std.mem.Allocator) !void {
 
 pub fn migrateV2ToV3(save: *WorldSave) void {
     if (save.schema_version != schema_version_v2) return;
-    save.schema_version = schema_version;
+    // Pin to v3 (not live schema) so the chain can step v3→v4 cleanly.
+    save.schema_version = schema_version_v3;
     for (save.entities) |*ent| {
         ent.hunger = survival.hunger_max -% ent.hunger;
+    }
+}
+
+pub fn migrateV3ToV4(save: *WorldSave) void {
+    if (save.schema_version != schema_version_v3) return;
+    save.schema_version = schema_version;
+    for (save.entities) |*ent| {
+        ent.danger_tier = 0;
     }
 }
 
@@ -409,8 +427,58 @@ test "migrate v2 inverts hunger to rising scale" {
         .combat = null,
     };
     migrateV2ToV3(&save);
-    try std.testing.expectEqual(schema_version, save.schema_version);
+    try std.testing.expectEqual(schema_version_v3, save.schema_version);
     try std.testing.expectEqual(@as(u16, 95), save.entities[0].hunger);
+    migrateV3ToV4(&save);
+    try std.testing.expectEqual(schema_version, save.schema_version);
+    try std.testing.expectEqual(@as(u32, 0), save.entities[0].danger_tier);
+}
+
+test "migrate v3 to v4 defaults danger_tier" {
+    var entities = [_]EntitySave{.{
+        .id = 0,
+        .name = "goblin_0",
+        .x = 50,
+        .y = 49,
+        .movement = 30,
+        .char_name = "goblin",
+        .race_name = "monster",
+        .class_name = "monster",
+        .status = .exploring,
+        .str = 8,
+        .dex = 14,
+        .con = 10,
+        .int_stat = 10,
+        .wis = 10,
+        .cha = 10,
+        .conditions_bits = 0,
+        .current_hp = 7,
+        .max_hp = 7,
+        .damage_die = 6,
+        .is_monster = true,
+        .danger_tier = 99, // stale; migration zeroes it
+    }};
+    var save = WorldSave{
+        .schema_version = schema_version_v3,
+        .seed = 42,
+        .rng_state = 1,
+        .rng_offset = 0,
+        .floor_index = 4,
+        .has_dungeon = true,
+        .clock_ticks = 0,
+        .clock_time_of_day = 0,
+        .clock_seconds_per_day = 120,
+        .clock_update_rate = 5,
+        .clock_time_multiplier = 1,
+        .next_entity_id = 1,
+        .player_id = 0,
+        .entities = entities[0..],
+        .map_cells = &.{},
+        .combat = null,
+    };
+    migrateV3ToV4(&save);
+    try std.testing.expectEqual(schema_version, save.schema_version);
+    try std.testing.expectEqual(@as(u32, 0), save.entities[0].danger_tier);
 }
 
 test "migrate v1 save adds v2 defaults" {
@@ -469,6 +537,7 @@ pub fn expectEqual(a: *const WorldSave, b: *const WorldSave) !void {
         try std.testing.expectEqual(ea.y, eb.y);
         try std.testing.expectEqual(ea.current_hp, eb.current_hp);
         try std.testing.expectEqual(ea.max_hp, eb.max_hp);
+        try std.testing.expectEqual(ea.danger_tier, eb.danger_tier);
         try std.testing.expectEqual(ea.conditions_bits, eb.conditions_bits);
         try std.testing.expectEqual(ea.is_monster, eb.is_monster);
         try std.testing.expectEqual(ea.status, eb.status);

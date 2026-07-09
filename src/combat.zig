@@ -1,4 +1,4 @@
-const std = @import("std");
+﻿const std = @import("std");
 const world = @import("world.zig");
 const entity = @import("entity.zig");
 const loc = @import("loc.zig");
@@ -53,13 +53,17 @@ pub fn monsterKind(ent: *const entity.Entity) ?monsters.Kind {
     if (!ent.is_monster) return null;
     if (std.mem.eql(u8, ent.char.name, "goblin")) return .goblin;
     if (std.mem.eql(u8, ent.char.name, "skeleton")) return .skeleton;
+    if (std.mem.eql(u8, ent.char.name, "hobgoblin")) return .hobgoblin;
+    if (std.mem.eql(u8, ent.char.name, "skeleton_warrior")) return .skeleton_warrior;
     return null;
 }
 
 pub fn targetAc(ent: *const entity.Entity) u32 {
-    if (monsterKind(ent)) |kind| return monsters.armorClass(kind);
+    if (monsterKind(ent)) |kind| {
+        return monsters.armorClass(kind) + ent.danger_tier / 2;
+    }
     if (!ent.is_monster) return inventory.State.playerAc(&ent.inventory, ent);
-    return character.armorClass(ent.char);
+    return character.armorClass(ent.char) + ent.danger_tier / 2;
 }
 
 pub fn attackRoll(w: *world.World, attacker: *const entity.Entity) u8 {
@@ -74,15 +78,38 @@ pub fn attackRoll(w: *world.World, attacker: *const entity.Entity) u8 {
 pub fn attackModifier(attacker: *const entity.Entity, target: *const entity.Entity) i32 {
     var mod = character.abilityModifier(character.statByAbbr(attacker.char, "STR"));
     mod += conditions.attackAdvantageVs(target);
+    // Danger-tier attack bonus (0 for players and floor 1â€“3 monsters).
+    mod += @as(i32, @intCast(attacker.danger_tier));
     return mod;
+}
+
+fn weaponDamageBonus(attacker: *const entity.Entity) i32 {
+    if (attacker.inventory.weapon) |wid| return items.def(wid).damage_bonus;
+    return 0;
 }
 
 fn rollDamage(w: *world.World, attacker: *const entity.Entity) i32 {
     var buf: [1]u8 = undefined;
-    const mod = character.abilityModifier(character.statByAbbr(attacker.char, "STR"));
+    var mod = character.abilityModifier(character.statByAbbr(attacker.char, "STR"));
+    mod += @as(i32, @intCast(attacker.danger_tier));
+    mod += weaponDamageBonus(attacker);
     const die = inventory.State.weaponDamageDie(&attacker.inventory, attacker);
     const result = dice.roll(&w.rng, .{ .n = 1, .sides = die, .modifier = mod }, &buf);
-    return @max(result.sum, 0);
+    var dmg = @max(result.sum, 0);
+    // Danger-tier hits always cost â‰¥ 1 HP (floors 1â€“3 unchanged).
+    if (attacker.danger_tier > 0) dmg = @max(dmg, 1);
+    return dmg;
+}
+
+/// True when any living combat participant carries a positive danger_tier.
+fn combatHasDangerTier(w: *const world.World) bool {
+    const combat = w.combat orelse return false;
+    for (combat.participants.items) |id| {
+        if (w.store.get(id)) |ent| {
+            if (isAlive(ent) and ent.danger_tier > 0) return true;
+        }
+    }
+    return false;
 }
 
 fn weaponTrait(attacker: *const entity.Entity) items.Trait {
@@ -216,7 +243,14 @@ pub fn formatTargetHints(
     }
 }
 
-pub fn enterCombat(w: *world.World, player_id: entity.EntityId, enemy_id: entity.EntityId) !void {
+/// Begin combat. `first_actor` seats initiative (player on a player-initiated attack;
+/// the ambushing monster when a monster initiates). Global, not floor-gated (D2).
+pub fn enterCombat(
+    w: *world.World,
+    player_id: entity.EntityId,
+    enemy_id: entity.EntityId,
+    first_actor: entity.EntityId,
+) !void {
     if (w.combat) |c| {
         c.deinit(w.allocator);
         w.allocator.destroy(c);
@@ -246,6 +280,16 @@ pub fn enterCombat(w: *world.World, player_id: entity.EntityId, enemy_id: entity
     if (w.store.get(enemy_id)) |e| {
         if (isAlive(e)) e.char.status = .fighting;
     }
+
+    // Seat first_actor at turn_index 0's active slot.
+    var seat: usize = 0;
+    for (combat_ptr.participants.items, 0..) |id, i| {
+        if (id == first_actor) {
+            seat = i;
+            break;
+        }
+    }
+    combat_ptr.turn_index = seat;
 
     w.combat = combat_ptr;
 }
@@ -341,7 +385,7 @@ pub fn performAttack(
 }
 
 /// A single free swing at the fleeing player from an adjacent hostile. Mirrors the hit
-/// math of `performAttack` but costs no turn and no clock tick — it is a reaction, not an
+/// math of `performAttack` but costs no turn and no clock tick â€” it is a reaction, not an
 /// action, so it does not advance the survival clock or initiative.
 fn opportunityAttack(
     w: *world.World,
@@ -397,10 +441,30 @@ fn processMonsterTurns(w: *world.World, writer: anytype) !void {
             advanceTurn(w);
             continue;
         }
+        if (conditions.blocksAttack(ent)) {
+            advanceTurn(w);
+            continue;
+        }
         try performAttack(w, active, combat.player_id, writer);
         if (!isInCombat(w)) return;
         if (livingParticipants(w) <= 1) return;
         advanceTurn(w);
+    }
+}
+
+/// Resolve monster opening turns after an ambush (monster seated first). Stops when
+/// the player's turn is up or combat ends. Used by explore ambush entry.
+pub fn resolveOpeningTurns(w: *world.World, writer: anytype) !void {
+    if (!isInCombat(w)) return;
+    try processMonsterTurns(w, writer);
+    if (isInCombat(w)) {
+        if (activeTurn(w)) |next| {
+            if (w.store.get(next)) |ent| {
+                try writer.print("turn: {s}\n", .{ent.name});
+            }
+        }
+    } else {
+        try writer.print("combat ended\n", .{});
     }
 }
 
@@ -416,10 +480,18 @@ pub fn attack(
     }
 
     const attacker = w.store.get(attacker_id) orelse return error.AttackerNotFound;
+    if (conditions.blocksAttack(attacker)) return error.CannotAct;
     const target = findTarget(w, attacker_id, target_name) orelse return error.NoTarget;
     if (!isAdjacent(attacker.loc, target.loc)) return error.NotAdjacent;
-    if (!isInCombat(w)) try enterCombat(w, attacker_id, target.id);
+    // Player-initiated: player acts first.
+    if (!isInCombat(w)) try enterCombat(w, attacker_id, target.id, attacker_id);
     try performAttack(w, attacker_id, target.id, writer);
+
+    // D1: on danger floors, monsters counter after every player attack (floors 1â€“3
+    // keep legacy alternation â€” no passTurn, no new RNG on those paths).
+    if (isInCombat(w) and combatHasDangerTier(w)) {
+        try passTurnToOpponents(w, writer);
+    }
 }
 
 pub fn endTurn(w: *world.World, actor_id: entity.EntityId, writer: anytype) !void {
@@ -462,6 +534,7 @@ pub fn flee(w: *world.World, actor_id: entity.EntityId, writer: anytype) !void {
     if (active != actor_id) return error.NotYourTurn;
 
     const player = w.store.get(actor_id) orelse return error.AttackerNotFound;
+    if (conditions.blocksAttack(player)) return error.CannotAct;
     try writer.print("{s} flees from combat\n", .{player.name});
 
     var ids: [32]entity.EntityId = undefined;
@@ -481,6 +554,7 @@ pub fn flee(w: *world.World, actor_id: entity.EntityId, writer: anytype) !void {
     while (i < n) : (i += 1) {
         const attacker = w.store.get(ids[i]) orelse continue;
         if (!isAlive(attacker)) continue;
+        if (conditions.blocksAttack(attacker)) continue;
         try opportunityAttack(w, attacker, actor_id, writer);
         if (w.isPlayerDead()) break;
     }
@@ -510,14 +584,15 @@ pub fn flee(w: *world.World, actor_id: entity.EntityId, writer: anytype) !void {
 
 /// In-combat recovery: the player catches their breath, shedding a little fatigue (and
 /// possibly easing exhaustion), but yields the turn so monsters still counterattack. Softens
-/// the exhaustion→disadvantage attrition loop without escaping the fight. Clamped to
-/// `survival.rest_fatigue_floor` like `rest` — only `sleep` fully clears exhaustion.
+/// the exhaustionâ†’disadvantage attrition loop without escaping the fight. Clamped to
+/// `survival.rest_fatigue_floor` like `rest` â€” only `sleep` fully clears exhaustion.
 pub fn catchBreath(w: *world.World, actor_id: entity.EntityId, writer: anytype) !void {
     if (!isInCombat(w)) return error.NotInCombat;
     const active = activeTurn(w) orelse return error.NoActiveTurn;
     if (active != actor_id) return error.NotYourTurn;
 
     const player = w.store.get(actor_id) orelse return error.AttackerNotFound;
+    if (conditions.blocksAttack(player)) return error.CannotAct;
     const change = survival.applyCatchBreath(player);
     try writer.print("{s} catches their breath (fatigue={})\n", .{ player.name, player.fatigue });
     try survival.printExhaustionNotice(change.before, change.after, writer);
@@ -560,7 +635,7 @@ test "melee reduces target hp" {
 
     const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
     const goblin_id = try w.spawnMonster(.goblin, loc.Loc.init(50, 49), "goblin_0");
-    try enterCombat(&w, player_id, goblin_id);
+    try enterCombat(&w, player_id, goblin_id, player_id);
 
     var buf: [256]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
@@ -610,7 +685,7 @@ test "end turn advances initiative" {
 
     const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
     const goblin_id = try w.spawnMonster(.goblin, loc.Loc.init(50, 49), "goblin_0");
-    try enterCombat(&w, player_id, goblin_id);
+    try enterCombat(&w, player_id, goblin_id, player_id);
 
     var buf: [512]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
@@ -629,7 +704,7 @@ test "slaying last adjacent foe ends combat while distant monsters remain" {
     for (w.store.get(player_id).?.char.attributes.items) |*attr| {
         if (std.mem.eql(u8, attr.abbr, "STR")) attr.stat = 18;
     }
-    try enterCombat(&w, player_id, goblin_adj);
+    try enterCombat(&w, player_id, goblin_adj, player_id);
 
     var buf: [512]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
@@ -650,7 +725,7 @@ test "player can move on their turn during combat" {
     try w.loadFloor(1);
     const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
     const goblin_id = try w.spawnMonster(.goblin, loc.Loc.init(50, 49), "goblin_0");
-    try enterCombat(&w, player_id, goblin_id);
+    try enterCombat(&w, player_id, goblin_id, player_id);
     try std.testing.expect(activeTurn(&w) == player_id);
 
     const moved = try @import("movement.zig").moveEntity(&w, player_id, .west);
@@ -661,14 +736,14 @@ test "player can move on their turn during combat" {
 test "end turn after moving out of reach skips the monster instead of crashing" {
     // Regression: move one tile away mid-combat, then end turn. processMonsterTurns
     // used to call performAttack unconditionally, so the goblin's counter raised
-    // error.NotAdjacent, which no command handler catches — aborting the REPL/DST.
+    // error.NotAdjacent, which no command handler catches â€” aborting the REPL/DST.
     const allocator = std.testing.allocator;
     var w = try world.World.init(allocator, 42);
     defer w.deinit();
     try w.loadFloor(1);
     const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
     const goblin_id = try w.spawnMonster(.goblin, loc.Loc.init(50, 49), "goblin_0");
-    try enterCombat(&w, player_id, goblin_id);
+    try enterCombat(&w, player_id, goblin_id, player_id);
     _ = try @import("movement.zig").moveEntity(&w, player_id, .west);
 
     const hp_before = w.store.get(player_id).?.current_hp;
@@ -695,7 +770,7 @@ test "catch breath after moving out of reach skips the monster instead of crashi
     try w.loadFloor(1);
     const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
     const goblin_id = try w.spawnMonster(.goblin, loc.Loc.init(50, 49), "goblin_0");
-    try enterCombat(&w, player_id, goblin_id);
+    try enterCombat(&w, player_id, goblin_id, player_id);
     _ = try @import("movement.zig").moveEntity(&w, player_id, .west);
 
     var buf: [512]u8 = undefined;
@@ -719,7 +794,7 @@ test "combat end restores exploring status" {
         if (std.mem.eql(u8, attr.abbr, "STR")) attr.stat = 18;
     }
     w.store.get(goblin_id).?.current_hp = 1;
-    try enterCombat(&w, player_id, goblin_id);
+    try enterCombat(&w, player_id, goblin_id, player_id);
 
     var buf: [512]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
@@ -741,7 +816,7 @@ test "flee ends combat and provokes an opportunity attack" {
     // Enough HP to survive the parting swing so we can assert the exploring status.
     w.store.get(player_id).?.max_hp = 30;
     w.store.get(player_id).?.current_hp = 30;
-    try enterCombat(&w, player_id, goblin_id);
+    try enterCombat(&w, player_id, goblin_id, player_id);
     try std.testing.expect(isInCombat(&w));
 
     var buf: [512]u8 = undefined;
@@ -775,7 +850,7 @@ test "flee provokes each adjacent hostile in id order" {
     w.store.get(player_id).?.current_hp = 60;
     const g0 = try w.spawnMonster(.goblin, loc.Loc.init(50, 49), "goblin_0");
     _ = try w.spawnMonster(.goblin, loc.Loc.init(48, 49), "goblin_1");
-    try enterCombat(&w, player_id, g0);
+    try enterCombat(&w, player_id, g0, player_id);
 
     var buf: [512]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
@@ -800,7 +875,7 @@ test "catch breath sheds fatigue and eases exhaustion" {
     player.fatigue = 42; // exhaustion level 2 (55 > 42 >= 40)
     _ = survival.syncExhaustion(player);
     try std.testing.expectEqual(@as(u3, 2), conditions.exhaustionLevel(player));
-    try enterCombat(&w, player_id, goblin_id);
+    try enterCombat(&w, player_id, goblin_id, player_id);
 
     var buf: [512]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
@@ -824,7 +899,7 @@ test "catch breath floors at rest_fatigue_floor instead of reaching zero" {
     player.current_hp = 60;
     player.fatigue = 24; // a full 8-point shed would land at 16, below the rest floor
     _ = survival.syncExhaustion(player);
-    try enterCombat(&w, player_id, goblin_id);
+    try enterCombat(&w, player_id, goblin_id, player_id);
 
     var buf: [512]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);

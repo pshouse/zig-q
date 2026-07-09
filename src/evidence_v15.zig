@@ -27,8 +27,9 @@ pub fn run(allocator: std.mem.Allocator, writer: anytype) !void {
     var deep_buf: [65536]u8 = undefined;
     const deep_out = try evidence_format.runScenario(allocator, "deep_floor", 42, &deep_buf, gate);
     try writer.print("--- scenario deep_floor ---\n", .{});
+    // v1.6 intentionally cut floor-5 loot (was plan_loot=8); monster count marker unchanged.
     try evidence_format.marker(writer, "depth_report floor=5 plan_monsters=5", deep_out, "depth_report floor=5 plan_monsters=5");
-    try evidence_format.marker(writer, "depth_report floor=2 plan_monsters=3", deep_out, "depth_report floor=2 plan_monsters=3");
+    try evidence_format.marker(writer, "depth_report floor=2 plan_monsters=3 plan_loot=4", deep_out, "depth_report floor=2 plan_monsters=3 plan_loot=4");
 
     var ref_header_buf: [64]u8 = undefined;
     const ref_header_line = try version.versionLine(&ref_header_buf, gate.reference_header);
@@ -51,5 +52,5 @@ test "evidence v15 crawl completeness markers" {
     try evidence_format.expectMarkerLineTrue(out, "marker trap triggered: true");
     try evidence_format.expectMarkerLineTrue(out, "marker poisoned: true");
     try evidence_format.expectMarkerLineTrue(out, "marker depth_report floor=5 plan_monsters=5: true");
-    try evidence_format.expectMarkerLineTrue(out, "marker depth_report floor=2 plan_monsters=3: true");
+    try evidence_format.expectMarkerLineTrue(out, "marker depth_report floor=2 plan_monsters=3 plan_loot=4: true");
 }

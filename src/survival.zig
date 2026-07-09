@@ -153,9 +153,11 @@ pub fn applySleep(ent: *entity.Entity) ExhaustionChange {
 
 pub fn exhaustionEffectHint(level: u3) ?[]const u8 {
     return switch (level) {
-        1, 2 => "getting tired",
+        // Tiers 1–2: rest floors at 20; on danger floors (4+) each move costs an extra tick.
+        // Tier 3: attack disadvantage + movement −1 (display and extra move tick everywhere).
+        1, 2 => "rest cannot fully clear this; deeper floors cost extra move ticks",
         3 => "disadvantage on attacks; movement -1",
-        4 => "HP max halved",
+        4 => "HP max halved; near collapse — rest or sleep soon",
         5, 6 => "risk of collapse",
         else => null,
     };
@@ -216,16 +218,27 @@ pub fn printSurvivalNotices(change: SurvivalChange, writer: anytype) !void {
     try printStarvingNotice(change.starving.before, change.starving.after, writer);
 }
 
+/// Resolve a survival death (DoT or exhaustion collapse) exactly like a
+/// killing blow. Permadeath is authoritative regardless of combat state:
+/// starving or succumbing to poison in the open must end the run, or the
+/// player lingers as a walking dead actor. A monster mirrors the combat-kill
+/// path (combat.performAttack): it drops a corpse and leaves the tile map, so
+/// the fuzz DeadMonsterOnMap invariant and the corpse/loot economy hold when
+/// a poisoned monster bleeds out on its own — not just when it is slain.
+fn resolveDeath(w: *world.World, ent: *entity.Entity) void {
+    if (ent.is_monster) {
+        w.spawnCorpse(ent.name, ent.loc) catch {};
+        w.tile_map.remove(ent.loc, ent.id);
+    } else {
+        w.markPlayerDead(ent.id);
+    }
+    conditions.markDead(ent);
+}
+
 fn applyHpDot(w: *world.World, ent: *entity.Entity, amount: u32) void {
     if (ent.current_hp == 0) return;
     ent.current_hp -|= amount;
-    if (ent.current_hp == 0) {
-        // Permadeath is authoritative regardless of combat state: starving or
-        // succumbing to poison in the open must end the run just like a killing
-        // blow, or the player lingers as a walking dead actor.
-        if (!ent.is_monster) w.markPlayerDead(ent.id);
-        conditions.markDead(ent);
-    }
+    if (ent.current_hp == 0) resolveDeath(w, ent);
 }
 
 pub fn onTick(w: *world.World, ent: *entity.Entity) void {
@@ -247,7 +260,16 @@ pub fn onTick(w: *world.World, ent: *entity.Entity) void {
     _ = syncStarving(ent);
 
     if (conditions.has(ent, .poisoned)) applyHpDot(w, ent, 1);
-    if (conditions.has(ent, .starving)) applyHpDot(w, ent, 1);
+    if (conditions.has(ent, .starving)) {
+        // v1.6 balance: out of combat, starving drains 1 HP every other clock
+        // tick (even ticks), doubling the window to reach food or stairs on
+        // 2-tick-per-move danger floors. In combat the full 1 HP/tick stays —
+        // fighting while starving remains as deadly as before. Clock parity is
+        // saved state, so the rate is deterministic across save/load and
+        // identical in REPL, DST, and fuzz.
+        const dot_tick = w.combat != null or (w.game_clock.ticks % 2 == 0);
+        if (dot_tick) applyHpDot(w, ent, 1);
+    }
 
     _ = syncExhaustion(ent);
     // Deliberately no clamp of current HP to effectiveMaxHp here: the tier-4
@@ -255,10 +277,10 @@ pub fn onTick(w: *world.World, ent: *entity.Entity) void {
     // HP loss from exhaustion comes only from the tier-6 collapse below.
 
     if (conditions.exhaustionLevel(ent) >= 6) {
-        // Same permadeath rule as applyHpDot: collapse from exhaustion ends the
-        // run whether or not a fight is in progress.
-        if (!ent.is_monster) w.markPlayerDead(ent.id);
-        conditions.markDead(ent);
+        // Collapse from exhaustion ends the run whether or not a fight is in
+        // progress. Unreachable for monsters (they exit above) but routed
+        // through the same death path in case the exemption ever narrows.
+        resolveDeath(w, ent);
     }
 }
 
@@ -325,7 +347,7 @@ test "high fatigue reaches exhaustion 6" {
     try std.testing.expectEqual(@as(u3, 6), conditions.exhaustionLevel(&ent));
 }
 
-test "starving deals hp damage each tick" {
+test "starving deals hp damage on even ticks out of combat" {
     var ent: entity.Entity = undefined;
     ent.conditions = @import("types.zig").ConditionSet.initEmpty();
     ent.exhaustion_level = 0;
@@ -336,9 +358,37 @@ test "starving deals hp damage each tick" {
     ent.sleeping = false;
     var w: world.World = undefined;
     w.combat = null;
-    onTick(&w, &ent);
+    w.game_clock = @import("clock.zig").Clock.init(0.0, 120.0, 5.0, 1.0);
+    onTick(&w, &ent); // ticks=0: even -> DoT lands
     try std.testing.expectEqual(@as(u32, 9), ent.current_hp);
     try std.testing.expect(conditions.has(&ent, .starving));
+    w.game_clock.ticks = 1;
+    onTick(&w, &ent); // odd tick out of combat -> no starving DoT
+    try std.testing.expectEqual(@as(u32, 9), ent.current_hp);
+    w.game_clock.ticks = 2;
+    onTick(&w, &ent);
+    try std.testing.expectEqual(@as(u32, 8), ent.current_hp);
+}
+
+test "starving in combat deals hp damage every tick" {
+    var ent: entity.Entity = undefined;
+    ent.conditions = @import("types.zig").ConditionSet.initEmpty();
+    ent.exhaustion_level = 0;
+    ent.current_hp = 10;
+    ent.max_hp = 10;
+    ent.hunger = hunger_max;
+    ent.fatigue = 0;
+    ent.sleeping = false;
+    var w: world.World = undefined;
+    var combat_state: @import("combat.zig").CombatState = undefined;
+    w.combat = &combat_state; // onTick only null-checks; never dereferences
+    w.game_clock = @import("clock.zig").Clock.init(0.0, 120.0, 5.0, 1.0);
+    w.game_clock.ticks = 1; // odd tick: out of combat this would be skipped
+    onTick(&w, &ent);
+    try std.testing.expectEqual(@as(u32, 9), ent.current_hp);
+    w.game_clock.ticks = 2;
+    onTick(&w, &ent);
+    try std.testing.expectEqual(@as(u32, 8), ent.current_hp);
 }
 
 test "starvation death outside combat is permadeath" {
@@ -349,7 +399,9 @@ test "starvation death outside combat is permadeath" {
     const ent = w.store.get(id).?;
     ent.hunger = hunger_max;
     ent.current_hp = 1;
-    w.tick();
+    // Out-of-combat starving DoT lands on even clock ticks: tick 1 is skipped,
+    // tick 2 kills. Two ticks bound the death instead of one (v1.6 half rate).
+    w.tickAction(2);
     try std.testing.expect(conditions.isDead(ent));
     try std.testing.expect(w.isPlayerDead());
 }
@@ -397,6 +449,25 @@ test "monster survival death does not trigger permadeath" {
     w.tick();
     try std.testing.expect(conditions.isDead(ent));
     try std.testing.expect(!w.isPlayerDead());
+}
+
+// A DoT death must look exactly like a combat kill: corpse floor object at the
+// tile, monster off the tile map (glyph clears, tile stops counting as occupied).
+test "monster poison death drops a corpse and frees its tile" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    const position = @import("loc.zig").Loc.init(50, 49);
+    const id = try w.spawnMonster(.goblin, position, "goblin_0");
+    const ent = w.store.get(id).?;
+    conditions.apply(ent, .poisoned);
+    ent.current_hp = 1;
+    w.tick();
+    try std.testing.expect(conditions.isDead(ent));
+    const corpse = w.floor_objects.at(position) orelse return error.MissingCorpse;
+    try std.testing.expectEqual(@import("world_objects.zig").Kind.corpse, corpse.kind);
+    try std.testing.expectEqualStrings("goblin_0", corpse.label);
+    try std.testing.expectEqual(@as(usize, 0), w.tile_map.entityCountAt(position));
 }
 
 test "food reduces hunger" {
