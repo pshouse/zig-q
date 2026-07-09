@@ -1,7 +1,7 @@
 //! Single source of truth for release identity (semver).
 const std = @import("std");
 
-pub const semver: []const u8 = "1.5.5";
+pub const semver: []const u8 = "1.6.0";
 
 /// Wave gate versions recorded in DST/evidence transcripts per release plan.
 pub const v11: []const u8 = "1.1.0";
@@ -9,6 +9,7 @@ pub const v12: []const u8 = "1.2.0";
 pub const v13: []const u8 = "1.3.0";
 pub const v14: []const u8 = "1.4.0";
 pub const v15: []const u8 = "1.5.3";
+pub const v16: []const u8 = "1.6.0";
 
 pub const GateConfig = struct {
     wave: u8,
@@ -28,6 +29,7 @@ pub fn wave(w: u8) []const u8 {
         13 => v13,
         14 => v14,
         15 => v15,
+        16 => v16,
         else => semver,
     };
 }
@@ -66,10 +68,11 @@ pub fn cliVersion(cli_override: ?[]const u8) []const u8 {
 test "forGate maps wave to emit semver" {
     try std.testing.expectEqualStrings("1.2.0", forGate(12).emit);
     try std.testing.expectEqualStrings("1.1.0", forGate(14).reference_header);
+    try std.testing.expectEqualStrings("1.6.0", forGate(16).emit);
 }
 
 test "resolve defaults to shipped semver" {
-    try std.testing.expectEqualStrings("1.5.5", resolve(null));
+    try std.testing.expectEqualStrings("1.6.0", resolve(null));
     try std.testing.expectEqualStrings("0.6.0-dev", resolve("0.6.0-dev"));
 }
 

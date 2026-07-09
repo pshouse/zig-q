@@ -6,10 +6,12 @@ const session = @import("session.zig");
 const commands = @import("commands.zig");
 const combat = @import("combat.zig");
 const conditions = @import("conditions.zig");
+const monsters = @import("monsters.zig");
 const loc = @import("loc.zig");
 const transcript = @import("transcript.zig");
 const save_state = @import("save_state.zig");
 const sqlite_store = @import("sqlite_store.zig");
+const dungeon = @import("dungeon.zig");
 
 pub const Config = struct {
     seed: u64 = 0,
@@ -84,6 +86,7 @@ const templates = [_][]const u8{
     "end turn",
     "flee",
     "disengage",
+    "retreat",
     "catch breath",
     "recover",
     // One-line creation: without this, an iteration only reaches a spawned player if
@@ -414,6 +417,30 @@ pub fn assertInvariantsTracked(
             if (owner.char.status != .fighting) return error.InvalidFightingStatus;
             if (owner.current_hp == 0 or owner.conditions.has(.dead)) return error.DeadTurnOwner;
         }
+    }
+
+    // Danger-tier invariants: tier ∈ [0,2]; players always 0; elites only on floor ≥ 4.
+    for (w.store.entities.items) |ent| {
+        if (ent.danger_tier > 2) return error.DangerTierOutOfRange;
+        if (!ent.is_monster and ent.danger_tier != 0) return error.PlayerDangerTier;
+        if (ent.is_monster) {
+            if (monsters.isElite(combat.monsterKind(&ent) orelse .goblin) and w.floor_index < 4)
+                return error.EliteOnShallowFloor;
+        }
+    }
+
+    // v1.6 survival economy: every danger floor's loot plan must include at
+    // least one ration (the survival floor under scarcity). Plan-level check —
+    // pure recomputation from (seed, floor), independent of what the player
+    // already picked up.
+    if (w.has_dungeon and dungeon.dangerTier(w.floor_index) > 0) {
+        const plan = dungeon.planFloorLoot(w.seed, w.floor_index, w.floor_spawn, &w.terrain);
+        var rations: usize = 0;
+        var i: usize = 0;
+        while (i < plan.count) : (i += 1) {
+            if (plan.spawns[i].item == .rations) rations += 1;
+        }
+        if (rations == 0) return error.DangerFloorWithoutFood;
     }
 
     if (tracker) |t| try trackMonsterPositions(w, t);

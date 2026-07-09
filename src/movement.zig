@@ -46,6 +46,10 @@ pub fn step(from: loc.Loc, dir: Direction) ?loc.Loc {
 }
 
 /// Moves entity on the sparse map, ticks the clock on success.
+/// Exhaustion movement cost (beyond the free tile step):
+/// - tier ≥ 3: always an extra clock tick (promised movement −1, for real)
+/// - tiers 1–2: extra tick only on danger floors (floor ≥ 4), so frozen
+///   floor 1–3 goldens (incl. `reference_crawl`) stay byte-identical
 pub fn moveEntity(w: *world.World, id: entity.EntityId, dir: Direction) !loc.Loc {
     const ent = w.store.get(id) orelse return error.EntityNotFound;
     const old_loc = ent.loc;
@@ -62,6 +66,11 @@ pub fn moveEntity(w: *world.World, id: entity.EntityId, dir: Direction) !loc.Loc
     try w.tile_map.place(new_loc, id);
     ent.loc = new_loc;
     w.tick();
+    if (!ent.is_monster) {
+        const ex = @import("conditions.zig").exhaustionLevel(ent);
+        const extra = ex >= 3 or (ex >= 1 and w.floor_index >= 4);
+        if (extra) w.tick();
+    }
     return new_loc;
 }
 

@@ -252,6 +252,23 @@ pub fn build(b: *std.Build) void {
     const evidence_v15_step = b.step("evidence-v15", "Emit v1.5 crawl-completeness verification transcript");
     evidence_v15_step.dependOn(&evidence_v15_run.step);
 
+    const evidence_v16_exe = b.addExecutable(.{
+        .name = "zig-q-evidence-v16",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/evidence_v16_main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zig_q", .module = zig_q_mod },
+            },
+        }),
+    });
+    b.installArtifact(evidence_v16_exe);
+
+    const evidence_v16_run = b.addRunArtifact(evidence_v16_exe);
+    const evidence_v16_step = b.step("evidence-v16", "Emit v1.6 depth-danger verification transcript");
+    evidence_v16_step.dependOn(&evidence_v16_run.step);
+
     const wave_gate_exe = b.addExecutable(.{
         .name = "zig-q-wave-gate",
         .root_module = b.createModule(.{
@@ -265,9 +282,11 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(wave_gate_exe);
 
-    const gate_scratch = "C:\\Users\\admin\\AppData\\Local\\Temp\\grok-goal-1322f48c036d\\implementer";
+    // Portable gate scratch: repo-relative `.gate-scratch/` (override via ZIG_Q_SCRATCH).
+    // Same env var wave_gate.zig honors so build-log paths and gate captures share a root.
+    const gate_scratch = b.graph.env_map.get("ZIG_Q_SCRATCH") orelse ".gate-scratch";
 
-    inline for (.{ 11, 12, 13, 14, 15 }) |wave| {
+    inline for (.{ 11, 12, 13, 14, 15, 16 }) |wave| {
         const prefix = b.fmt("v{d}", .{wave});
         const build_log = b.fmt("{s}\\{s}_build.log", .{ gate_scratch, prefix });
 

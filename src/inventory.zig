@@ -159,11 +159,13 @@ pub const State = struct {
         return false;
     }
 
-    pub fn effectiveMovement(self: *const State, ent: *entity.Entity) u8 {
+    pub fn effectiveMovement(self: *const State, ent: *const entity.Entity) u8 {
         var speed = ent.movement;
         const penalty = self.encumbrancePenalty(ent);
         if (penalty >= speed) return 1;
         speed -%= @intCast(penalty);
+        // Display: exhaustion tier 3+ movement −1. Real extra move ticks live in
+        // `movement.moveEntity` (tier ≥ 3 always; tiers 1–2 on floor ≥ 4 only).
         if (conditions.exhaustionLevel(ent) >= 3) {
             if (speed > 1) speed -%= 1;
         }
