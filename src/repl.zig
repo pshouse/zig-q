@@ -9,6 +9,9 @@ pub const RunOpts = struct {
     record: ?transcript.RecordOpts = null,
     semver: ?[]const u8 = null,
     playtest: bool = false,
+    /// Force explore AI on even when stdin is piped (--live-ai). AI draws come from
+    /// the seeded stream in a fixed order, so scripted runs stay byte-identical.
+    live_ai: bool = false,
 };
 
 pub const ReplCli = struct {
@@ -16,6 +19,7 @@ pub const ReplCli = struct {
     record: ?transcript.RecordOpts = null,
     semver: ?[]const u8 = null,
     playtest: bool = false,
+    live_ai: bool = false,
 };
 
 /// Parse REPL args after `--repl`: `[seed] [--record [path]]` in any order.
@@ -53,6 +57,10 @@ pub fn parseReplCli(args: []const []const u8) !ReplCli {
             result.playtest = true;
             continue;
         }
+        if (std.mem.eql(u8, arg, "--live-ai")) {
+            result.live_ai = true;
+            continue;
+        }
         if (arg[0] == '-') return error.UnknownArgument;
         result.seed = try std.fmt.parseInt(u64, arg, 10);
     }
@@ -78,7 +86,8 @@ pub fn runRepl(
     defer w.deinit();
     try w.loadFloor(1);
     // Piped scripts skip explore AI so ambush does not block scripted verification paths.
-    w.explore_ai_on_move = std.fs.File.stdin().isTty();
+    // --live-ai opts back in for scripted co-op sessions that want a living dungeon.
+    w.explore_ai_on_move = std.fs.File.stdin().isTty() or opts.live_ai;
 
     var draft: session.CreationDraft = .{};
     _ = session.draftRoll(&w, &draft);
@@ -145,7 +154,7 @@ pub fn runReplScript(
     var w = try world.World.init(allocator, seed);
     defer w.deinit();
     try w.loadFloor(1);
-    w.explore_ai_on_move = false;
+    w.explore_ai_on_move = opts.live_ai;
 
     var draft: session.CreationDraft = .{};
     _ = session.draftRoll(&w, &draft);
@@ -245,6 +254,14 @@ test "parseReplCli gates playtest behind --playtest" {
     try std.testing.expect(!off.playtest);
 }
 
+test "parseReplCli gates live AI behind --live-ai" {
+    const on = try parseReplCli(&.{ "42", "--live-ai" });
+    try std.testing.expectEqual(@as(u64, 42), on.seed);
+    try std.testing.expect(on.live_ai);
+    const off = try parseReplCli(&.{"42"});
+    try std.testing.expect(!off.live_ai);
+}
+
 test "repl recording captures session transcript" {
     const allocator = std.testing.allocator;
 
@@ -330,6 +347,49 @@ test "repl crawl script is deterministic" {
     try std.testing.expect(std.mem.indexOf(u8, out_a, "HP:") != null);
     try std.testing.expect(std.mem.indexOf(u8, out_a, "You cannot move there") != null);
     try std.testing.expectEqualSlices(u8, out_a, out_b);
+}
+
+test "repl live-ai script is deterministic and monsters act" {
+    const allocator = std.testing.allocator;
+    // Descend to floor 2 (floor 1 spawns no monsters) and burn a few explore
+    // actions so live AI has turns to patrol/chase.
+    const script = [_][]const u8{
+        "assign 6 5 4 3 2 1",
+        "race 2",
+        "class 1",
+        "spawn",
+        "move east",
+        "move south",
+        "move east",
+        "descend",
+        "look",
+        "wait",
+        "wait",
+        "wait",
+        "wait",
+        "exit",
+    };
+
+    var buf_a: [32768]u8 = undefined;
+    var buf_b: [32768]u8 = undefined;
+    var fbs_a = std.io.fixedBufferStream(&buf_a);
+    var fbs_b = std.io.fixedBufferStream(&buf_b);
+
+    try runReplScript(allocator, 42, &script, fbs_a.writer(), .{ .live_ai = true });
+    try runReplScript(allocator, 42, &script, fbs_b.writer(), .{ .live_ai = true });
+
+    const out_a = fbs_a.getWritten();
+    const out_b = fbs_b.getWritten();
+    try std.testing.expect(out_a.len > 0);
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "look floor=2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out_a, " moved ") != null);
+    try std.testing.expectEqualSlices(u8, out_a, out_b);
+
+    // Default (piped) behavior stays AI-off: same script, no monster movement.
+    var buf_off: [32768]u8 = undefined;
+    var fbs_off = std.io.fixedBufferStream(&buf_off);
+    try runReplScript(allocator, 42, &script, fbs_off.writer(), .{});
+    try std.testing.expect(std.mem.indexOf(u8, fbs_off.getWritten(), " moved ") == null);
 }
 
 test "repl creation script is deterministic" {

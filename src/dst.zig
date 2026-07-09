@@ -578,6 +578,39 @@ pub const reference_survive_scenario = Scenario{
     },
 };
 
+/// Seed 42: monsters must outlive a long stretch of the survival clock. Regression
+/// scenario for the leak that ticked hunger/fatigue on monsters and dropped every
+/// floor's population dead of exhaustion ~95 ticks after spawn — corpseless (only
+/// the combat kill path drops corpses) and untargetable. The player's meters are
+/// pinned back between waits so only the goblin is exposed to the clock.
+pub const monster_endurance_scenario = Scenario{
+    .name = "monster_endurance",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 },
+        .{ .choose_class = 1 },
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .spawn_monster = .{ .kind = .goblin, .name = "goblin_0", .x = 50, .y = 49 } },
+        .{ .tick = 45 },
+        .{ .set_hunger = .{ .entity = "entity_0", .value = 0 } },
+        .{ .set_fatigue = .{ .entity = "entity_0", .value = 0 } },
+        .{ .tick = 45 },
+        .{ .set_hunger = .{ .entity = "entity_0", .value = 0 } },
+        .{ .set_fatigue = .{ .entity = "entity_0", .value = 0 } },
+        .{ .tick = 45 },
+        .{ .set_hunger = .{ .entity = "entity_0", .value = 0 } },
+        .{ .set_fatigue = .{ .entity = "entity_0", .value = 0 } },
+        .{ .command = "look" },
+        .{ .command = "attack goblin_0" },
+        .{ .command = "end turn" },
+        .{ .command = "exit" },
+    },
+};
+
 pub const hunt_scenario = Scenario{
     .name = "hunt",
     .seed = 42,
@@ -1426,6 +1459,8 @@ pub fn scenarioByName(name: []const u8, seed: u64) ?Scenario {
         return Scenario{ .name = "rest_floor", .seed = seed, .steps = rest_floor_scenario.steps };
     if (std.mem.eql(u8, name, "reference_survive"))
         return Scenario{ .name = "reference_survive", .seed = seed, .steps = reference_survive_scenario.steps };
+    if (std.mem.eql(u8, name, "monster_endurance"))
+        return Scenario{ .name = "monster_endurance", .seed = seed, .steps = monster_endurance_scenario.steps };
     if (std.mem.eql(u8, name, "heal_bandage"))
         return Scenario{ .name = "heal_bandage", .seed = seed, .steps = heal_bandage_scenario.steps };
     if (std.mem.eql(u8, name, "trap_floor"))
@@ -1703,6 +1738,7 @@ test "dst create scenario is byte-identical across runs" {
     try std.testing.expectEqualSlices(u8, out_a, out_b);
 }
 
+/// Returned transcript is allocated with `allocator`; the caller must free it.
 fn expectScenarioDeterministic(allocator: std.mem.Allocator, name: []const u8, buf_size: usize) ![]const u8 {
     var buf_a: [131072]u8 = undefined;
     var buf_b: [131072]u8 = undefined;
@@ -1715,12 +1751,13 @@ fn expectScenarioDeterministic(allocator: std.mem.Allocator, name: []const u8, b
     const out_b = fbs_b.getWritten();
     try std.testing.expect(out_a.len > 0);
     try std.testing.expectEqualSlices(u8, out_a, out_b);
-    return out_a;
+    return try allocator.dupe(u8, out_a);
 }
 
 test "dst save_v2_roundtrip scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "save_v2_roundtrip", 131072);
+    defer allocator.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "poisoned") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "exhaustion=3") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "floor_object corpse") != null);
@@ -1729,6 +1766,7 @@ test "dst save_v2_roundtrip scenario is byte-identical across runs" {
 test "dst conditions_brawl scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "conditions_brawl", 131072);
+    defer allocator.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "mod=4") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "conditions: none") != null);
 }
@@ -1736,6 +1774,7 @@ test "dst conditions_brawl scenario is byte-identical across runs" {
 test "dst los_peek scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "los_peek", 65536);
+    defer allocator.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "near_goblin") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "far_goblin (goblin)") == null);
 }
@@ -1743,12 +1782,14 @@ test "dst los_peek scenario is byte-identical across runs" {
 test "dst ambush scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "ambush", 65536);
+    defer allocator.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "ambush combat started") != null);
 }
 
 test "dst hunt scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "hunt", 131072);
+    defer allocator.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "waited") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "look floor=1") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "*") != null);
@@ -1757,6 +1798,7 @@ test "dst hunt scenario is byte-identical across runs" {
 test "dst flee scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "flee", 65536);
+    defer allocator.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "flee_goblin") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "waited") != null);
 }
@@ -1764,6 +1806,7 @@ test "dst flee scenario is byte-identical across runs" {
 test "dst trap_trigger scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "trap_trigger", 65536);
+    defer allocator.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "trap triggered") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "poisoned") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "poison cleared") != null);
@@ -1772,6 +1815,7 @@ test "dst trap_trigger scenario is byte-identical across runs" {
 test "dst door_route scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "door_route", 65536);
+    defer allocator.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "opened door") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "moved to (50,49)") != null);
 }
@@ -1779,6 +1823,7 @@ test "dst door_route scenario is byte-identical across runs" {
 test "dst permadeath scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "permadeath", 65536);
+    defer allocator.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "you are dead (permadeath)") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "status: dead (permadeath)") != null);
 }
@@ -1786,6 +1831,7 @@ test "dst permadeath scenario is byte-identical across runs" {
 test "dst survive scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "survive", 131072);
+    defer allocator.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "hunger=") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "ate rations") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "rested") != null);
@@ -1795,6 +1841,7 @@ test "dst survive scenario is byte-identical across runs" {
 test "dst starve scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "starve", 131072);
+    defer allocator.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "hunger=100") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "starving") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "moved to") != null);
@@ -1803,6 +1850,7 @@ test "dst starve scenario is byte-identical across runs" {
 test "dst starve_out scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "starve_out", 131072);
+    defer allocator.free(out);
     // Death lands via the tick step with no combat in progress, yet the gate holds.
     try std.testing.expect(std.mem.indexOf(u8, out, "you are dead (permadeath)") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "status: dead (permadeath)") != null);
@@ -1813,6 +1861,7 @@ test "dst starve_out scenario is byte-identical across runs" {
 test "dst sleep_cycle scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "sleep_cycle", 131072);
+    defer allocator.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "sleeping (unconscious)") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "slept") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "fatigue=") != null);
@@ -1822,6 +1871,7 @@ test "dst sleep_cycle scenario is byte-identical across runs" {
 test "dst rest_floor scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "rest_floor", 131072);
+    defer allocator.free(out);
     // From a penalty tier, rest lifts out but is floored: fatigue stalls at 20...
     try std.testing.expect(std.mem.indexOf(u8, out, "exhaustion=3") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "fatigue=20)") != null);
@@ -1834,6 +1884,7 @@ test "dst rest_floor scenario is byte-identical across runs" {
 test "dst reference_survive scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "reference_survive", 131072);
+    defer allocator.free(out);
     var version_expect_buf: [64]u8 = undefined;
     const version_expect = try std.fmt.bufPrint(&version_expect_buf, "# version={s}", .{version.semver});
     try std.testing.expect(std.mem.indexOf(u8, out, version_expect) != null);
@@ -1842,9 +1893,20 @@ test "dst reference_survive scenario is byte-identical across runs" {
     try std.testing.expect(std.mem.indexOf(u8, out, "loaded slot") != null);
 }
 
+test "dst monster_endurance scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "monster_endurance", 131072);
+    defer allocator.free(out);
+    // The goblin must outlive 135 ticks of world clock: still visible and attackable.
+    try std.testing.expect(std.mem.indexOf(u8, out, "step tick count=45 total=135") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "attack entity_0->goblin_0 roll=") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "no valid attack target") == null);
+}
+
 test "dst heal_bandage scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "heal_bandage", 65536);
+    defer allocator.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "used bandage; healed") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "HP:") != null);
 }
@@ -1852,6 +1914,7 @@ test "dst heal_bandage scenario is byte-identical across runs" {
 test "dst trap_floor scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "trap_floor", 131072);
+    defer allocator.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "floor_object trap") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "trap triggered") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "poisoned") != null);
@@ -1860,6 +1923,7 @@ test "dst trap_floor scenario is byte-identical across runs" {
 test "dst deep_floor scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "deep_floor", 65536);
+    defer allocator.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "depth_report floor=2 plan_monsters=3 plan_loot=4 plan_bandages=1") != null);
     // Intentional v1.6 delta (D4): floor-5 loot scarcity (was plan_loot=8).
     try std.testing.expect(std.mem.indexOf(u8, out, "depth_report floor=5 plan_monsters=5") != null);
@@ -1869,6 +1933,7 @@ test "dst deep_floor scenario is byte-identical across runs" {
 test "dst combat_flee scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "combat_flee", 65536);
+    defer allocator.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "flees from combat") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "opportunity attack goblin_0->entity_0") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "combat ended") != null);
@@ -1877,6 +1942,7 @@ test "dst combat_flee scenario is byte-identical across runs" {
 test "dst catch_breath scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "catch_breath", 65536);
+    defer allocator.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "catches their breath") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "exhaustion eased") != null);
 }
@@ -1884,6 +1950,7 @@ test "dst catch_breath scenario is byte-identical across runs" {
 test "dst combat_reposition scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "combat_reposition", 65536);
+    defer allocator.free(out);
     // The out-of-reach goblin forfeits: the turn comes straight back to the player
     // after both `end turn` and `catch breath`, with no goblin counterattack between.
     try std.testing.expect(std.mem.indexOf(u8, out, "turn: entity_0") != null);
@@ -1898,6 +1965,7 @@ test "dst combat_reposition scenario is byte-identical across runs" {
 test "dst deadly_floor scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "deadly_floor", 65536);
+    defer allocator.free(out);
     // Danger-tier goblin counters after player attack (attack goblin→player lines).
     try std.testing.expect(std.mem.indexOf(u8, out, "attack goblin_0->entity_0") != null);
     // Danger-tier attack modifier is STR(-1)+tier(1) = 0 (not the legacy mod=-1).
@@ -1912,6 +1980,7 @@ test "dst deadly_floor scenario is byte-identical across runs" {
 test "dst elite_brawl scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "elite_brawl", 65536);
+    defer allocator.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "hobgoblin") != null);
     // AC 16 base + tier/2 (tier 2 → +1) = 17
     try std.testing.expect(std.mem.indexOf(u8, out, "vs AC 17") != null);
@@ -1920,6 +1989,7 @@ test "dst elite_brawl scenario is byte-identical across runs" {
 test "dst scarce_heals scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "scarce_heals", 65536);
+    defer allocator.free(out);
     // Floor-2 baseline is exactly 1 bandage; deep floors must not exceed that share.
     try std.testing.expect(std.mem.indexOf(u8, out, "depth_report floor=2 plan_monsters=3 plan_loot=4 plan_bandages=1 plan_elites=0") != null);
     // Floor-5 loot stays scarce (3 vs the pre-1.6 glut of 8) but now includes
@@ -1933,6 +2003,7 @@ test "dst scarce_heals scenario is byte-identical across runs" {
 test "dst save_v4_roundtrip scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "save_v4_roundtrip", 131072);
+    defer allocator.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "saved slot") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "loaded slot") != null);
     // Post-load report (not only the pre-save spawn_monster line).
@@ -1947,6 +2018,7 @@ test "dst save_v4_roundtrip scenario is byte-identical across runs" {
 test "dst sleep_interrupt scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "sleep_interrupt", 65536);
+    defer allocator.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "sleeping (unconscious)") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "sleep interrupted by combat") != null);
     // D2: ambusher opens with a swing, then player turn.
@@ -1957,6 +2029,7 @@ test "dst sleep_interrupt scenario is byte-identical across runs" {
 test "dst unequip_cycle scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "unequip_cycle", 65536);
+    defer allocator.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "equipped short sword") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "unequipped short sword") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "short sword x1") != null);
@@ -1965,19 +2038,32 @@ test "dst unequip_cycle scenario is byte-identical across runs" {
 test "dst drop_clears_slot scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "drop_clears_slot", 65536);
+    defer allocator.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "unequipped short sword") != null);
 }
 
 test "dst bare_loot_corpse scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "bare_loot_corpse", 65536);
+    defer allocator.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "picked up short sword from goblin_0") != null);
 }
 
 test "dst weaker_weapon scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "weaker_weapon", 65536);
+    defer allocator.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "you keep your innate d12") != null);
+}
+
+test "dst survival_economy scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "survival_economy", 65536);
+    defer allocator.free(out);
+    // Danger floors always audit >= 1 planned ration (v1.6 survival floor).
+    try std.testing.expect(std.mem.indexOf(u8, out, "economy_report floor=4 plan_rations=1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "economy_report floor=5 plan_rations=1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "ration_ticks=50") != null);
 }
 
 test "provisioned player on a direct stairs route reaches floor 5 alive on all tested seeds" {

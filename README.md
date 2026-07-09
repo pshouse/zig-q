@@ -2,7 +2,7 @@
 
 A Zig prototype for deterministic **dungeon crawl** simulation: character creation, dungeon tiles, level-1 combat sheet (HP/AC), turn-based combat, and SQLite save/load.
 
-**Requires Zig 0.15+** (tested on 0.15.2). **Version:** `1.5.4` — deterministic dungeon crawl through crawl completeness (see ROADMAP.md).
+**Requires Zig 0.15+** (tested on 0.15.2). **Version:** `1.6.0` — deterministic dungeon crawl through crawl completeness (see ROADMAP.md).
 
 SQLite is bundled via the amalgamation in `deps/sqlite3/` (no system SQLite install required).
 
@@ -41,6 +41,7 @@ zig build run -- --repl 42
 zig build run -- --repl 42 --record
 zig build run -- --repl --record 42
 zig build run -- --repl 42 --record my-session.txt
+zig build run -- --repl 42 --live-ai
 ```
 
 Use `--record` to save a transcript (default: `transcripts/session-<timestamp>-seed<N>.txt`). A bare number after `--record` is the **seed**, not a filename — use a path like `transcripts/foo.txt` for a custom file. Transcripts include `# version=<semver>`, `# seed=`, and `> command` lines. Override version metadata with `--semver 0.6.0-dev`.
@@ -76,6 +77,8 @@ Piped crawl script (PowerShell):
 ```
 
 Use newline-terminated lines. Each line is echoed as `> <command>` in the transcript.
+
+Piped sessions run with **explore AI off** by default: monsters do not patrol, chase, or ambush between your actions, so scripted verification paths stay stable. Pass `--live-ai` to keep explore AI on in a piped session — monsters roam exactly as in an interactive TTY run. AI draws come from the seeded stream in a fixed order, so a `--live-ai` script is still byte-identical across replays. DST scenarios and wave-gate captures do not use this flag; their golden transcripts are unchanged.
 
 ## DST harness (deterministic simulation testing)
 
@@ -120,6 +123,7 @@ zig build dst -- @scenarios/reference_crawl.txt 42
 - **scarce_heals** — floor 4–5 loot plans place fewer bandages than the floor-2 baseline
 - **save_v4_roundtrip** — schema v4 `danger_tier` survives save/load
 - **survival_economy** — food-vs-ticks audit per generated floor: planned rations, spawn→stairs distance, minimum crossing cost (danger floors guarantee ≥ 1 ration)
+- **monster_endurance** — goblin outlives 135 ticks of world clock and is still attackable; regression for monsters dying of exhaustion (survival pressure is player-only)
 - **@scenarios/*.txt** — data-driven step files (`load_floor`, `command`, `spawn`, …)
 
 Floors 2+ are generated deterministically from `(seed, floor_index)`; floor 1 stays handcrafted for regression.
@@ -182,7 +186,8 @@ zig build run -- --help
 | Version | Theme |
 |---------|--------|
 | **1.6.0** | Depth danger: initiative counters on floor ≥4, danger-tier stats, elites, scarce heals, save v4 |
-| **1.5.4** | Survival economy: `rest` floored at fatigue 20; only `sleep` fully clears exhaustion |
+| **1.5.5** | Monsters exempt from hunger/fatigue/exhaustion: survival pressure is player-only, so floors no longer die off corpseless ~95 ticks after spawning (poison DoT still applies to monsters) |
+| **1.5.4** | Survival economy: `rest` floored at fatigue 20; only `sleep` fully clears exhaustion (sleep no longer strictly dominated) |
 | **1.5.3** | Review fixes: look no longer perturbs combat RNG, unique deep-floor monster names, honest cross-wave gate |
 | **1.5.2** | DoT HP notices for poison/starvation ticks |
 | **1.5.1** | v1.5 crawl + WIS-gated trap spotting in `look` |
