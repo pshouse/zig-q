@@ -378,11 +378,22 @@ fn processMonsterTurns(w: *world.World, writer: anytype) !void {
     while (true) {
         const active = activeTurn(w) orelse return;
         if (active == combat.player_id) return;
+        const player = w.store.get(combat.player_id) orelse return;
+        if (!isAlive(player)) return;
         const ent = w.store.get(active) orelse {
             advanceTurn(w);
             continue;
         };
         if (!isAlive(ent)) {
+            advanceTurn(w);
+            continue;
+        }
+        // A monster the player has stepped away from has no reach this round: it
+        // forfeits its swing (no attack, no RNG draw, no clock tick) instead of
+        // surfacing performAttack's NotAdjacent out of the whole turn handoff.
+        // Termination: the living player is a participant, so advanceTurn reaches
+        // them within one cycle and the loop exits at the player-turn check above.
+        if (!isAdjacent(ent.loc, player.loc)) {
             advanceTurn(w);
             continue;
         }
@@ -650,6 +661,56 @@ test "player can move on their turn during combat" {
     const moved = try @import("movement.zig").moveEntity(&w, player_id, .west);
     try std.testing.expectEqual(loc.Loc.init(49, 48), moved);
     try std.testing.expect(isInCombat(&w));
+}
+
+test "end turn after moving out of reach skips the monster instead of crashing" {
+    // Regression: move one tile away mid-combat, then end turn. processMonsterTurns
+    // used to call performAttack unconditionally, so the goblin's counter raised
+    // error.NotAdjacent, which no command handler catches — aborting the REPL/DST.
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    const goblin_id = try w.spawnMonster(.goblin, loc.Loc.init(50, 49), "goblin_0");
+    try enterCombat(&w, player_id, goblin_id);
+    _ = try @import("movement.zig").moveEntity(&w, player_id, .west);
+
+    const hp_before = w.store.get(player_id).?.current_hp;
+    var buf: [512]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    try endTurn(&w, player_id, fbs.writer());
+
+    // The goblin forfeits its swing (no attack line, player untouched), combat
+    // stays live, and initiative comes back around to the player.
+    const out = fbs.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, out, "attack ") == null);
+    try std.testing.expectEqual(hp_before, w.store.get(player_id).?.current_hp);
+    try std.testing.expect(isInCombat(&w));
+    try std.testing.expect(activeTurn(&w) == player_id);
+    try std.testing.expect(std.mem.indexOf(u8, out, "turn: entity_0") != null);
+}
+
+test "catch breath after moving out of reach skips the monster instead of crashing" {
+    // Same passTurnToOpponents handoff as end turn; both entry points must survive
+    // a repositioned player.
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    const goblin_id = try w.spawnMonster(.goblin, loc.Loc.init(50, 49), "goblin_0");
+    try enterCombat(&w, player_id, goblin_id);
+    _ = try @import("movement.zig").moveEntity(&w, player_id, .west);
+
+    var buf: [512]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    try catchBreath(&w, player_id, fbs.writer());
+    const out = fbs.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, out, "catches their breath") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "attack ") == null);
+    try std.testing.expect(isInCombat(&w));
+    try std.testing.expect(activeTurn(&w) == player_id);
 }
 
 test "combat end restores exploring status" {

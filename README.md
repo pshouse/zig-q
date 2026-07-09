@@ -112,6 +112,7 @@ zig build dst -- @scenarios/reference_crawl.txt 42
 - **reference_crawl** — floor 1→3 descent, goblin fights, save/load on floor 2 (seed 42 regression)
 - **combat_flee** — exhausted fighter attacks then `flee`s; adjacent goblin gets one opportunity attack, combat ends
 - **catch_breath** — exhausted fighter trades combat turns to `catch breath`, shedding fatigue as the goblin counters
+- **combat_reposition** — step out of the goblin's reach mid-combat, then `end turn` / `catch breath`; the unreachable goblin forfeits its counter (crash regression), re-engage proves combat stayed live
 - **rest_floor** — rest sheds fatigue only to the floor (20); only sleep clears exhaustion (survival-economy guard)
 - **@scenarios/*.txt** — data-driven step files (`load_floor`, `command`, `spawn`, …)
 
