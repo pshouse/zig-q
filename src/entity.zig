@@ -21,6 +21,8 @@ pub const Entity = struct {
     current_hp: u32 = 0,
     max_hp: u32 = 0,
     damage_die: u8 = 0,
+    /// Depth-danger bonus tier (0 on floors 1–3; 1–2 on floors 4–5). Player always 0.
+    danger_tier: u32 = 0,
     is_monster: bool = false,
     heap_char_name: bool = false,
     inventory: inventory.State = .init(),

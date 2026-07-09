@@ -531,6 +531,21 @@ fn cmdEquip(ctx: *Context, name: []const u8, writer: anytype) !Result {
         try writer.print("no player spawned\n", .{});
         return .continue_repl;
     };
+    if (conditions.blocksAttack(ent) and conditions.blocksMove(ent)) {
+        try writer.print("cannot equip while incapacitated\n", .{});
+        return .continue_repl;
+    }
+    // Mid-combat gear swaps cost the turn (parity with get/drop being blocked).
+    if (combat.isInCombat(ctx.w)) {
+        const active = combat.activeTurn(ctx.w) orelse {
+            try writer.print("cannot equip during combat\n", .{});
+            return .continue_repl;
+        };
+        if (active != ctx.player_id) {
+            try writer.print("not your turn\n", .{});
+            return .continue_repl;
+        }
+    }
     const id = try resolveBagItemOrPrint(ent, name, writer) orelse return .continue_repl;
     if (!ent.inventory.has(id)) {
         try writer.print("you do not have that item\n", .{});
@@ -555,6 +570,26 @@ fn cmdEquip(ctx: *Context, name: []const u8, writer: anytype) !Result {
         },
     }
     try writer.print("equipped {s}\n", .{d.name});
+    // Equip advisory: weapon die vs innate baseline + trait.
+    if (d.category == .weapon) {
+        const baseline = inventory.State.baselineDamageDie(ent);
+        if (d.damage_die < baseline) {
+            try writer.print("you keep your innate d{}; the {s}", .{ baseline, d.name });
+            if (d.trait != .none) {
+                try writer.print(" adds its {s} trait\n", .{@tagName(d.trait)});
+            } else {
+                try writer.print(" does not raise your damage die\n", .{});
+            }
+        } else if (d.damage_bonus > 0) {
+            try writer.print("fine quality: +{} damage\n", .{d.damage_bonus});
+        }
+    }
+    if (combat.isInCombat(ctx.w)) {
+        try combat.endTurn(ctx.w, ctx.player_id, writer);
+    } else {
+        try tickPlayerAction(ctx, 1, writer);
+        try finishExploreAction(ctx, writer);
+    }
     return .continue_repl;
 }
 
@@ -590,6 +625,22 @@ fn cmdUnequip(ctx: *Context, name: []const u8, writer: anytype) !Result {
 }
 
 fn unequipFromSlot(ctx: *Context, inv: *inventory.State, slot: inventory.Slot, writer: anytype) !Result {
+    if (ctx.w.store.get(ctx.player_id)) |ent| {
+        if (conditions.blocksAttack(ent) and conditions.blocksMove(ent)) {
+            try writer.print("cannot unequip while incapacitated\n", .{});
+            return .continue_repl;
+        }
+    }
+    if (combat.isInCombat(ctx.w)) {
+        const active = combat.activeTurn(ctx.w) orelse {
+            try writer.print("cannot unequip during combat\n", .{});
+            return .continue_repl;
+        };
+        if (active != ctx.player_id) {
+            try writer.print("not your turn\n", .{});
+            return .continue_repl;
+        }
+    }
     const id = inv.clearSlot(slot) orelse {
         try writer.print("no {s} equipped\n", .{inventory.slotLabel(slot)});
         return .continue_repl;
@@ -599,6 +650,12 @@ fn unequipFromSlot(ctx: *Context, inv: *inventory.State, slot: inventory.Slot, w
     // putting the item back so `unequip` can never delete gear.
     if (!inv.has(id)) try inv.add(ctx.allocator, id, 1);
     try writer.print("unequipped {s}\n", .{items.def(id).name});
+    if (combat.isInCombat(ctx.w)) {
+        try combat.endTurn(ctx.w, ctx.player_id, writer);
+    } else {
+        try tickPlayerAction(ctx, 1, writer);
+        try finishExploreAction(ctx, writer);
+    }
     return .continue_repl;
 }
 
@@ -607,6 +664,10 @@ fn cmdFood(ctx: *Context, name: ?[]const u8, writer: anytype) !Result {
         try writer.print("no player spawned\n", .{});
         return .continue_repl;
     };
+    if (conditions.has(ent, .unconscious) or conditions.blocksAttack(ent)) {
+        try writer.print("cannot eat while incapacitated\n", .{});
+        return .continue_repl;
+    }
     var food_id: ?items.Id = null;
     if (name) |n| {
         food_id = items.parseId(n);
@@ -658,6 +719,10 @@ fn cmdRest(ctx: *Context, writer: anytype) !Result {
     var i: u32 = 0;
     while (i < survival.rest_ticks) : (i += 1) {
         ctx.w.tickAction(1);
+        // Live explore AI each tick so ambush can interrupt rest (was dead branch).
+        if (ctx.w.explore_ai_on_move and !combat.isInCombat(ctx.w)) {
+            _ = try explore.afterPlayerExploreAction(ctx.w, ctx.player_id, writer);
+        }
         if (combat.isInCombat(ctx.w)) {
             try writer.print("rest interrupted by combat\n", .{});
             try notice.printChanges(ent, writer);
@@ -690,6 +755,10 @@ fn cmdSleep(ctx: *Context, writer: anytype) !Result {
     var i: u32 = 0;
     while (i < survival.sleep_ticks) : (i += 1) {
         ctx.w.tickAction(1);
+        // Live explore AI each tick so ambush can interrupt sleep (D2 first-strike applies).
+        if (ctx.w.explore_ai_on_move and !combat.isInCombat(ctx.w)) {
+            _ = try explore.afterPlayerExploreAction(ctx.w, ctx.player_id, writer);
+        }
         if (combat.isInCombat(ctx.w)) {
             ent.sleeping = false;
             conditions.remove(ent, .unconscious);
@@ -703,7 +772,7 @@ fn cmdSleep(ctx: *Context, writer: anytype) !Result {
     conditions.remove(ent, .unconscious);
     _ = survival.applySleep(ent);
     try notice.printChanges(ent, writer);
-    try writer.print("slept (ticks={} fatigue=0)\n", .{ ctx.w.game_clock.ticks });
+    try writer.print("slept (ticks={} fatigue=0)\n", .{ctx.w.game_clock.ticks});
     return .continue_repl;
 }
 
@@ -748,6 +817,10 @@ fn finishExploreAction(ctx: *Context, writer: anytype) !void {
     // — moves and non-move actions (get/loot/use/wait/open/close/wound) alike — so a
     // scripted run behaves the same regardless of which command the player issues.
     if (!ctx.w.explore_ai_on_move) return;
+    // Floor-1 symmetry: handcrafted floor has no wandering spawns. Manual test spawns
+    // (ambush/hunt/flee) still run AI because those scenarios place monsters themselves;
+    // with zero live monsters this is a no-op, so natural floor-1 paths stay quiet.
+    // (Previously only `move` skipped AI here while `wait` ran it — hoisted for parity.)
     const notice_before: ?SurvivalNoticeState = if (ctx.w.store.get(ctx.player_id)) |ent|
         SurvivalNoticeState.capture(ent)
     else
@@ -762,9 +835,7 @@ fn finishExploreAction(ctx: *Context, writer: anytype) !void {
 }
 
 fn finishExploreMove(ctx: *Context, writer: anytype) !void {
-    // The explore_ai_on_move / combat gates live in finishExploreAction; moves add the
-    // floor-1 exemption (no wandering monsters on the handcrafted starting floor).
-    if (ctx.w.floor_index < 2) return;
+    // AI/combat gates live solely in finishExploreAction (floor-1 / move / wait symmetry).
     try finishExploreAction(ctx, writer);
 }
 
@@ -1001,6 +1072,10 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                 }
             }
             if (ctx.w.store.get(ctx.player_id)) |ent| {
+                if (conditions.blocksMove(ent)) {
+                    try writer.print("cannot move while incapacitated\n", .{});
+                    return .continue_repl;
+                }
                 if (ent.inventory.blocksMove(ent)) {
                     try writer.print("You are too encumbered to move.\n", .{});
                     return .continue_repl;
@@ -1184,8 +1259,10 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                     for (ent.char.attributes.items) |attr| {
                         try writer.print("{s}: {}\n", .{ attr.abbr, attr.stat });
                     }
-                    try writer.print("HP: {}\n", .{ ent.current_hp });
+                    try writer.print("HP: {}\n", .{ent.current_hp});
                     try writer.print("AC: {}\n", .{inventory.State.playerAc(&ent.inventory, ent)});
+                    // effectiveMovement: base − encumbrance − (exhaustion ≥ 3 → −1).
+                    // Real extra move ticks also apply (tier ≥ 3 always; tiers 1–2 on floor ≥ 4).
                     try writer.print("movement: {}\n", .{inventory.State.effectiveMovement(&ent.inventory, ent)});
                     const cap = inventory.State.carryCapacity(character.statByAbbr(ent.char, "STR"));
                     try writer.print("encumbrance: {} of {}\n", .{ ent.inventory.totalWeight(), cap });
@@ -1233,6 +1310,10 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                     try writer.writeAll("\n");
                     return .continue_repl;
                 },
+                error.CannotAct => {
+                    try writer.print("cannot attack while incapacitated\n", .{});
+                    return .continue_repl;
+                },
                 else => |e| return e,
             };
         },
@@ -1256,6 +1337,10 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                     try writer.print("target not adjacent; move next to it first", .{});
                     try combat.formatTargetHints(ctx.w, ctx.player_id, writer);
                     try writer.writeAll("\n");
+                    return .continue_repl;
+                },
+                error.CannotAct => {
+                    try writer.print("cannot attack while incapacitated\n", .{});
                     return .continue_repl;
                 },
                 else => |e| return e,
@@ -1310,6 +1395,10 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                     try writer.print("not your turn\n", .{});
                     return .continue_repl;
                 },
+                error.CannotAct => {
+                    try writer.print("cannot flee while incapacitated\n", .{});
+                    return .continue_repl;
+                },
                 else => |e| return e,
             };
         },
@@ -1325,6 +1414,10 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                 },
                 error.NotYourTurn => {
                     try writer.print("not your turn\n", .{});
+                    return .continue_repl;
+                },
+                error.CannotAct => {
+                    try writer.print("cannot catch breath while incapacitated\n", .{});
                     return .continue_repl;
                 },
                 else => |e| return e,
@@ -2369,7 +2462,7 @@ test "kill via execute restores exploring status" {
         if (std.mem.eql(u8, attr.abbr, "STR")) attr.stat = 18;
     }
     w.store.get(goblin_id).?.current_hp = 1;
-    try combat.enterCombat(&w, ctx.player_id, goblin_id);
+    try combat.enterCombat(&w, ctx.player_id, goblin_id, ctx.player_id);
 
     var buf: [4096]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);

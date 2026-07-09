@@ -147,9 +147,11 @@ pub fn applySleep(ent: *entity.Entity) ExhaustionChange {
 
 pub fn exhaustionEffectHint(level: u3) ?[]const u8 {
     return switch (level) {
-        1, 2 => "getting tired",
+        // Tiers 1–2: rest floors at 20; on danger floors (4+) each move costs an extra tick.
+        // Tier 3: attack disadvantage + movement −1 (display and extra move tick everywhere).
+        1, 2 => "rest cannot fully clear this; deeper floors cost extra move ticks",
         3 => "disadvantage on attacks; movement -1",
-        4 => "HP max halved",
+        4 => "HP max halved; near collapse — rest or sleep soon",
         5, 6 => "risk of collapse",
         else => null,
     };

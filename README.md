@@ -115,6 +115,10 @@ zig build dst -- @scenarios/reference_crawl.txt 42
 - **combat_reposition** — step out of the goblin's reach mid-combat, then `end turn` / `catch breath`; the unreachable goblin forfeits its counter (crash regression), re-engage proves combat stayed live
 - **rest_floor** — rest sheds fatigue only to the floor (20); only sleep clears exhaustion (survival-economy guard)
 - **starve_out** — starvation drains HP to 0 outside combat; permadeath gate blocks further play (walking-dead guard)
+- **deadly_floor** — floor-4 danger-tier counters after every player attack; `flee` under pressure
+- **elite_brawl** — hobgoblin/skeleton_warrior with danger-tier AC/HP on deep floors
+- **scarce_heals** — floor 4–5 loot plans place fewer bandages than the floor-2 baseline
+- **save_v4_roundtrip** — schema v4 `danger_tier` survives save/load
 - **@scenarios/*.txt** — data-driven step files (`load_floor`, `command`, `spawn`, …)
 
 Floors 2+ are generated deterministically from `(seed, floor_index)`; floor 1 stays handcrafted for regression.
@@ -176,12 +180,13 @@ zig build run -- --help
 
 | Version | Theme |
 |---------|--------|
-| **1.4.0** | Survival clock: hunger, fatigue, exhaustion, food/rest/sleep, poison DoT |
-| **1.5.4** | Survival economy: `rest` floored at fatigue 20; only `sleep` fully clears exhaustion (sleep no longer strictly dominated) |
+| **1.6.0** | Depth danger: initiative counters on floor ≥4, danger-tier stats, elites, scarce heals, save v4 |
+| **1.5.4** | Survival economy: `rest` floored at fatigue 20; only `sleep` fully clears exhaustion |
 | **1.5.3** | Review fixes: look no longer perturbs combat RNG, unique deep-floor monster names, honest cross-wave gate |
 | **1.5.2** | DoT HP notices for poison/starvation ticks |
 | **1.5.1** | v1.5 crawl + WIS-gated trap spotting in `look` |
 | **1.5.0** | Bandage heal, procedural traps on descend, depth-scaled monsters/loot |
+| **1.4.0** | Survival clock: hunger, fatigue, exhaustion, food/rest/sleep, poison DoT |
 | **1.3.0** | Living dungeon: monster AI, doors, step-traps, pathfinding |
 | **1.2.0** | Mundane gear: inventory, weapons, armour, encumbrance, corpse loot |
 | **1.1.0** | Foundation: save v2, LOS, conditions registry, permadeath, ambush handoff |

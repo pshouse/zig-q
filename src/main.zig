@@ -72,23 +72,21 @@ pub fn main() !void {
             \\  zig build run -- --version [--semver <version>]
             \\                                           Print semver and exit
             \\  zig build run -- --demo [seed]             Non-interactive demo (default seed 42)
-            \\  zig build run -- --repl [seed] [--record [path]] [--semver <version>]
+            \\  zig build run -- --repl [seed] [--record [path]] [--semver <version>] [--playtest]
             \\  zig build run -- --repl --record [seed]    Same; numeric after --record is seed
             \\                                           Interactive REPL (default seed 42)
-            \\  zig build dst -- bootstrap [seed]          DST harness: bootstrap scenario
-            \\  zig build dst -- explore [seed]            DST harness: explore scenario
-            \\  zig build dst -- create [seed]             DST harness: character creation scenario
-            \\  zig build dst -- crawl_start [seed]       DST harness: dungeon crawl start
-            \\  zig build dst -- brawl [seed]              DST harness: combat scenario
-            \\  zig build dst -- playthrough [seed]       DST harness: harvested REPL playthrough
+            \\  zig build dst -- <scenario> [seed]         DST harness (bootstrap, brawl, deadly_floor, …)
+            \\  zig build dst -- @scenarios/<file> [seed]  Data-driven scenario file
             \\  zig build run -- --harvest <transcript>   Print harvested > command lines
             \\  zig build fuzz -- [iterations] [seed] [world_seed]
             \\                                           Deterministic REPL fuzz harness (required gate)
+            \\  zig build gate-v16                        v1.6 release gate captures
             \\
             \\  --record writes a transcript under transcripts/ unless path is given.
             \\  Transcripts include # version=<semver>; --semver overrides for this run.
+            \\  --playtest enables extra debug verbs (e.g. wound) for manual balance work.
             \\
-            \\  See ROADMAP.md for v0.6-v1.0 dungeon crawl plan.
+            \\  See ROADMAP.md for the dungeon crawl plan (current: v1.6).
             \\
         , .{zig_q.version.semver});
         return;

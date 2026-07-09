@@ -100,10 +100,27 @@ fn depthBonusRng(world_seed: u64, floor_index: u32) rng.SeededRng {
     return rng.SeededRng.init(depthBonusSeed(world_seed, floor_index));
 }
 
-/// Depth tier for generated floors (0 on floor 1–2 baseline).
+fn eliteSeed(world_seed: u64, floor_index: u32) u64 {
+    return floorSeed(world_seed, floor_index) ^ 0xE11FE11FE11FE11F;
+}
+
+/// Separate stream for elite upgrades on danger floors only — does not touch
+/// floor-3 `depthBonusRng` draw positions (frozen golden safety).
+pub fn eliteRng(world_seed: u64, floor_index: u32) rng.SeededRng {
+    return rng.SeededRng.init(eliteSeed(world_seed, floor_index));
+}
+
+/// Depth tier for generated floors (0 on floor 1–2 baseline). Count scaling only.
 fn depthTier(floor_index: u32) u32 {
     if (floor_index < 2) return 0;
     return @min(floor_index - 2, 6);
+}
+
+/// Danger tier for lethality bonuses. 0 on floors 1–3; 1 on floor 4; 2 on floor 5+.
+/// Cap 2 (product max depth 5). All v1.6 teeth gate on this so pre-1.6 goldens stay frozen.
+pub fn dangerTier(floor_index: u32) u32 {
+    if (floor_index < 4) return 0;
+    return @min(floor_index - 3, 2);
 }
 
 pub const GeneratedFloor = struct {
@@ -226,6 +243,7 @@ pub const MonsterSpawn = struct {
     kind: monsters.Kind,
     name: []const u8,
     position: loc.Loc,
+    danger_tier: u32 = 0,
 };
 
 pub const MonsterPlan = struct {
@@ -255,6 +273,22 @@ fn monsterName(kind: monsters.Kind, slot: usize) []const u8 {
             4 => "skeleton_4",
             else => "skeleton_5",
         },
+        .hobgoblin => switch (slot) {
+            0 => "hobgoblin_0",
+            1 => "hobgoblin_1",
+            2 => "hobgoblin_2",
+            3 => "hobgoblin_3",
+            4 => "hobgoblin_4",
+            else => "hobgoblin_5",
+        },
+        .skeleton_warrior => switch (slot) {
+            0 => "skeleton_warrior_0",
+            1 => "skeleton_warrior_1",
+            2 => "skeleton_warrior_2",
+            3 => "skeleton_warrior_3",
+            4 => "skeleton_warrior_4",
+            else => "skeleton_warrior_5",
+        },
     };
 }
 
@@ -265,6 +299,7 @@ pub fn planMonsterSpawns(world_seed: u64, floor_index: u32, spawn: loc.Loc) Mons
 
     var list: [6]MonsterSpawn = undefined;
     var count: usize = 0;
+    const d_tier = dangerTier(floor_index);
 
     const goblin_count = 1 + (floor_rng.nextU8() % 2);
     var g: u8 = 0;
@@ -275,6 +310,7 @@ pub fn planMonsterSpawns(world_seed: u64, floor_index: u32, spawn: loc.Loc) Mons
             .kind = .goblin,
             .name = monsterName(.goblin, count),
             .position = offsetLoc(spawn, offset_x, offset_y),
+            .danger_tier = d_tier,
         };
         count += 1;
     }
@@ -286,6 +322,7 @@ pub fn planMonsterSpawns(world_seed: u64, floor_index: u32, spawn: loc.Loc) Mons
             .kind = .skeleton,
             .name = monsterName(.skeleton, 0),
             .position = offsetLoc(spawn, offset_x, offset_y),
+            .danger_tier = d_tier,
         };
         count += 1;
     }
@@ -302,8 +339,28 @@ pub fn planMonsterSpawns(world_seed: u64, floor_index: u32, spawn: loc.Loc) Mons
                 .kind = kind,
                 .name = monsterName(kind, count),
                 .position = offsetLoc(spawn, offset_x, offset_y),
+                .danger_tier = d_tier,
             };
             count += 1;
+        }
+    }
+
+    // Elite upgrades: separate stream, only when danger_tier > 0 (floor ≥ 4).
+    // Does not consume depthBonusRng, so floor-3 paths stay byte-identical.
+    if (d_tier > 0) {
+        var elite_rng = eliteRng(world_seed, floor_index);
+        var i: usize = 0;
+        while (i < count) : (i += 1) {
+            // ~25% chance per spawn to upgrade to the elite of its family.
+            if ((elite_rng.nextU8() % 4) != 0) continue;
+            const upgraded: monsters.Kind = switch (list[i].kind) {
+                .goblin => .hobgoblin,
+                .skeleton => .skeleton_warrior,
+                .hobgoblin, .skeleton_warrior => list[i].kind,
+            };
+            if (upgraded == list[i].kind) continue;
+            list[i].kind = upgraded;
+            list[i].name = monsterName(upgraded, i);
         }
     }
 
@@ -333,29 +390,67 @@ pub fn planFloorLoot(
 
     var list: [8]LootSpawn = undefined;
     var count: usize = 0;
-    const candidates = [_]items.Id{ .bandage, .antidote, .rations, .leather_armour };
+    const d_tier = dangerTier(floor_index);
+    // Floors 1–3: legacy bandage-rich base table (frozen goldens).
+    // Floor ≥ 4: no free bandage in base; ration cap applies to all placements.
+    const base_table = if (d_tier > 0)
+        [_]items.Id{ .antidote, .rations, .leather_armour, .war_axe }
+    else
+        [_]items.Id{ .bandage, .antidote, .rations, .leather_armour };
+    const legacy_candidates = [_]items.Id{ .bandage, .antidote, .rations, .leather_armour };
+    var rations_placed: u8 = 0;
+    const ration_cap: u8 = 1;
     var c: usize = 0;
-    while (c < candidates.len and count < list.len) : (c += 1) {
+    while (c < base_table.len and count < list.len) : (c += 1) {
+        // Consume the same offset draws as the legacy 4-slot loop so floor RNG
+        // for walkability checks stays aligned on shallow floors; on danger floors
+        // the table itself differs (intentional scarcity, not a frozen golden path).
         const offset_x: i64 = @intCast((floor_rng.nextU8() % 4) + 1);
         const offset_y: i64 = @as(i64, @intCast(floor_rng.nextU8() % 4)) - 2;
         const pos = offsetLoc(spawn, offset_x, offset_y);
         if (!map.isWalkable(pos)) continue;
-        list[count] = .{ .item = candidates[c], .position = pos };
+        var item = base_table[c];
+        if (d_tier > 0 and item == .rations) {
+            if (rations_placed >= ration_cap) item = .antidote;
+            rations_placed +%= 1;
+        }
+        list[count] = .{ .item = item, .position = pos };
         count += 1;
     }
 
     const tier = depthTier(floor_index);
-    if (tier > 0) {
+    if (tier > 0 and d_tier == 0) {
+        // Legacy floor-3 path: keep depthBonusRng draws and bandage-rich table frozen.
         var bonus_rng = depthBonusRng(world_seed, floor_index);
         var attempt: u8 = 0;
         const max_attempts: u8 = @intCast(tier * 4);
         while (attempt < max_attempts and count < list.len) : (attempt += 1) {
-            const pick = bonus_rng.nextU8() % @as(u8, @intCast(candidates.len));
+            const pick = bonus_rng.nextU8() % @as(u8, @intCast(legacy_candidates.len));
             const offset_x: i64 = @intCast((bonus_rng.nextU8() % 8) + 1);
             const offset_y: i64 = @as(i64, @intCast(bonus_rng.nextU8() % 8)) - 4;
             const pos = offsetLoc(spawn, offset_x, offset_y);
             if (!map.isWalkable(pos)) continue;
-            list[count] = .{ .item = candidates[pick], .position = pos };
+            list[count] = .{ .item = legacy_candidates[pick], .position = pos };
+            count += 1;
+        }
+    } else if (d_tier > 0) {
+        // Danger floors: scarce heals, ration cap (shared with base), weapon roster.
+        var bonus_rng = depthBonusRng(world_seed, floor_index);
+        const deep_table = [_]items.Id{ .antidote, .rations, .leather_armour, .war_axe, .greatsword, .bandage };
+        var attempt: u8 = 0;
+        const max_attempts: u8 = @intCast(d_tier); // small cap replaces tier*4 glut
+        while (attempt < max_attempts and count < list.len) : (attempt += 1) {
+            const pick = bonus_rng.nextU8() % @as(u8, @intCast(deep_table.len));
+            var item = deep_table[pick];
+            if (item == .rations) {
+                if (rations_placed >= ration_cap) item = .antidote;
+                rations_placed +%= 1;
+            }
+            const offset_x: i64 = @intCast((bonus_rng.nextU8() % 8) + 1);
+            const offset_y: i64 = @as(i64, @intCast(bonus_rng.nextU8() % 8)) - 4;
+            const pos = offsetLoc(spawn, offset_x, offset_y);
+            if (!map.isWalkable(pos)) continue;
+            list[count] = .{ .item = item, .position = pos };
             count += 1;
         }
     }
@@ -494,12 +589,68 @@ test "deeper floors scale monster and loot counts on seed 42" {
     const loot2 = planFloorLoot(42, 2, gen2.spawn, &map2);
     const loot5 = planFloorLoot(42, 5, gen5.spawn, &map5);
 
-    try std.testing.expect(monsters5.count > monsters2.count or loot5.count > loot2.count);
+    // Monsters still scale with depth; danger-floor loot is intentionally scarcer (v1.6).
     try std.testing.expectEqual(@as(usize, 3), monsters2.count);
     try std.testing.expectEqual(@as(usize, 4), loot2.count);
     try std.testing.expect(monsters5.count > monsters2.count);
     try std.testing.expectEqual(@as(usize, 5), monsters5.count);
-    try std.testing.expect(loot5.count > loot2.count);
+    try std.testing.expect(loot5.count < loot2.count); // scarcity on floor ≥ 4
+    try std.testing.expectEqual(@as(u32, 2), dangerTier(5));
+    try std.testing.expectEqual(@as(u32, 0), dangerTier(3));
+}
+
+test "eliteRng upgrades only on danger floors" {
+    const allocator = std.testing.allocator;
+    var map3 = terrain.TerrainMap.init(allocator);
+    defer map3.deinit();
+    const gen3 = try generateFloor(&map3, 42, 3);
+
+    const plan3 = planMonsterSpawns(42, 3, gen3.spawn);
+    var i: usize = 0;
+    while (i < plan3.count) : (i += 1) {
+        try std.testing.expect(!monsters.isElite(plan3.spawns[i].kind));
+        try std.testing.expectEqual(@as(u32, 0), plan3.spawns[i].danger_tier);
+    }
+
+    // Search a band of seeds for a natural elite upgrade on floor 4 (eliteRng ~25%/spawn).
+    var found_elite = false;
+    var seed: u64 = 1;
+    while (seed < 64) : (seed += 1) {
+        var map = terrain.TerrainMap.init(allocator);
+        defer map.deinit();
+        const gen = try generateFloor(&map, seed, 4);
+        const plan = planMonsterSpawns(seed, 4, gen.spawn);
+        var j: usize = 0;
+        while (j < plan.count) : (j += 1) {
+            try std.testing.expectEqual(@as(u32, 1), plan.spawns[j].danger_tier);
+            if (monsters.isElite(plan.spawns[j].kind)) {
+                found_elite = true;
+                // Name tracks the upgraded kind.
+                try std.testing.expect(std.mem.indexOf(u8, plan.spawns[j].name, "hobgoblin") != null or
+                    std.mem.indexOf(u8, plan.spawns[j].name, "skeleton_warrior") != null);
+            }
+        }
+        if (found_elite) break;
+    }
+    try std.testing.expect(found_elite);
+}
+
+test "danger floor base loot has no free bandage glut" {
+    const allocator = std.testing.allocator;
+    var map = terrain.TerrainMap.init(allocator);
+    defer map.deinit();
+    const gen = try generateFloor(&map, 42, 5);
+    const loot = planFloorLoot(42, 5, gen.spawn, &map);
+    var bandages: usize = 0;
+    var rations: usize = 0;
+    var i: usize = 0;
+    while (i < loot.count) : (i += 1) {
+        if (loot.spawns[i].item == .bandage) bandages += 1;
+        if (loot.spawns[i].item == .rations) rations += 1;
+    }
+    // Base table drops bandage; deep bonus may add at most ~1-in-6 and ration cap is 1.
+    try std.testing.expect(bandages <= 1);
+    try std.testing.expect(rations <= 1);
 }
 
 test "trap spawn plan is deterministic and places poison traps" {
