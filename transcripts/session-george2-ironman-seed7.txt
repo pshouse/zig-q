@@ -1,0 +1,589 @@
+# zig-q repl transcript
+# version=1.6.1
+# seed=7
+# started=1783594506
+# ---
+zig-q repl version=1.6.1 seed=7 floor=1
+stat_rolls: 1=11 2=12 3=13 4=7 5=14 6=12
+type 'help' for commands
+recording to transcripts/session-george2-ironman-seed7.txt
+> roll
+stat_rolls: 1=13 2=15 3=12 4=15 5=12 6=8
+> roll
+stat_rolls: 1=17 2=11 3=8 4=14 5=12 6=14
+> roll
+stat_rolls: 1=13 2=8 3=8 4=10 5=8 6=13
+> roll
+stat_rolls: 1=12 2=16 3=13 4=12 5=13 6=17
+> roll
+stat_rolls: 1=12 2=9 3=12 4=16 5=10 6=17
+> roll
+stat_rolls: 1=9 2=12 3=14 4=14 5=16 6=15
+> roll
+stat_rolls: 1=8 2=12 3=12 4=11 5=17 6=10
+> roll
+stat_rolls: 1=16 2=10 3=10 4=10 5=13 6=13
+> roll
+stat_rolls: 1=11 2=6 3=7 4=15 5=16 6=9
+> roll
+stat_rolls: 1=15 2=16 3=6 4=15 5=10 6=15
+> roll
+stat_rolls: 1=12 2=12 3=8 4=9 5=14 6=14
+> roll
+stat_rolls: 1=16 2=12 3=13 4=4 5=11 6=10
+> roll
+stat_rolls: 1=12 2=14 3=9 4=13 5=16 6=9
+> roll
+stat_rolls: 1=15 2=9 3=8 4=9 5=16 6=9
+> roll
+stat_rolls: 1=10 2=10 3=11 4=10 5=13 6=10
+> roll
+stat_rolls: 1=12 2=11 3=15 4=14 5=10 6=8
+> roll
+stat_rolls: 1=17 2=10 3=14 4=15 5=9 6=17
+> roll
+stat_rolls: 1=8 2=13 3=10 4=17 5=15 6=11
+> roll
+stat_rolls: 1=13 2=12 3=11 4=13 5=12 6=13
+> roll
+stat_rolls: 1=16 2=15 3=11 4=13 5=16 6=11
+> roll
+stat_rolls: 1=11 2=16 3=11 4=13 5=11 6=7
+> roll
+stat_rolls: 1=13 2=12 3=6 4=12 5=10 6=12
+> roll
+stat_rolls: 1=15 2=11 3=16 4=13 5=13 6=14
+> roll
+stat_rolls: 1=6 2=12 3=15 4=9 5=7 6=8
+> roll
+stat_rolls: 1=9 2=13 3=17 4=12 5=7 6=12
+> roll
+stat_rolls: 1=14 2=13 3=6 4=13 5=14 6=17
+> roll
+stat_rolls: 1=10 2=10 3=13 4=12 5=13 6=14
+> roll
+stat_rolls: 1=17 2=15 3=12 4=8 5=8 6=15
+> roll
+stat_rolls: 1=10 2=17 3=11 4=12 5=12 6=15
+> roll
+stat_rolls: 1=12 2=13 3=14 4=17 5=11 6=8
+> roll
+stat_rolls: 1=9 2=15 3=15 4=10 5=12 6=16
+> roll
+stat_rolls: 1=13 2=12 3=13 4=12 5=11 6=12
+> roll
+stat_rolls: 1=17 2=14 3=15 4=11 5=10 6=17
+> roll
+stat_rolls: 1=13 2=17 3=10 4=12 5=15 6=10
+> roll
+stat_rolls: 1=15 2=17 3=13 4=17 5=13 6=13
+> roll
+stat_rolls: 1=17 2=12 3=13 4=7 5=7 6=8
+> roll
+stat_rolls: 1=14 2=17 3=11 4=13 5=8 6=12
+> roll
+stat_rolls: 1=10 2=9 3=11 4=14 5=13 6=15
+> roll
+stat_rolls: 1=14 2=10 3=12 4=16 5=10 6=13
+> roll
+stat_rolls: 1=11 2=15 3=8 4=12 5=11 6=11
+> roll
+stat_rolls: 1=15 2=13 3=15 4=11 5=18 6=12
+> assign 5 3 1 4 6 2
+stats assigned
+> race 2
+race chosen
+> class 1
+class chosen
+> spawn
+spawned id=0 at (49,49) (rations x2 bandage x1)
+> stats
+character George race=dwarf class=barbarian
+STR: 18
+DEX: 15
+CON: 17
+INT: 11
+WIS: 12
+CHA: 13
+HP: 15
+AC: 12
+movement: 30
+encumbrance: 3 of 90
+hunger=0 fatigue=0 exhaustion=0
+> m se e
+moved to (50,49)
+moved to (50,50)
+moved to (50,51)
+> descend
+descended to floor 2
+> look
+look floor=2 center=(49,45) radius=5
+###########
+###########
+###########
+####...####
+####...#...
+...#.@.#...
+.....g....>
+......##...
+...########
+...########
+###########
+nearby:
+  bandage at (51,43) (get bandage)
+  antidote at (51,44) (get antidote)
+  leather armour at (50,46) (get leather armour)
+visible:
+  goblin_0 (goblin) at (50,45) distance=1
+> attack goblin_0
+attack entity_0->goblin_0 roll=6 mod=4 vs AC 15 miss
+> attack goblin_0
+attack entity_0->goblin_0 roll=15 mod=4 vs AC 15 hit damage=14 hp=0/7
+goblin_0 is slain
+> attack goblin_0
+no valid attack target: goblin_0; no creatures in sight
+> move s
+moved to (50,45)
+> get leather armour
+picked up leather armour
+> equip leather armour
+equipped leather armour
+> move s
+moved to (51,45)
+> get antidote
+picked up antidote
+> move w
+moved to (51,44)
+> get bandage
+picked up bandage
+> stats
+character George race=dwarf class=barbarian
+STR: 18
+DEX: 15
+CON: 17
+INT: 11
+WIS: 12
+CHA: 13
+HP: 15
+AC: 13
+movement: 30
+encumbrance: 15 of 90
+hunger=13 fatigue=13 exhaustion=0
+> move n
+moved to (50,44)
+> move e
+moved to (50,45)
+> move e
+moved to (50,46)
+> move e
+moved to (50,47)
+> move e
+moved to (50,48)
+> move e
+moved to (50,49)
+> move e
+moved to (50,50)
+exhaustion level 1 (rest cannot fully clear this; deeper floors cost extra move ticks)
+> descend
+descended to floor 3
+> look
+look floor=3 center=(54,48) radius=5
+...########
+...########
+......#####
+.......####
+#..>..s####
+#....@.####
+####...####
+###########
+###########
+###########
+###########
+nearby:
+  bandage at (55,49) (get bandage)
+  antidote at (55,48) (get antidote)
+visible:
+  skeleton_0 (skeleton) at (53,49) distance=2
+> get antidote
+picked up antidote
+> move s
+moved to (55,48)
+> get bandage
+picked up bandage
+> move n
+moved to (54,48)
+> move e
+moved to (54,49)
+> attack skeleton_0
+attack entity_0->skeleton_0 roll=6 mod=4 vs AC 13 miss
+> attack skeleton_0
+attack entity_0->skeleton_0 roll=19 mod=4 vs AC 13 hit damage=16 hp=0/13
+skeleton_0 is slain
+> attack skeleton_0
+no valid attack target: skeleton_0; no creatures in sight
+> rest
+rested (ticks=34 fatigue=20)
+> move w
+moved to (54,48)
+> move w
+moved to (54,47)
+> move w
+moved to (54,46)
+> move n
+moved to (53,46)
+> descend
+descended to floor 4
+> look
+look floor=4 center=(60,48) radius=5
+......#####
+..###.#####
+..###.#####
+###....####
+###...s####
+###..@.####
+###...g####
+###########
+###########
+...........
+......hg...
+nearby:
+  antidote at (64,48) (get antidote)
+  leather armour at (61,48) (get leather armour)
+  war axe at (64,48) (get war axe)
+  greatsword at (64,45) (get greatsword)
+visible:
+  goblin_1 (goblin) at (61,49) distance=2
+  skeleton_0 (skeleton) at (59,49) distance=2
+> move n
+moved to (59,48)
+> move n
+moved to (58,48)
+> move n
+moved to (57,48)
+> move n
+moved to (56,48)
+> move n
+moved to (55,48)
+> look
+look floor=4 center=(55,48) radius=5
+#######....
+###########
+..#########
+..#########
+..#########
+.....@#####
+..###.#####
+..###.#####
+###....####
+###...s####
+###....####
+> food
+ate rations hunger=1
+> move w
+moved to (55,47)
+> move w
+moved to (55,46)
+exhaustion level 2 (rest cannot fully clear this; deeper floors cost extra move ticks)
+> move w
+moved to (55,45)
+> move w
+moved to (55,44)
+> move w
+moved to (55,43)
+> move w
+moved to (55,42)
+> move w
+moved to (55,41)
+> move w
+moved to (55,40)
+> move w
+moved to (55,39)
+> rest
+exhaustion eased to level 1 (rest cannot fully clear this; deeper floors cost extra move ticks)
+rested (ticks=74 fatigue=30)
+> move s
+moved to (56,39)
+> move s
+moved to (57,39)
+> move s
+moved to (58,39)
+> move s
+moved to (59,39)
+> move s
+moved to (60,39)
+exhaustion level 2 (rest cannot fully clear this; deeper floors cost extra move ticks)
+> move s
+moved to (61,39)
+> move s
+moved to (62,39)
+> move s
+moved to (63,39)
+> move s
+moved to (64,39)
+> rest
+exhaustion eased to level 1 (rest cannot fully clear this; deeper floors cost extra move ticks)
+rested (ticks=98 fatigue=24)
+> move e
+moved to (64,40)
+> move e
+moved to (64,41)
+> move e
+moved to (64,42)
+> move e
+moved to (64,43)
+> move e
+moved to (64,44)
+> move e
+moved to (64,45)
+> get greatsword
+picked up greatsword
+> equip greatsword
+equipped greatsword
+fine quality: +1 damage
+> look
+look floor=4 center=(64,45) radius=5
+######...s#
+######....#
+######...g#
+###########
+###########
+.....@.....
+.........hg
+...........
+...........
+...........
+...........
+nearby:
+  antidote at (64,48) (get antidote)
+  leather armour at (61,48) (get leather armour)
+  war axe at (64,48) (get war axe)
+  trap at (64,50)
+  rations at (68,49) (get rations)
+visible:
+  goblin_3 (goblin) at (65,50) distance=6
+  hobgoblin_4 (hobgoblin) at (65,49) distance=5
+> move e
+moved to (64,46)
+exhaustion level 2 (rest cannot fully clear this; deeper floors cost extra move ticks)
+> move e
+moved to (64,47)
+> move e
+moved to (64,48)
+> get antidote
+picked up antidote
+> move e
+moved to (64,49)
+> attack hobgoblin_4
+attack entity_0->hobgoblin_4 roll=19 mod=4 vs AC 16 hit damage=17 hp=2/19
+attack hobgoblin_4->entity_0 roll=5 mod=2 vs AC 13 miss
+turn: entity_0
+> attack hobgoblin_4
+attack entity_0->hobgoblin_4 roll=8 mod=4 vs AC 16 miss
+starvation deals 1 hp; hp=14/15
+attack hobgoblin_4->entity_0 roll=3 mod=2 vs AC 13 miss
+starvation deals 1 hp; hp=13/15
+turn: entity_0
+> attack hobgoblin_4
+attack entity_0->hobgoblin_4 roll=9 mod=4 vs AC 16 miss
+starvation deals 1 hp; hp=12/15
+attack hobgoblin_4->entity_0 roll=3 mod=2 vs AC 13 miss
+starvation deals 1 hp; hp=11/15
+turn: entity_0
+> look
+look floor=4 center=(64,49) radius=5
+##...s#####
+##....#####
+##...g#####
+###########
+###########
+.....@.....
+.....hg....
+...........
+...........
+...........
+...........
+nearby:
+  leather armour at (61,48) (get leather armour)
+  war axe at (64,48) (get war axe)
+  rations at (68,49) (get rations)
+visible:
+  goblin_3 (goblin) at (65,50) distance=2
+  hobgoblin_4 (hobgoblin) at (65,49) distance=1
+> food
+no longer starving
+ate rations hunger=29
+> move s
+something is in the way.
+> move s
+something is in the way.
+> move s
+something is in the way.
+> look
+look floor=4 center=(64,49) radius=5
+##...s#####
+##....#####
+##...g#####
+###########
+###########
+.....@.....
+.....hg....
+...........
+...........
+...........
+...........
+nearby:
+  leather armour at (61,48) (get leather armour)
+  war axe at (64,48) (get war axe)
+  rations at (68,49) (get rations)
+visible:
+  goblin_3 (goblin) at (65,50) distance=2
+  hobgoblin_4 (hobgoblin) at (65,49) distance=1
+> use antidote
+you are not poisoned
+> rest
+cannot rest during combat
+> rest
+cannot rest during combat
+> move e
+moved to (64,50)
+exhaustion level 3 (disadvantage on attacks; movement -1)
+trap triggered: poisoned
+> move e
+moved to (64,51)
+poison deals 2 hp; hp=9/15
+> move e
+moved to (64,52)
+poison deals 2 hp; hp=7/15
+> move e
+moved to (64,53)
+poison deals 2 hp; hp=5/15
+> move e
+moved to (64,54)
+poison deals 2 hp; hp=3/15
+> look
+look floor=4 center=(64,54) radius=5
+s######....
+.######....
+g######....
+#######....
+#######....
+.....@.....
+hg.........
+...........
+...........
+...........
+...........
+nearby:
+  rations at (68,49) (get rations)
+visible:
+  goblin_3 (goblin) at (65,50) distance=5
+  hobgoblin_4 (hobgoblin) at (65,49) distance=6
+> move e
+moved to (64,55)
+poison deals 2 hp; hp=1/15
+> move e
+moved to (64,56)
+poison deals 1 hp; hp=0/15
+> move e
+you are dead (permadeath)
+> move e
+you are dead (permadeath)
+> move e
+you are dead (permadeath)
+> look
+you are dead (permadeath)
+> stats
+character George race=dwarf class=barbarian
+STR: 18
+DEX: 15
+CON: 17
+INT: 11
+WIS: 12
+CHA: 13
+HP: 0
+AC: 13
+movement: 29
+encumbrance: 22 of 90
+hunger=42 fatigue=67 exhaustion=3
+conditions: exhaustion, poisoned, dead, exhaustion=3
+status: dead (permadeath)
+> move n
+you are dead (permadeath)
+> move n
+you are dead (permadeath)
+> move n
+you are dead (permadeath)
+> move n
+you are dead (permadeath)
+> move n
+you are dead (permadeath)
+> look
+you are dead (permadeath)
+> move n
+you are dead (permadeath)
+> move n
+you are dead (permadeath)
+> move n
+you are dead (permadeath)
+> move n
+you are dead (permadeath)
+> move n
+you are dead (permadeath)
+> look
+you are dead (permadeath)
+> use bandage
+you are dead (permadeath)
+> use bandage
+you are dead (permadeath)
+> use bandage
+you are dead (permadeath)
+> move n
+you are dead (permadeath)
+> move n
+you are dead (permadeath)
+> move n
+you are dead (permadeath)
+> move n
+you are dead (permadeath)
+> stats
+character George race=dwarf class=barbarian
+STR: 18
+DEX: 15
+CON: 17
+INT: 11
+WIS: 12
+CHA: 13
+HP: 0
+AC: 13
+movement: 29
+encumbrance: 22 of 90
+hunger=42 fatigue=67 exhaustion=3
+conditions: exhaustion, poisoned, dead, exhaustion=3
+status: dead (permadeath)
+> move n
+you are dead (permadeath)
+> move n
+you are dead (permadeath)
+> move n
+you are dead (permadeath)
+> stats
+character George race=dwarf class=barbarian
+STR: 18
+DEX: 15
+CON: 17
+INT: 11
+WIS: 12
+CHA: 13
+HP: 0
+AC: 13
+movement: 29
+encumbrance: 22 of 90
+hunger=42 fatigue=67 exhaustion=3
+conditions: exhaustion, poisoned, dead, exhaustion=3
+status: dead (permadeath)
+> move n
+you are dead (permadeath)
+> look
+you are dead (permadeath)
+> exit
+exiting...

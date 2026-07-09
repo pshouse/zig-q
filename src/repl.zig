@@ -317,6 +317,40 @@ test "harvested playthrough transcript is deterministic" {
     try std.testing.expectEqualSlices(u8, out_a, out_b);
 }
 
+// Long-horizon regression from a 177-command ironman playtest (seed 7) that originally
+// exposed monster mass-starvation and the walking-dead permadeath hole. The session runs
+// far past the 95-tick horizon short DST scenarios never reach. Assertions pin the FIXED
+// behaviors: the player's starvation death ends in a permadeath lockout, and the replay
+// stays byte-identical. Re-bless the transcript deliberately if survival tuning changes
+// this route's outcome (see SPRINT_V1.6.md).
+test "harvested george2 ironman transcript is deterministic and permadeath-locked" {
+    const allocator = std.testing.allocator;
+    const path = "transcripts/session-george2-ironman-seed7.txt";
+
+    const harvested = try transcript.harvestFile(allocator, path);
+    defer transcript.freeCommands(allocator, harvested.commands);
+
+    try std.testing.expectEqual(@as(?u64, 7), harvested.header.seed);
+    try std.testing.expectEqual(@as(usize, 177), harvested.commands.len);
+
+    var buf_a: [65536]u8 = undefined;
+    var buf_b: [65536]u8 = undefined;
+    var fbs_a = std.io.fixedBufferStream(&buf_a);
+    var fbs_b = std.io.fixedBufferStream(&buf_b);
+
+    const seed = harvested.header.seed orelse 7;
+    try runReplScript(allocator, seed, harvested.commands, fbs_a.writer(), .{});
+    try runReplScript(allocator, seed, harvested.commands, fbs_b.writer(), .{});
+
+    const out_a = fbs_a.getWritten();
+    const out_b = fbs_b.getWritten();
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "descended to floor 4") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "equipped greatsword") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "starvation deals") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "you are dead (permadeath)") != null);
+    try std.testing.expectEqualSlices(u8, out_a, out_b);
+}
+
 test "repl crawl script is deterministic" {
     const allocator = std.testing.allocator;
     const script = [_][]const u8{
