@@ -90,6 +90,16 @@ The weapon-die fix overshot: with a one-weapon catalog (short sword d6) and clas
 | Fuzz gaps | Add `retreat` template; danger-tier invariants; walking-dead invariant. | S |
 | ROADMAP | Insert v1.6 entry (plan §9); re-slot bones sink / locked doors / permadeath summary to an explicit 1.7+ row. | S |
 
+## Harvested ironman regression (wired)
+
+`transcripts/session-george2-ironman-seed7.txt` — a 177-command ironman playtest (seed 7, played
+against pre-fix v1.6.0) that exposed monster mass-starvation, the walking-dead permadeath hole, the
+deep-floor food-economy spiral, and the `*`-glyph ambiguity. Re-recorded against v1.6.1 and wired as
+the suite's first **long-horizon** test (`harvested george2 ironman transcript is deterministic and
+permadeath-locked`, [repl.zig](src/repl.zig)): replay byte-identical ×2, and the player's starvation
+death now ends in a permadeath lockout — same input that found the bugs, asserting the fixes. If
+survival tuning changes this route's outcome, re-bless the transcript deliberately in that change.
+
 ## Explicitly cut from this sprint
 
 - Ogre / floor-6 / tier-3 content (D3) — backlog.
