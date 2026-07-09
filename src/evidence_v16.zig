@@ -82,6 +82,14 @@ pub fn run(allocator: std.mem.Allocator, writer: anytype) !void {
     try evidence_format.marker(writer, "plan_bandages=1", scarce_out, "plan_bandages=1");
     try evidence_format.marker(writer, "depth_report floor=5 plan_monsters=5", scarce_out, "depth_report floor=5 plan_monsters=5");
 
+    // Survival-economy tuning: scarcity is bounded from below — every danger
+    // floor's plan places at least one ration (food-vs-ticks audit).
+    var econ_buf: [65536]u8 = undefined;
+    const econ_out = try evidence_format.runScenario(allocator, "survival_economy", 42, &econ_buf, gate);
+    try writer.print("--- scenario survival_economy ---\n", .{});
+    try evidence_format.marker(writer, "economy_report floor=4 plan_rations=1", econ_out, "economy_report floor=4 plan_rations=1");
+    try evidence_format.marker(writer, "economy_report floor=5 plan_rations=1", econ_out, "economy_report floor=5 plan_rations=1");
+
     var save_buf: [131072]u8 = undefined;
     const save_out = try evidence_format.runScenario(allocator, "save_v4_roundtrip", 42, &save_buf, gate);
     try writer.print("--- scenario save_v4_roundtrip ---\n", .{});
@@ -112,6 +120,8 @@ test "evidence v16 depth danger markers" {
     try evidence_format.expectMarkerLineTrue(out, "marker flees from combat: true");
     try evidence_format.expectMarkerLineTrue(out, "marker hobgoblin: true");
     try evidence_format.expectMarkerLineTrue(out, "marker vs AC 17: true");
+    try evidence_format.expectMarkerLineTrue(out, "marker economy_report floor=4 plan_rations=1: true");
+    try evidence_format.expectMarkerLineTrue(out, "marker economy_report floor=5 plan_rations=1: true");
     try evidence_format.expectMarkerLineTrue(out, "marker step report_danger goblin_0 danger_tier=1: true");
     try std.testing.expect(std.mem.indexOf(u8, out, "migration_v4 schema=4 danger_tier=0") != null);
 }

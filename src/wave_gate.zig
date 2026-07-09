@@ -96,7 +96,8 @@ pub const plans = [_]WavePlan{
         .new_scenarios = &.{
             "deadly_floor",     "elite_brawl",   "scarce_heals",    "save_v4_roundtrip", "sleep_interrupt",
             "rest_floor",       "combat_flee",   "catch_breath",    "unequip_cycle",     "drop_clears_slot",
-            "bare_loot_corpse", "weaker_weapon", "reference_crawl",
+            "bare_loot_corpse", "weaker_weapon", "starve_out",      "combat_reposition", "survival_economy",
+            "reference_crawl",
         },
         .all_scenarios = &.{
             "bootstrap",         "explore",         "create",            "crawl_start",      "playthrough",       "brawl",         "save_roundtrip",
@@ -105,6 +106,7 @@ pub const plans = [_]WavePlan{
             "door_route",        "survive",         "starve",            "sleep_cycle",      "reference_survive", "heal_bandage",  "trap_floor",
             "deep_floor",        "rest_floor",      "combat_flee",       "catch_breath",     "deadly_floor",      "elite_brawl",   "scarce_heals",
             "save_v4_roundtrip", "sleep_interrupt", "unequip_cycle",     "drop_clears_slot", "bare_loot_corpse",  "weaker_weapon",
+            "starve_out",        "combat_reposition", "survival_economy",
         },
         .run_migration = true,
     },

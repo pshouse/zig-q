@@ -119,6 +119,7 @@ zig build dst -- @scenarios/reference_crawl.txt 42
 - **elite_brawl** — hobgoblin/skeleton_warrior with danger-tier AC/HP on deep floors
 - **scarce_heals** — floor 4–5 loot plans place fewer bandages than the floor-2 baseline
 - **save_v4_roundtrip** — schema v4 `danger_tier` survives save/load
+- **survival_economy** — food-vs-ticks audit per generated floor: planned rations, spawn→stairs distance, minimum crossing cost (danger floors guarantee ≥ 1 ration)
 - **@scenarios/*.txt** — data-driven step files (`load_floor`, `command`, `spawn`, …)
 
 Floors 2+ are generated deterministically from `(seed, floor_index)`; floor 1 stays handcrafted for regression.

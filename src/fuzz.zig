@@ -11,6 +11,7 @@ const loc = @import("loc.zig");
 const transcript = @import("transcript.zig");
 const save_state = @import("save_state.zig");
 const sqlite_store = @import("sqlite_store.zig");
+const dungeon = @import("dungeon.zig");
 
 pub const Config = struct {
     seed: u64 = 0,
@@ -422,6 +423,20 @@ pub fn assertInvariantsTracked(
             if (monsters.isElite(combat.monsterKind(&ent) orelse .goblin) and w.floor_index < 4)
                 return error.EliteOnShallowFloor;
         }
+    }
+
+    // v1.6 survival economy: every danger floor's loot plan must include at
+    // least one ration (the survival floor under scarcity). Plan-level check —
+    // pure recomputation from (seed, floor), independent of what the player
+    // already picked up.
+    if (w.has_dungeon and dungeon.dangerTier(w.floor_index) > 0) {
+        const plan = dungeon.planFloorLoot(w.seed, w.floor_index, w.floor_spawn, &w.terrain);
+        var rations: usize = 0;
+        var i: usize = 0;
+        while (i < plan.count) : (i += 1) {
+            if (plan.spawns[i].item == .rations) rations += 1;
+        }
+        if (rations == 0) return error.DangerFloorWithoutFood;
     }
 
     if (tracker) |t| try trackMonsterPositions(w, t);

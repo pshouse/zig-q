@@ -55,6 +55,8 @@ pub const Step = union(enum) {
     depth_report: u32,
     /// Print entity danger_tier (post-load proof for save_v4_roundtrip).
     report_danger: []const u8,
+    /// Food-vs-ticks audit of a generated floor (v1.6 survival-economy tuning).
+    economy_report: u32,
 };
 
 fn findEntityByName(w: *world.World, name: []const u8) ?*entity.Entity {
@@ -492,7 +494,9 @@ pub const starve_out_scenario = Scenario{
         .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
         .{ .set_hunger = .{ .entity = "entity_0", .value = 100 } },
         .{ .set_hp = .{ .entity = "entity_0", .current = 3 } },
-        .{ .tick = 3 }, // starvation DoT out of combat: hp 3 -> 0
+        // Out-of-combat starving DoT lands on even clock ticks (v1.6 half
+        // rate), so 6 ticks bound the 3 hits that take hp 3 -> 0.
+        .{ .tick = 6 },
         .{ .command = "move east" }, // blocked: permadeath gate
         .{ .command = "look" }, // blocked: permadeath gate
         .{ .command = "stats" }, // allowed for the dead: shows permadeath status
@@ -678,6 +682,20 @@ pub const deep_floor_scenario = Scenario{
         .{ .depth_report = 2 },
         .{ .depth_report = 5 },
         .{ .command = "exit" },
+    },
+};
+
+/// v1.6 survival-economy audit: food obtainable vs minimum ticks to cross each
+/// generated floor. Pure plan/layout math (no live world), so it sweeps any
+/// seed cheaply: `zig build dst -- survival_economy <seed>`.
+pub const survival_economy_scenario = Scenario{
+    .name = "survival_economy",
+    .seed = 42,
+    .steps = &.{
+        .{ .economy_report = 2 },
+        .{ .economy_report = 3 },
+        .{ .economy_report = 4 },
+        .{ .economy_report = 5 },
     },
 };
 
@@ -1332,6 +1350,21 @@ pub const Harness = struct {
                     ent.max_hp,
                 });
             },
+            .economy_report => |floor_index| {
+                const econ = try dungeon.auditFloorEconomy(self.allocator, self.w.seed, floor_index);
+                const ration_ticks = @import("items.zig").def(.rations).food_restore;
+                try writer.print(
+                    "step economy_report floor={} plan_rations={} plan_loot={} stairs_dist={} min_cross_ticks={} ration_ticks={}\n",
+                    .{
+                        econ.floor_index,
+                        econ.plan_rations,
+                        econ.plan_loot,
+                        econ.stairs_distance,
+                        econ.min_cross_ticks,
+                        ration_ticks,
+                    },
+                );
+            },
         }
     }
 };
@@ -1423,6 +1456,8 @@ pub fn scenarioByName(name: []const u8, seed: u64) ?Scenario {
         return Scenario{ .name = "weaker_weapon", .seed = seed, .steps = weaker_weapon_scenario.steps };
     if (std.mem.eql(u8, name, "sleep_interrupt"))
         return Scenario{ .name = "sleep_interrupt", .seed = seed, .steps = sleep_interrupt_scenario.steps };
+    if (std.mem.eql(u8, name, "survival_economy"))
+        return Scenario{ .name = "survival_economy", .seed = seed, .steps = survival_economy_scenario.steps };
     return null;
 }
 
@@ -1887,7 +1922,9 @@ test "dst scarce_heals scenario is byte-identical across runs" {
     const out = try expectScenarioDeterministic(allocator, "scarce_heals", 65536);
     // Floor-2 baseline is exactly 1 bandage; deep floors must not exceed that share.
     try std.testing.expect(std.mem.indexOf(u8, out, "depth_report floor=2 plan_monsters=3 plan_loot=4 plan_bandages=1 plan_elites=0") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "depth_report floor=5 plan_monsters=5 plan_loot=2 plan_bandages=0") != null);
+    // Floor-5 loot stays scarce (3 vs the pre-1.6 glut of 8) but now includes
+    // the guaranteed ration (v1.6 survival-floor tuning; was plan_loot=2).
+    try std.testing.expect(std.mem.indexOf(u8, out, "depth_report floor=5 plan_monsters=5 plan_loot=3 plan_bandages=0") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "plan_loot=8") == null);
     // Natural elite upgrades appear on some danger floors (seed 42 floor 4).
     try std.testing.expect(std.mem.indexOf(u8, out, "floor=4") != null and std.mem.indexOf(u8, out, "plan_elites=2") != null);
@@ -1941,6 +1978,80 @@ test "dst weaker_weapon scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "weaker_weapon", 65536);
     try std.testing.expect(std.mem.indexOf(u8, out, "you keep your innate d12") != null);
+}
+
+test "provisioned player on a direct stairs route reaches floor 5 alive on all tested seeds" {
+    // v1.6 survival-economy invariant: with the playtest provisioning (starter
+    // kit two rations + two banked) and sensible eat/sleep discipline, a direct
+    // spawn->stairs route across floors 2-4 must never end in a survival death.
+    // Monsters are removed each floor to isolate the survival economy — combat
+    // lethality is deadly_floor/elite_brawl's job; survival is pressure, not an
+    // unavoidable timer (SPRINT_V1.6 aim). Exercises the real engine tick path:
+    // moveEntity's danger-floor extra tick, hunger/fatigue, DoT, permadeath.
+    const allocator = std.testing.allocator;
+    const movement = @import("movement.zig");
+    var seed: u64 = 1;
+    while (seed <= 24) : (seed += 1) {
+        var w = try world.World.init(allocator, seed);
+        defer w.deinit();
+        try w.loadFloor(2);
+        const player_id = try w.spawnTestPlayer(w.floor_spawn);
+        try w.store.get(player_id).?.inventory.add(allocator, .rations, 4);
+
+        while (w.floor_index < 5) {
+            w.removeAllMonsters();
+
+            var scratch = terrain.TerrainMap.init(allocator);
+            const gen = try dungeon.generateFloor(&scratch, seed, w.floor_index);
+            const stairs = gen.stairs_down orelse {
+                scratch.deinit();
+                return error.TestUnexpectedResult;
+            };
+            var route: [512]dungeon.RouteStep = undefined;
+            const start = w.store.get(player_id).?.loc;
+            const maybe_len = dungeon.planDirectRoute(&scratch, start, stairs, &route);
+            scratch.deinit();
+            const len = maybe_len orelse return error.TestUnexpectedResult;
+
+            for (route[0..len]) |step| {
+                const ent = w.store.get(player_id).?;
+                // Eat before hunger bites: one ration exactly refills 50.
+                if (ent.hunger >= 50 and ent.inventory.has(.rations)) {
+                    _ = ent.inventory.remove(.rations, 1);
+                    _ = survival.eatFood(ent, .rations);
+                    w.tickAction(1); // cmdFood charges one tick
+                }
+                // Sleep before the penalty tiers: sleeping later than fatigue
+                // ~45 crosses exhaustion 4 mid-sleep and halves current HP.
+                if (ent.fatigue >= 45) {
+                    w.tickAction(survival.sleep_ticks);
+                    _ = survival.applySleep(ent);
+                }
+                const dir: movement.Direction = switch (step) {
+                    .north => .north,
+                    .south => .south,
+                    .east => .east,
+                    .west => .west,
+                };
+                _ = try movement.moveEntity(&w, player_id, dir);
+                try std.testing.expect(!w.isPlayerDead());
+            }
+            w.descend(player_id) catch |err| {
+                const p = w.store.get(player_id).?;
+                std.debug.print("walk-invariant descend failed: seed={} floor={} loc=({},{}) stairs=({},{}) len={} err={s}\n", .{
+                    seed,             w.floor_index, p.loc.x, p.loc.y,
+                    stairs.x,         stairs.y,      len,     @errorName(err),
+                });
+                return err;
+            };
+            try std.testing.expect(!w.isPlayerDead());
+        }
+
+        const ent = w.store.get(player_id).?;
+        try std.testing.expectEqual(@as(u32, 5), w.floor_index);
+        try std.testing.expect(!conditions.isDead(ent));
+        try std.testing.expect(ent.current_hp > 0);
+    }
 }
 
 test "demo output is deterministic for fixed seed" {
