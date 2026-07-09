@@ -225,6 +225,16 @@ fn applyHpDot(w: *world.World, ent: *entity.Entity, amount: u32) void {
 pub fn onTick(w: *world.World, ent: *entity.Entity) void {
     if (conditions.isDead(ent)) return;
 
+    // Monsters are exempt from survival pressure: hunger and fatigue are
+    // player-economy meters, and ticking them here dropped every monster dead
+    // of exhaustion ~95 ticks after its floor spawned — corpseless (only the
+    // combat kill path drops corpses) and untargetable. Poison DoT still
+    // applies, so a trap-poisoned monster bleeds out as before.
+    if (ent.is_monster) {
+        if (conditions.has(ent, .poisoned)) applyHpDot(w, ent, 1);
+        return;
+    }
+
     if (ent.hunger < hunger_max) ent.hunger += 1;
     if (ent.fatigue < fatigue_max) ent.fatigue += 1;
 
@@ -354,6 +364,25 @@ test "exhaustion collapse outside combat is permadeath" {
     try std.testing.expect(w.isPlayerDead());
 }
 
+test "monsters are exempt from survival pressure" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    const id = try w.spawnMonster(.goblin, @import("loc.zig").Loc.init(50, 49), "goblin_0");
+    var i: u32 = 0;
+    while (i < 200) : (i += 1) w.tick();
+    const ent = w.store.get(id).?;
+    try std.testing.expect(!conditions.isDead(ent));
+    try std.testing.expectEqual(ent.max_hp, ent.current_hp);
+    try std.testing.expectEqual(@as(u16, 0), ent.hunger);
+    try std.testing.expectEqual(@as(u16, 0), ent.fatigue);
+    try std.testing.expectEqual(@as(u3, 0), conditions.exhaustionLevel(ent));
+    try std.testing.expect(!conditions.has(ent, .starving));
+}
+
+// Poison DoT deliberately still applies to monsters (the one survival pressure
+// they keep): a trap-poisoned monster must bleed out even with the hunger/
+// fatigue/exhaustion exemption above.
 test "monster survival death does not trigger permadeath" {
     const allocator = std.testing.allocator;
     var w = try world.World.init(allocator, 42);
