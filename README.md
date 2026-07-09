@@ -119,6 +119,7 @@ zig build dst -- @scenarios/reference_crawl.txt 42
 - **rest_floor** — rest sheds fatigue only to the floor (20); only sleep clears exhaustion (survival-economy guard)
 - **starve_out** — starvation drains HP to 0 outside combat; permadeath gate blocks further play (walking-dead guard)
 - **monster_endurance** — goblin outlives 135 ticks of world clock and is still attackable; regression for monsters dying of exhaustion (survival pressure is player-only)
+- **bleed_out** — poisoned goblin dies of DoT outside combat; the death mirrors a combat kill (corpse with loot drops, tile map frees, player walks onto the tile)
 - **@scenarios/*.txt** — data-driven step files (`load_floor`, `command`, `spawn`, …)
 
 Floors 2+ are generated deterministically from `(seed, floor_index)`; floor 1 stays handcrafted for regression.

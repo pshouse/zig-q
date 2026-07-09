@@ -210,16 +210,27 @@ pub fn printSurvivalNotices(change: SurvivalChange, writer: anytype) !void {
     try printStarvingNotice(change.starving.before, change.starving.after, writer);
 }
 
+/// Resolve a survival death (DoT or exhaustion collapse) exactly like a
+/// killing blow. Permadeath is authoritative regardless of combat state:
+/// starving or succumbing to poison in the open must end the run, or the
+/// player lingers as a walking dead actor. A monster mirrors the combat-kill
+/// path (combat.performAttack): it drops a corpse and leaves the tile map, so
+/// the fuzz DeadMonsterOnMap invariant and the corpse/loot economy hold when
+/// a poisoned monster bleeds out on its own — not just when it is slain.
+fn resolveDeath(w: *world.World, ent: *entity.Entity) void {
+    if (ent.is_monster) {
+        w.spawnCorpse(ent.name, ent.loc) catch {};
+        w.tile_map.remove(ent.loc, ent.id);
+    } else {
+        w.markPlayerDead(ent.id);
+    }
+    conditions.markDead(ent);
+}
+
 fn applyHpDot(w: *world.World, ent: *entity.Entity, amount: u32) void {
     if (ent.current_hp == 0) return;
     ent.current_hp -|= amount;
-    if (ent.current_hp == 0) {
-        // Permadeath is authoritative regardless of combat state: starving or
-        // succumbing to poison in the open must end the run just like a killing
-        // blow, or the player lingers as a walking dead actor.
-        if (!ent.is_monster) w.markPlayerDead(ent.id);
-        conditions.markDead(ent);
-    }
+    if (ent.current_hp == 0) resolveDeath(w, ent);
 }
 
 pub fn onTick(w: *world.World, ent: *entity.Entity) void {
@@ -247,10 +258,10 @@ pub fn onTick(w: *world.World, ent: *entity.Entity) void {
     clampHpToEffectiveMax(ent);
 
     if (conditions.exhaustionLevel(ent) >= 6) {
-        // Same permadeath rule as applyHpDot: collapse from exhaustion ends the
-        // run whether or not a fight is in progress.
-        if (!ent.is_monster) w.markPlayerDead(ent.id);
-        conditions.markDead(ent);
+        // Collapse from exhaustion ends the run whether or not a fight is in
+        // progress. Unreachable for monsters (they exit above) but routed
+        // through the same death path in case the exemption ever narrows.
+        resolveDeath(w, ent);
     }
 }
 
@@ -394,6 +405,25 @@ test "monster survival death does not trigger permadeath" {
     w.tick();
     try std.testing.expect(conditions.isDead(ent));
     try std.testing.expect(!w.isPlayerDead());
+}
+
+// A DoT death must look exactly like a combat kill: corpse floor object at the
+// tile, monster off the tile map (glyph clears, tile stops counting as occupied).
+test "monster poison death drops a corpse and frees its tile" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    const position = @import("loc.zig").Loc.init(50, 49);
+    const id = try w.spawnMonster(.goblin, position, "goblin_0");
+    const ent = w.store.get(id).?;
+    conditions.apply(ent, .poisoned);
+    ent.current_hp = 1;
+    w.tick();
+    try std.testing.expect(conditions.isDead(ent));
+    const corpse = w.floor_objects.at(position) orelse return error.MissingCorpse;
+    try std.testing.expectEqual(@import("world_objects.zig").Kind.corpse, corpse.kind);
+    try std.testing.expectEqualStrings("goblin_0", corpse.label);
+    try std.testing.expectEqual(@as(usize, 0), w.tile_map.entityCountAt(position));
 }
 
 test "food reduces hunger" {
