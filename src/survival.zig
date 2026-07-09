@@ -147,9 +147,11 @@ pub fn applySleep(ent: *entity.Entity) ExhaustionChange {
 
 pub fn exhaustionEffectHint(level: u3) ?[]const u8 {
     return switch (level) {
-        1, 2 => "getting tired",
+        // Tiers 1–2: rest floors at 20; on danger floors (4+) each move costs an extra tick.
+        // Tier 3: attack disadvantage + movement −1 (display and extra move tick everywhere).
+        1, 2 => "rest cannot fully clear this; deeper floors cost extra move ticks",
         3 => "disadvantage on attacks; movement -1",
-        4 => "HP max halved",
+        4 => "HP max halved; near collapse — rest or sleep soon",
         5, 6 => "risk of collapse",
         else => null,
     };
@@ -241,7 +243,16 @@ pub fn onTick(w: *world.World, ent: *entity.Entity) void {
     _ = syncStarving(ent);
 
     if (conditions.has(ent, .poisoned)) applyHpDot(w, ent, 1);
-    if (conditions.has(ent, .starving)) applyHpDot(w, ent, 1);
+    if (conditions.has(ent, .starving)) {
+        // v1.6 balance: out of combat, starving drains 1 HP every other clock
+        // tick (even ticks), doubling the window to reach food or stairs on
+        // 2-tick-per-move danger floors. In combat the full 1 HP/tick stays —
+        // fighting while starving remains as deadly as before. Clock parity is
+        // saved state, so the rate is deterministic across save/load and
+        // identical in REPL, DST, and fuzz.
+        const dot_tick = w.combat != null or (w.game_clock.ticks % 2 == 0);
+        if (dot_tick) applyHpDot(w, ent, 1);
+    }
 
     _ = syncExhaustion(ent);
     clampHpToEffectiveMax(ent);
@@ -322,7 +333,7 @@ test "high fatigue reaches exhaustion 6" {
     try std.testing.expectEqual(@as(u3, 6), conditions.exhaustionLevel(&ent));
 }
 
-test "starving deals hp damage each tick" {
+test "starving deals hp damage on even ticks out of combat" {
     var ent: entity.Entity = undefined;
     ent.conditions = @import("types.zig").ConditionSet.initEmpty();
     ent.exhaustion_level = 0;
@@ -333,9 +344,37 @@ test "starving deals hp damage each tick" {
     ent.sleeping = false;
     var w: world.World = undefined;
     w.combat = null;
-    onTick(&w, &ent);
+    w.game_clock = @import("clock.zig").Clock.init(0.0, 120.0, 5.0, 1.0);
+    onTick(&w, &ent); // ticks=0: even -> DoT lands
     try std.testing.expectEqual(@as(u32, 9), ent.current_hp);
     try std.testing.expect(conditions.has(&ent, .starving));
+    w.game_clock.ticks = 1;
+    onTick(&w, &ent); // odd tick out of combat -> no starving DoT
+    try std.testing.expectEqual(@as(u32, 9), ent.current_hp);
+    w.game_clock.ticks = 2;
+    onTick(&w, &ent);
+    try std.testing.expectEqual(@as(u32, 8), ent.current_hp);
+}
+
+test "starving in combat deals hp damage every tick" {
+    var ent: entity.Entity = undefined;
+    ent.conditions = @import("types.zig").ConditionSet.initEmpty();
+    ent.exhaustion_level = 0;
+    ent.current_hp = 10;
+    ent.max_hp = 10;
+    ent.hunger = hunger_max;
+    ent.fatigue = 0;
+    ent.sleeping = false;
+    var w: world.World = undefined;
+    var combat_state: @import("combat.zig").CombatState = undefined;
+    w.combat = &combat_state; // onTick only null-checks; never dereferences
+    w.game_clock = @import("clock.zig").Clock.init(0.0, 120.0, 5.0, 1.0);
+    w.game_clock.ticks = 1; // odd tick: out of combat this would be skipped
+    onTick(&w, &ent);
+    try std.testing.expectEqual(@as(u32, 9), ent.current_hp);
+    w.game_clock.ticks = 2;
+    onTick(&w, &ent);
+    try std.testing.expectEqual(@as(u32, 8), ent.current_hp);
 }
 
 test "starvation death outside combat is permadeath" {
@@ -346,7 +385,9 @@ test "starvation death outside combat is permadeath" {
     const ent = w.store.get(id).?;
     ent.hunger = hunger_max;
     ent.current_hp = 1;
-    w.tick();
+    // Out-of-combat starving DoT lands on even clock ticks: tick 1 is skipped,
+    // tick 2 kills. Two ticks bound the death instead of one (v1.6 half rate).
+    w.tickAction(2);
     try std.testing.expect(conditions.isDead(ent));
     try std.testing.expect(w.isPlayerDead());
 }

@@ -79,7 +79,10 @@ pub const World = struct {
     }
 
     pub fn spawnCorpse(self: *World, name: []const u8, position: loc.Loc) !void {
-        const loot: ?@import("items.zig").Id = if (std.mem.startsWith(u8, name, "goblin"))
+        const loot: ?@import("items.zig").Id = if (std.mem.startsWith(u8, name, "goblin") or
+            std.mem.startsWith(u8, name, "hobgoblin"))
+            .short_sword
+        else if (std.mem.startsWith(u8, name, "skeleton_warrior"))
             .short_sword
         else
             null;
@@ -112,7 +115,7 @@ pub const World = struct {
             // so denser depth-scaled plans cannot stack two monsters on one tile —
             // matching placeFloorLoot / placeFloorTraps.
             if (self.tile_map.entityCountAt(spawn.position) > 0) continue;
-            _ = try self.spawnMonster(spawn.kind, spawn.position, spawn.name);
+            _ = try self.spawnMonsterWithTier(spawn.kind, spawn.position, spawn.name, spawn.danger_tier);
         }
     }
 
@@ -234,13 +237,28 @@ pub const World = struct {
     }
 
     pub fn spawnMonster(self: *World, kind: monsters.Kind, position: loc.Loc, name: []const u8) !entity.EntityId {
+        return self.spawnMonsterWithTier(kind, position, name, 0);
+    }
+
+    /// Spawn a monster and apply danger-tier HP/stat source (`danger_tier` 0 = legacy).
+    pub fn spawnMonsterWithTier(
+        self: *World,
+        kind: monsters.Kind,
+        position: loc.Loc,
+        name: []const u8,
+        danger_tier: u32,
+    ) !entity.EntityId {
         const b = monsters.block(kind);
         const char_ptr = try monsters.buildCharacter(self.allocator, kind);
         const id = try self.spawnPlayer(char_ptr, position, name);
         if (self.store.get(id)) |ent| {
             ent.is_monster = true;
-            ent.max_hp = b.max_hp;
-            ent.current_hp = b.max_hp;
+            const tier: u32 = if (danger_tier > 2) 2 else danger_tier;
+            ent.danger_tier = tier;
+            // +3·tier HP; attack/damage/AC bonuses are derived at read time from danger_tier.
+            const hp_bonus: u32 = tier * 3;
+            ent.max_hp = b.max_hp + hp_bonus;
+            ent.current_hp = ent.max_hp;
             ent.damage_die = b.damage_die;
             ent.ai_origin = position;
             ent.ai_patrol_phase = @truncate(id);

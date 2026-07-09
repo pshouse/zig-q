@@ -1,9 +1,10 @@
-//! In-repo release gate runner for v1.1–v1.5 verification captures.
+//! In-repo release gate runner for v1.1–v1.6 verification captures.
 //! Invokes real `zig build` subcommands per plan verification steps.
 const std = @import("std");
 const version = @import("version.zig");
 
-pub const default_scratch = "C:\\Users\\admin\\AppData\\Local\\Temp\\grok-goal-1322f48c036d\\implementer";
+/// Repo-relative default; override with `ZIG_Q_SCRATCH` or CLI `--scratch`.
+pub const default_scratch = ".gate-scratch";
 
 pub const WavePlan = struct {
     wave: u8,
@@ -23,9 +24,8 @@ pub const plans = [_]WavePlan{
             "save_v2_roundtrip", "conditions_brawl", "los_peek", "ambush", "permadeath", "reference_crawl",
         },
         .all_scenarios = &.{
-            "bootstrap", "explore", "create", "crawl_start", "playthrough", "brawl", "save_roundtrip",
-            "descend_crawl", "reference_crawl", "save_v2_roundtrip", "conditions_brawl", "los_peek",
-            "ambush", "permadeath",
+            "bootstrap",     "explore",         "create",            "crawl_start",      "playthrough", "brawl",  "save_roundtrip",
+            "descend_crawl", "reference_crawl", "save_v2_roundtrip", "conditions_brawl", "los_peek",    "ambush", "permadeath",
         },
         .run_migration = true,
     },
@@ -37,9 +37,9 @@ pub const plans = [_]WavePlan{
             "loot_roundtrip", "geared_brawl", "corpse_loot", "encumbered", "reference_crawl",
         },
         .all_scenarios = &.{
-            "bootstrap", "explore", "create", "crawl_start", "playthrough", "brawl", "save_roundtrip",
-            "descend_crawl", "reference_crawl", "save_v2_roundtrip", "conditions_brawl", "los_peek",
-            "ambush", "permadeath", "loot_roundtrip", "geared_brawl", "corpse_loot", "encumbered",
+            "bootstrap",      "explore",         "create",            "crawl_start",      "playthrough", "brawl",  "save_roundtrip",
+            "descend_crawl",  "reference_crawl", "save_v2_roundtrip", "conditions_brawl", "los_peek",    "ambush", "permadeath",
+            "loot_roundtrip", "geared_brawl",    "corpse_loot",       "encumbered",
         },
         .run_migration = false,
     },
@@ -51,10 +51,10 @@ pub const plans = [_]WavePlan{
             "hunt", "flee", "trap_trigger", "door_route", "ambush", "reference_crawl",
         },
         .all_scenarios = &.{
-            "bootstrap", "explore", "create", "crawl_start", "playthrough", "brawl", "save_roundtrip",
-            "descend_crawl", "reference_crawl", "save_v2_roundtrip", "conditions_brawl", "los_peek",
-            "ambush", "permadeath", "loot_roundtrip", "geared_brawl", "corpse_loot", "encumbered",
-            "hunt", "flee", "trap_trigger", "door_route",
+            "bootstrap",      "explore",         "create",            "crawl_start",      "playthrough", "brawl",  "save_roundtrip",
+            "descend_crawl",  "reference_crawl", "save_v2_roundtrip", "conditions_brawl", "los_peek",    "ambush", "permadeath",
+            "loot_roundtrip", "geared_brawl",    "corpse_loot",       "encumbered",       "hunt",        "flee",   "trap_trigger",
+            "door_route",
         },
         .run_migration = false,
     },
@@ -66,11 +66,10 @@ pub const plans = [_]WavePlan{
             "survive", "starve", "sleep_cycle", "reference_survive", "reference_crawl",
         },
         .all_scenarios = &.{
-            "bootstrap", "explore", "create", "crawl_start", "playthrough", "brawl", "save_roundtrip",
-            "descend_crawl", "reference_crawl", "save_v2_roundtrip", "conditions_brawl", "los_peek",
-            "ambush", "permadeath", "loot_roundtrip", "geared_brawl", "corpse_loot", "encumbered",
-            "hunt", "flee", "trap_trigger", "door_route", "survive", "starve", "sleep_cycle",
-            "reference_survive",
+            "bootstrap",      "explore",         "create",            "crawl_start",      "playthrough",       "brawl",  "save_roundtrip",
+            "descend_crawl",  "reference_crawl", "save_v2_roundtrip", "conditions_brawl", "los_peek",          "ambush", "permadeath",
+            "loot_roundtrip", "geared_brawl",    "corpse_loot",       "encumbered",       "hunt",              "flee",   "trap_trigger",
+            "door_route",     "survive",         "starve",            "sleep_cycle",      "reference_survive",
         },
         .run_migration = false,
     },
@@ -82,13 +81,34 @@ pub const plans = [_]WavePlan{
             "heal_bandage", "trap_floor", "deep_floor", "reference_crawl",
         },
         .all_scenarios = &.{
-            "bootstrap", "explore", "create", "crawl_start", "playthrough", "brawl", "save_roundtrip",
-            "descend_crawl", "reference_crawl", "save_v2_roundtrip", "conditions_brawl", "los_peek",
-            "ambush", "permadeath", "loot_roundtrip", "geared_brawl", "corpse_loot", "encumbered",
-            "hunt", "flee", "trap_trigger", "door_route", "survive", "starve", "sleep_cycle",
-            "reference_survive", "heal_bandage", "trap_floor", "deep_floor",
+            "bootstrap",      "explore",         "create",            "crawl_start",      "playthrough",       "brawl",        "save_roundtrip",
+            "descend_crawl",  "reference_crawl", "save_v2_roundtrip", "conditions_brawl", "los_peek",          "ambush",       "permadeath",
+            "loot_roundtrip", "geared_brawl",    "corpse_loot",       "encumbered",       "hunt",              "flee",         "trap_trigger",
+            "door_route",     "survive",         "starve",            "sleep_cycle",      "reference_survive", "heal_bandage", "trap_floor",
+            "deep_floor",
         },
         .run_migration = false,
+    },
+    .{
+        .wave = 16,
+        .prefix = "v16",
+        .evidence_step = "evidence-v16",
+        .new_scenarios = &.{
+            "deadly_floor",     "elite_brawl",   "scarce_heals",    "save_v4_roundtrip", "sleep_interrupt",
+            "rest_floor",       "combat_flee",   "catch_breath",    "unequip_cycle",     "drop_clears_slot",
+            "bare_loot_corpse", "weaker_weapon", "starve_out",      "combat_reposition", "survival_economy",
+            "monster_endurance", "reference_crawl",
+        },
+        .all_scenarios = &.{
+            "bootstrap",         "explore",         "create",            "crawl_start",      "playthrough",       "brawl",         "save_roundtrip",
+            "descend_crawl",     "reference_crawl", "save_v2_roundtrip", "conditions_brawl", "los_peek",          "ambush",        "permadeath",
+            "loot_roundtrip",    "geared_brawl",    "corpse_loot",       "encumbered",       "hunt",              "flee",          "trap_trigger",
+            "door_route",        "survive",         "starve",            "sleep_cycle",      "reference_survive", "heal_bandage",  "trap_floor",
+            "deep_floor",        "rest_floor",      "combat_flee",       "catch_breath",     "deadly_floor",      "elite_brawl",   "scarce_heals",
+            "save_v4_roundtrip", "sleep_interrupt", "unequip_cycle",     "drop_clears_slot", "bare_loot_corpse",  "weaker_weapon",
+            "starve_out",        "combat_reposition", "survival_economy",  "monster_endurance",
+        },
+        .run_migration = true,
     },
 };
 

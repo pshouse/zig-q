@@ -21,7 +21,13 @@ pub const Step = union(enum) {
     choose_class: usize,
     creation_finish: []const u8,
     load_floor: u32,
-    spawn_monster: struct { kind: @import("monsters.zig").Kind, name: []const u8, x: u64, y: u64 },
+    spawn_monster: struct {
+        kind: @import("monsters.zig").Kind,
+        name: []const u8,
+        x: u64,
+        y: u64,
+        danger_tier: u32 = 0,
+    },
     spawn: struct { name: []const u8, x: u64, y: u64 },
     tick: u32,
     time,
@@ -47,6 +53,10 @@ pub const Step = union(enum) {
     set_fatigue: struct { entity: []const u8, value: u16 },
     set_hp: struct { entity: []const u8, current: u32 },
     depth_report: u32,
+    /// Print entity danger_tier (post-load proof for save_v4_roundtrip).
+    report_danger: []const u8,
+    /// Food-vs-ticks audit of a generated floor (v1.6 survival-economy tuning).
+    economy_report: u32,
 };
 
 fn findEntityByName(w: *world.World, name: []const u8) ?*entity.Entity {
@@ -484,7 +494,9 @@ pub const starve_out_scenario = Scenario{
         .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
         .{ .set_hunger = .{ .entity = "entity_0", .value = 100 } },
         .{ .set_hp = .{ .entity = "entity_0", .current = 3 } },
-        .{ .tick = 3 }, // starvation DoT out of combat: hp 3 -> 0
+        // Out-of-combat starving DoT lands on even clock ticks (v1.6 half
+        // rate), so 6 ticks bound the 3 hits that take hp 3 -> 0.
+        .{ .tick = 6 },
         .{ .command = "move east" }, // blocked: permadeath gate
         .{ .command = "look" }, // blocked: permadeath gate
         .{ .command = "stats" }, // allowed for the dead: shows permadeath status
@@ -702,6 +714,209 @@ pub const deep_floor_scenario = Scenario{
         .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
         .{ .depth_report = 2 },
         .{ .depth_report = 5 },
+        .{ .command = "exit" },
+    },
+};
+
+/// v1.6 survival-economy audit: food obtainable vs minimum ticks to cross each
+/// generated floor. Pure plan/layout math (no live world), so it sweeps any
+/// seed cheaply: `zig build dst -- survival_economy <seed>`.
+pub const survival_economy_scenario = Scenario{
+    .name = "survival_economy",
+    .seed = 42,
+    .steps = &.{
+        .{ .economy_report = 2 },
+        .{ .economy_report = 3 },
+        .{ .economy_report = 4 },
+        .{ .economy_report = 5 },
+    },
+};
+
+/// Floor-4 danger-tier counters: attack-spamming player takes unavoidable return fire;
+/// flee remains the escape valve under danger-tier pressure.
+pub const deadly_floor_scenario = Scenario{
+    .name = "deadly_floor",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 },
+        .{ .choose_class = 1 },
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .set_hp = .{ .entity = "entity_0", .current = 40 } },
+        .{ .set_attribute = .{ .entity = "entity_0", .abbr = "STR", .value = 8 } }, // soft hits
+        .{ .spawn_monster = .{ .kind = .goblin, .name = "goblin_0", .x = 50, .y = 49, .danger_tier = 1 } },
+        .{ .command = "attack goblin_0" },
+        .{ .command = "attack goblin_0" },
+        .{ .command = "attack goblin_0" },
+        .{ .command = "flee" },
+        .{ .command = "exit" },
+    },
+};
+
+/// Elite kinds on danger floors: hobgoblin shows higher HP/AC in combat transcript.
+pub const elite_brawl_scenario = Scenario{
+    .name = "elite_brawl",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 },
+        .{ .choose_class = 1 },
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .set_hp = .{ .entity = "entity_0", .current = 40 } },
+        .{ .spawn_monster = .{ .kind = .hobgoblin, .name = "hobgoblin_0", .x = 50, .y = 49, .danger_tier = 2 } },
+        .{ .command = "attack hobgoblin_0" },
+        .{ .command = "stats" },
+        .{ .command = "exit" },
+    },
+};
+
+/// Floor-4/5 loot plans place fewer bandages than the floor-2 baseline (exactly 1 bandage).
+pub const scarce_heals_scenario = Scenario{
+    .name = "scarce_heals",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 },
+        .{ .choose_class = 1 },
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .depth_report = 2 },
+        .{ .depth_report = 4 },
+        .{ .depth_report = 5 },
+        .{ .command = "exit" },
+    },
+};
+
+/// Schema v4 roundtrip: danger_tier survives save/load (post-load report + second counter).
+pub const save_v4_roundtrip_scenario = Scenario{
+    .name = "save_v4_roundtrip",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 },
+        .{ .choose_class = 1 },
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .set_hp = .{ .entity = "entity_0", .current = 40 } },
+        .{ .spawn_monster = .{ .kind = .goblin, .name = "goblin_0", .x = 50, .y = 49, .danger_tier = 1 } },
+        .{ .command = "attack goblin_0" },
+        .{ .command = "save" },
+        .{ .command = "load 1" },
+        // Post-load proof: tier must still be 1 (not only the pre-save spawn_monster line).
+        .{ .report_danger = "goblin_0" },
+        .{ .report_danger = "entity_0" },
+        .{ .command = "attack goblin_0" },
+        .{ .command = "exit" },
+    },
+};
+
+/// Sleep next to a hostile: explore AI + D2 first-strike interrupt the long rest.
+pub const sleep_interrupt_scenario = Scenario{
+    .name = "sleep_interrupt",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 },
+        .{ .choose_class = 1 },
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .set_hp = .{ .entity = "entity_0", .current = 40 } },
+        .{ .spawn_monster = .{ .kind = .goblin, .name = "goblin_0", .x = 50, .y = 49 } },
+        .{ .command = "sleep" },
+        .{ .command = "exit" },
+    },
+};
+
+/// Backfill: unequip cycle keeps item in bag.
+pub const unequip_cycle_scenario = Scenario{
+    .name = "unequip_cycle",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 },
+        .{ .choose_class = 2 },
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .give_item = .{ .entity = "entity_0", .item = .short_sword, .count = 1 } },
+        .{ .command = "equip short_sword" },
+        .{ .command = "unequip weapon" },
+        .{ .command = "inventory" },
+        .{ .command = "equip short_sword" },
+        .{ .command = "exit" },
+    },
+};
+
+/// Backfill: dropping the last equipped stack clears the slot.
+pub const drop_clears_slot_scenario = Scenario{
+    .name = "drop_clears_slot",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 },
+        .{ .choose_class = 2 },
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .give_item = .{ .entity = "entity_0", .item = .short_sword, .count = 1 } },
+        .{ .command = "equip short_sword" },
+        .{ .command = "drop short_sword" },
+        .{ .command = "inventory" },
+        .{ .command = "exit" },
+    },
+};
+
+/// Backfill: bare loot prefers corpse gear over a floor item.
+pub const bare_loot_corpse_scenario = Scenario{
+    .name = "bare_loot_corpse",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 },
+        .{ .choose_class = 1 },
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .add_floor_object = .{ .kind = .item, .x = 50, .y = 49, .label = "bandage", .item = .bandage } },
+        .{ .add_floor_object = .{ .kind = .corpse, .x = 50, .y = 49, .label = "goblin_0", .item = .short_sword } },
+        .{ .command = "loot" },
+        .{ .command = "inventory" },
+        .{ .command = "exit" },
+    },
+};
+
+/// Backfill: weaker weapon never cuts innate die (barbarian + short sword).
+pub const weaker_weapon_scenario = Scenario{
+    .name = "weaker_weapon",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 },
+        .{ .choose_class = 1 }, // barbarian d12
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .give_item = .{ .entity = "entity_0", .item = .short_sword, .count = 1 } },
+        .{ .command = "equip short_sword" },
+        .{ .spawn_monster = .{ .kind = .goblin, .name = "goblin_0", .x = 50, .y = 49 } },
+        .{ .set_attribute = .{ .entity = "entity_0", .abbr = "STR", .value = 18 } },
+        .{ .command = "attack goblin_0" },
         .{ .command = "exit" },
     },
 };
@@ -946,6 +1161,7 @@ pub const Harness = struct {
 
         if (std.mem.eql(u8, scenario.name, "save_roundtrip") or
             std.mem.eql(u8, scenario.name, "save_v2_roundtrip") or
+            std.mem.eql(u8, scenario.name, "save_v4_roundtrip") or
             std.mem.eql(u8, scenario.name, "loot_roundtrip") or
             std.mem.eql(u8, scenario.name, "survive") or
             std.mem.eql(u8, scenario.name, "permadeath") or
@@ -1015,11 +1231,12 @@ pub const Harness = struct {
             },
             .spawn_monster => |s| {
                 const position = loc.Loc.init(s.x, s.y);
-                const id = try self.w.spawnMonster(s.kind, position, s.name);
-                try writer.print("step spawn_monster id={} name={s} kind={s} at ({},{})\n", .{
+                const id = try self.w.spawnMonsterWithTier(s.kind, position, s.name, s.danger_tier);
+                try writer.print("step spawn_monster id={} name={s} kind={s} danger_tier={} at ({},{})\n", .{
                     id,
                     s.name,
                     @tagName(s.kind),
+                    s.danger_tier,
                     s.x,
                     s.y,
                 });
@@ -1152,6 +1369,8 @@ pub const Harness = struct {
             },
             .set_hp => |cfg| {
                 const ent = findEntityByName(&self.w, cfg.entity) orelse return error.EntityNotFound;
+                // Raise max when needed so scenario setup can grant temporary HP headroom.
+                if (cfg.current > ent.max_hp) ent.max_hp = cfg.current;
                 ent.current_hp = @min(cfg.current, ent.max_hp);
                 try writer.print("step set_hp {s} current={}\n", .{ cfg.entity, ent.current_hp });
             },
@@ -1161,11 +1380,47 @@ pub const Harness = struct {
                 const gen = try dungeon.generateFloor(&layout_map, self.w.seed, floor_index);
                 const monsters = dungeon.planMonsterSpawns(self.w.seed, floor_index, gen.spawn);
                 const loot = dungeon.planFloorLoot(self.w.seed, floor_index, gen.spawn, &layout_map);
-                try writer.print("step depth_report floor={} plan_monsters={} plan_loot={}\n", .{
+                var bandages: usize = 0;
+                var i: usize = 0;
+                while (i < loot.count) : (i += 1) {
+                    if (loot.spawns[i].item == .bandage) bandages += 1;
+                }
+                var elites: usize = 0;
+                var mi: usize = 0;
+                while (mi < monsters.count) : (mi += 1) {
+                    if (@import("monsters.zig").isElite(monsters.spawns[mi].kind)) elites += 1;
+                }
+                try writer.print("step depth_report floor={} plan_monsters={} plan_loot={} plan_bandages={} plan_elites={}\n", .{
                     floor_index,
                     monsters.count,
                     loot.count,
+                    bandages,
+                    elites,
                 });
+            },
+            .report_danger => |name| {
+                const ent = findEntityByName(&self.w, name) orelse return error.EntityNotFound;
+                try writer.print("step report_danger {s} danger_tier={} hp={}/{}\n", .{
+                    name,
+                    ent.danger_tier,
+                    ent.current_hp,
+                    ent.max_hp,
+                });
+            },
+            .economy_report => |floor_index| {
+                const econ = try dungeon.auditFloorEconomy(self.allocator, self.w.seed, floor_index);
+                const ration_ticks = @import("items.zig").def(.rations).food_restore;
+                try writer.print(
+                    "step economy_report floor={} plan_rations={} plan_loot={} stairs_dist={} min_cross_ticks={} ration_ticks={}\n",
+                    .{
+                        econ.floor_index,
+                        econ.plan_rations,
+                        econ.plan_loot,
+                        econ.stairs_distance,
+                        econ.min_cross_ticks,
+                        ration_ticks,
+                    },
+                );
             },
         }
     }
@@ -1244,6 +1499,26 @@ pub fn scenarioByName(name: []const u8, seed: u64) ?Scenario {
         return Scenario{ .name = "combat_reposition", .seed = seed, .steps = combat_reposition_scenario.steps };
     if (std.mem.eql(u8, name, "glyph_look"))
         return Scenario{ .name = "glyph_look", .seed = seed, .steps = glyph_look_scenario.steps };
+    if (std.mem.eql(u8, name, "deadly_floor"))
+        return Scenario{ .name = "deadly_floor", .seed = seed, .steps = deadly_floor_scenario.steps };
+    if (std.mem.eql(u8, name, "elite_brawl"))
+        return Scenario{ .name = "elite_brawl", .seed = seed, .steps = elite_brawl_scenario.steps };
+    if (std.mem.eql(u8, name, "scarce_heals"))
+        return Scenario{ .name = "scarce_heals", .seed = seed, .steps = scarce_heals_scenario.steps };
+    if (std.mem.eql(u8, name, "save_v4_roundtrip"))
+        return Scenario{ .name = "save_v4_roundtrip", .seed = seed, .steps = save_v4_roundtrip_scenario.steps };
+    if (std.mem.eql(u8, name, "unequip_cycle"))
+        return Scenario{ .name = "unequip_cycle", .seed = seed, .steps = unequip_cycle_scenario.steps };
+    if (std.mem.eql(u8, name, "drop_clears_slot"))
+        return Scenario{ .name = "drop_clears_slot", .seed = seed, .steps = drop_clears_slot_scenario.steps };
+    if (std.mem.eql(u8, name, "bare_loot_corpse"))
+        return Scenario{ .name = "bare_loot_corpse", .seed = seed, .steps = bare_loot_corpse_scenario.steps };
+    if (std.mem.eql(u8, name, "weaker_weapon"))
+        return Scenario{ .name = "weaker_weapon", .seed = seed, .steps = weaker_weapon_scenario.steps };
+    if (std.mem.eql(u8, name, "sleep_interrupt"))
+        return Scenario{ .name = "sleep_interrupt", .seed = seed, .steps = sleep_interrupt_scenario.steps };
+    if (std.mem.eql(u8, name, "survival_economy"))
+        return Scenario{ .name = "survival_economy", .seed = seed, .steps = survival_economy_scenario.steps };
     return null;
 }
 
@@ -1677,8 +1952,10 @@ test "dst deep_floor scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "deep_floor", 65536);
     defer allocator.free(out);
-    try std.testing.expect(std.mem.indexOf(u8, out, "depth_report floor=2 plan_monsters=3 plan_loot=4") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "depth_report floor=5 plan_monsters=5 plan_loot=8") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "depth_report floor=2 plan_monsters=3 plan_loot=4 plan_bandages=1") != null);
+    // Intentional v1.6 delta (D4): floor-5 loot scarcity (was plan_loot=8).
+    try std.testing.expect(std.mem.indexOf(u8, out, "depth_report floor=5 plan_monsters=5") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "plan_loot=8") == null);
 }
 
 test "dst combat_flee scenario is byte-identical across runs" {
@@ -1727,6 +2004,184 @@ test "dst glyph_look scenario is byte-identical across runs" {
     try std.testing.expect(std.mem.indexOf(u8, after_death, "@s") == null);
     try std.testing.expect(std.mem.indexOf(u8, after_death, "#.@.#") != null);
     try std.testing.expect(std.mem.indexOf(u8, after_death, "#.g.#") != null);
+}
+
+test "dst deadly_floor scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "deadly_floor", 65536);
+    defer allocator.free(out);
+    // Danger-tier goblin counters after player attack (attack goblin→player lines).
+    try std.testing.expect(std.mem.indexOf(u8, out, "attack goblin_0->entity_0") != null);
+    // Danger-tier attack modifier is STR(-1)+tier(1) = 0 (not the legacy mod=-1).
+    try std.testing.expect(std.mem.indexOf(u8, out, "mod=0") != null);
+    // Min-1-on-hit: a danger-tier counter lands positive damage.
+    try std.testing.expect(std.mem.indexOf(u8, out, "hit damage=") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "hit damage=0") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "flees from combat") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "combat ended") != null);
+}
+
+test "dst elite_brawl scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "elite_brawl", 65536);
+    defer allocator.free(out);
+    try std.testing.expect(std.mem.indexOf(u8, out, "hobgoblin") != null);
+    // AC 16 base + tier/2 (tier 2 → +1) = 17
+    try std.testing.expect(std.mem.indexOf(u8, out, "vs AC 17") != null);
+}
+
+test "dst scarce_heals scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "scarce_heals", 65536);
+    defer allocator.free(out);
+    // Floor-2 baseline is exactly 1 bandage; deep floors must not exceed that share.
+    try std.testing.expect(std.mem.indexOf(u8, out, "depth_report floor=2 plan_monsters=3 plan_loot=4 plan_bandages=1 plan_elites=0") != null);
+    // Floor-5 loot stays scarce (3 vs the pre-1.6 glut of 8) but now includes
+    // the guaranteed ration (v1.6 survival-floor tuning; was plan_loot=2).
+    try std.testing.expect(std.mem.indexOf(u8, out, "depth_report floor=5 plan_monsters=5 plan_loot=3 plan_bandages=0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "plan_loot=8") == null);
+    // Natural elite upgrades appear on some danger floors (seed 42 floor 4).
+    try std.testing.expect(std.mem.indexOf(u8, out, "floor=4") != null and std.mem.indexOf(u8, out, "plan_elites=2") != null);
+}
+
+test "dst save_v4_roundtrip scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "save_v4_roundtrip", 131072);
+    defer allocator.free(out);
+    try std.testing.expect(std.mem.indexOf(u8, out, "saved slot") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "loaded slot") != null);
+    // Post-load report (not only the pre-save spawn_monster line).
+    try std.testing.expect(std.mem.indexOf(u8, out, "step report_danger goblin_0 danger_tier=1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "step report_danger entity_0 danger_tier=0") != null);
+    // Second counter after load still uses danger-tier mod.
+    const load_pos = std.mem.indexOf(u8, out, "loaded slot") orelse return error.TestUnexpectedResult;
+    try std.testing.expect(std.mem.indexOf(u8, out[load_pos..], "attack goblin_0->entity_0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out[load_pos..], "mod=0") != null);
+}
+
+test "dst sleep_interrupt scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "sleep_interrupt", 65536);
+    defer allocator.free(out);
+    try std.testing.expect(std.mem.indexOf(u8, out, "sleeping (unconscious)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "sleep interrupted by combat") != null);
+    // D2: ambusher opens with a swing, then player turn.
+    try std.testing.expect(std.mem.indexOf(u8, out, "attack goblin_0->entity_0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "turn: entity_0") != null);
+}
+
+test "dst unequip_cycle scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "unequip_cycle", 65536);
+    defer allocator.free(out);
+    try std.testing.expect(std.mem.indexOf(u8, out, "equipped short sword") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "unequipped short sword") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "short sword x1") != null);
+}
+
+test "dst drop_clears_slot scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "drop_clears_slot", 65536);
+    defer allocator.free(out);
+    try std.testing.expect(std.mem.indexOf(u8, out, "unequipped short sword") != null);
+}
+
+test "dst bare_loot_corpse scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "bare_loot_corpse", 65536);
+    defer allocator.free(out);
+    try std.testing.expect(std.mem.indexOf(u8, out, "picked up short sword from goblin_0") != null);
+}
+
+test "dst weaker_weapon scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "weaker_weapon", 65536);
+    defer allocator.free(out);
+    try std.testing.expect(std.mem.indexOf(u8, out, "you keep your innate d12") != null);
+}
+
+test "dst survival_economy scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "survival_economy", 65536);
+    defer allocator.free(out);
+    // Danger floors always audit >= 1 planned ration (v1.6 survival floor).
+    try std.testing.expect(std.mem.indexOf(u8, out, "economy_report floor=4 plan_rations=1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "economy_report floor=5 plan_rations=1") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "ration_ticks=50") != null);
+}
+
+test "provisioned player on a direct stairs route reaches floor 5 alive on all tested seeds" {
+    // v1.6 survival-economy invariant: with the playtest provisioning (starter
+    // kit two rations + two banked) and sensible eat/sleep discipline, a direct
+    // spawn->stairs route across floors 2-4 must never end in a survival death.
+    // Monsters are removed each floor to isolate the survival economy — combat
+    // lethality is deadly_floor/elite_brawl's job; survival is pressure, not an
+    // unavoidable timer (SPRINT_V1.6 aim). Exercises the real engine tick path:
+    // moveEntity's danger-floor extra tick, hunger/fatigue, DoT, permadeath.
+    const allocator = std.testing.allocator;
+    const movement = @import("movement.zig");
+    var seed: u64 = 1;
+    while (seed <= 24) : (seed += 1) {
+        var w = try world.World.init(allocator, seed);
+        defer w.deinit();
+        try w.loadFloor(2);
+        const player_id = try w.spawnTestPlayer(w.floor_spawn);
+        try w.store.get(player_id).?.inventory.add(allocator, .rations, 4);
+
+        while (w.floor_index < 5) {
+            w.removeAllMonsters();
+
+            var scratch = terrain.TerrainMap.init(allocator);
+            const gen = try dungeon.generateFloor(&scratch, seed, w.floor_index);
+            const stairs = gen.stairs_down orelse {
+                scratch.deinit();
+                return error.TestUnexpectedResult;
+            };
+            var route: [512]dungeon.RouteStep = undefined;
+            const start = w.store.get(player_id).?.loc;
+            const maybe_len = dungeon.planDirectRoute(&scratch, start, stairs, &route);
+            scratch.deinit();
+            const len = maybe_len orelse return error.TestUnexpectedResult;
+
+            for (route[0..len]) |step| {
+                const ent = w.store.get(player_id).?;
+                // Eat before hunger bites: one ration exactly refills 50.
+                if (ent.hunger >= 50 and ent.inventory.has(.rations)) {
+                    _ = ent.inventory.remove(.rations, 1);
+                    _ = survival.eatFood(ent, .rations);
+                    w.tickAction(1); // cmdFood charges one tick
+                }
+                // Sleep before the penalty tiers: sleeping later than fatigue
+                // ~45 crosses exhaustion 4 mid-sleep and halves current HP.
+                if (ent.fatigue >= 45) {
+                    w.tickAction(survival.sleep_ticks);
+                    _ = survival.applySleep(ent);
+                }
+                const dir: movement.Direction = switch (step) {
+                    .north => .north,
+                    .south => .south,
+                    .east => .east,
+                    .west => .west,
+                };
+                _ = try movement.moveEntity(&w, player_id, dir);
+                try std.testing.expect(!w.isPlayerDead());
+            }
+            w.descend(player_id) catch |err| {
+                const p = w.store.get(player_id).?;
+                std.debug.print("walk-invariant descend failed: seed={} floor={} loc=({},{}) stairs=({},{}) len={} err={s}\n", .{
+                    seed,             w.floor_index, p.loc.x, p.loc.y,
+                    stairs.x,         stairs.y,      len,     @errorName(err),
+                });
+                return err;
+            };
+            try std.testing.expect(!w.isPlayerDead());
+        }
+
+        const ent = w.store.get(player_id).?;
+        try std.testing.expectEqual(@as(u32, 5), w.floor_index);
+        try std.testing.expect(!conditions.isDead(ent));
+        try std.testing.expect(ent.current_hp > 0);
+    }
 }
 
 test "demo output is deterministic for fixed seed" {

@@ -146,6 +146,9 @@ pub fn loadSlot(
     if (owned.schema_version == save_state.schema_version_v2) {
         save_state.migrateV2ToV3(&owned);
     }
+    if (owned.schema_version == save_state.schema_version_v3) {
+        save_state.migrateV3ToV4(&owned);
+    }
     if (owned.schema_version != save_state.schema_version) {
         return error.UnsupportedSchema;
     }

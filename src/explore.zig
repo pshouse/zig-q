@@ -177,7 +177,7 @@ pub fn runExploreMonsterTurns(w: *world.World, player_id: entity.EntityId, write
     return false;
 }
 
-pub fn tryAmbushOnAdjacent(w: *world.World, player_id: entity.EntityId) !void {
+pub fn tryAmbushOnAdjacent(w: *world.World, player_id: entity.EntityId, writer: anytype) !void {
     if (combat.isInCombat(w)) return;
     const player = w.store.get(player_id) orelse return;
     var best: ?entity.EntityId = null;
@@ -186,13 +186,21 @@ pub fn tryAmbushOnAdjacent(w: *world.World, player_id: entity.EntityId) !void {
         if (!isAdjacent(player.loc, ent.loc)) continue;
         if (best == null or ent.id < best.?) best = ent.id;
     }
-    if (best) |enemy| try combat.enterCombat(w, player_id, enemy);
+    // Ambush: monster initiates — seats the monster as first actor (D2), then resolves
+    // their opening swing(s) so the first-strike actually lands.
+    if (best) |enemy| {
+        try combat.enterCombat(w, player_id, enemy, enemy);
+        try combat.resolveOpeningTurns(w, writer);
+    }
 }
 
 pub fn afterPlayerExploreAction(w: *world.World, player_id: entity.EntityId, writer: anytype) !bool {
     if (combat.isInCombat(w)) return false;
-    const moved_adjacent = try runExploreMonsterTurns(w, player_id, writer);
-    if (moved_adjacent) try tryAmbushOnAdjacent(w, player_id);
+    _ = try runExploreMonsterTurns(w, player_id, writer);
+    // Always check adjacency after AI — not only when a monster *just* stepped in.
+    // Sleep/rest next to a hostile must interrupt (Track 3); previously only
+    // `moved_adjacent` triggered ambush, so standing-adjacent sleep was safe.
+    try tryAmbushOnAdjacent(w, player_id, writer);
     return combat.isInCombat(w);
 }
 

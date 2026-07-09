@@ -4,6 +4,8 @@ const types = @import("types.zig");
 pub const Kind = enum {
     goblin,
     skeleton,
+    hobgoblin,
+    skeleton_warrior,
 };
 
 pub const Block = struct {
@@ -36,6 +38,32 @@ pub fn block(kind: Kind) Block {
             .ac = 13,
             .damage_die = 6,
         },
+        .hobgoblin => .{
+            .name = "hobgoblin",
+            .str = 13,
+            .dex = 12,
+            .con = 12,
+            .max_hp = 16,
+            .ac = 16,
+            .damage_die = 6,
+        },
+        .skeleton_warrior => .{
+            .name = "skeleton_warrior",
+            .str = 13,
+            .dex = 12,
+            .con = 14,
+            .max_hp = 20,
+            .ac = 15,
+            .damage_die = 8,
+        },
+    };
+}
+
+/// True for elite kinds that only spawn on danger floors (floor ≥ 4).
+pub fn isElite(kind: Kind) bool {
+    return switch (kind) {
+        .hobgoblin, .skeleton_warrior => true,
+        .goblin, .skeleton => false,
     };
 }
 
@@ -70,6 +98,8 @@ pub fn glyph(kind: Kind) u8 {
     return switch (kind) {
         .goblin => 'g',
         .skeleton => 's',
+        .hobgoblin => 'h',
+        .skeleton_warrior => 'w',
     };
 }
 
@@ -104,9 +134,20 @@ test "every kind maps block name to its enum tag" {
 test "glyph mapping per kind" {
     try std.testing.expectEqual(@as(u8, 'g'), glyph(.goblin));
     try std.testing.expectEqual(@as(u8, 's'), glyph(.skeleton));
+    try std.testing.expectEqual(@as(u8, 'h'), glyph(.hobgoblin));
+    try std.testing.expectEqual(@as(u8, 'w'), glyph(.skeleton_warrior));
     try std.testing.expectEqual(@as(?u8, 'g'), glyphForName("goblin"));
     try std.testing.expectEqual(@as(?u8, 's'), glyphForName("skeleton"));
+    try std.testing.expectEqual(@as(?u8, 'h'), glyphForName("hobgoblin"));
+    try std.testing.expectEqual(@as(?u8, 'w'), glyphForName("skeleton_warrior"));
     try std.testing.expectEqual(@as(?u8, null), glyphForName("George"));
+}
+
+test "elite blocks are tougher than base kin" {
+    try std.testing.expect(block(.hobgoblin).max_hp > block(.goblin).max_hp);
+    try std.testing.expect(block(.skeleton_warrior).max_hp > block(.skeleton).max_hp);
+    try std.testing.expect(isElite(.hobgoblin));
+    try std.testing.expect(!isElite(.goblin));
 }
 
 test "spawnMonster skeleton uses skeleton ac in combat" {
@@ -120,7 +161,7 @@ test "spawnMonster skeleton uses skeleton ac in combat" {
     try std.testing.expect(skel.is_monster);
     try std.testing.expectEqual(@as(u32, 13), @import("combat.zig").targetAc(skel));
 
-    try @import("combat.zig").enterCombat(&w, player_id, skel_id);
+    try @import("combat.zig").enterCombat(&w, player_id, skel_id, player_id);
     var buf: [256]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
     try @import("combat.zig").performAttack(&w, player_id, skel_id, fbs.writer());

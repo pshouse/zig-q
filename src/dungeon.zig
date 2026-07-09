@@ -100,10 +100,37 @@ fn depthBonusRng(world_seed: u64, floor_index: u32) rng.SeededRng {
     return rng.SeededRng.init(depthBonusSeed(world_seed, floor_index));
 }
 
-/// Depth tier for generated floors (0 on floor 1–2 baseline).
+fn eliteSeed(world_seed: u64, floor_index: u32) u64 {
+    return floorSeed(world_seed, floor_index) ^ 0xE11FE11FE11FE11F;
+}
+
+/// Separate stream for elite upgrades on danger floors only — does not touch
+/// floor-3 `depthBonusRng` draw positions (frozen golden safety).
+pub fn eliteRng(world_seed: u64, floor_index: u32) rng.SeededRng {
+    return rng.SeededRng.init(eliteSeed(world_seed, floor_index));
+}
+
+fn rationSeed(world_seed: u64, floor_index: u32) u64 {
+    return floorSeed(world_seed, floor_index) ^ 0xF00DF00DF00DF00D;
+}
+
+/// Separate stream for the danger-floor guaranteed ration — like `eliteRng`,
+/// drawn only when `dangerTier > 0`, so floors ≤ 3 consume nothing new.
+fn rationRng(world_seed: u64, floor_index: u32) rng.SeededRng {
+    return rng.SeededRng.init(rationSeed(world_seed, floor_index));
+}
+
+/// Depth tier for generated floors (0 on floor 1–2 baseline). Count scaling only.
 fn depthTier(floor_index: u32) u32 {
     if (floor_index < 2) return 0;
     return @min(floor_index - 2, 6);
+}
+
+/// Danger tier for lethality bonuses. 0 on floors 1–3; 1 on floor 4; 2 on floor 5+.
+/// Cap 2 (product max depth 5). All v1.6 teeth gate on this so pre-1.6 goldens stay frozen.
+pub fn dangerTier(floor_index: u32) u32 {
+    if (floor_index < 4) return 0;
+    return @min(floor_index - 3, 2);
 }
 
 pub const GeneratedFloor = struct {
@@ -226,6 +253,7 @@ pub const MonsterSpawn = struct {
     kind: monsters.Kind,
     name: []const u8,
     position: loc.Loc,
+    danger_tier: u32 = 0,
 };
 
 pub const MonsterPlan = struct {
@@ -255,6 +283,22 @@ fn monsterName(kind: monsters.Kind, slot: usize) []const u8 {
             4 => "skeleton_4",
             else => "skeleton_5",
         },
+        .hobgoblin => switch (slot) {
+            0 => "hobgoblin_0",
+            1 => "hobgoblin_1",
+            2 => "hobgoblin_2",
+            3 => "hobgoblin_3",
+            4 => "hobgoblin_4",
+            else => "hobgoblin_5",
+        },
+        .skeleton_warrior => switch (slot) {
+            0 => "skeleton_warrior_0",
+            1 => "skeleton_warrior_1",
+            2 => "skeleton_warrior_2",
+            3 => "skeleton_warrior_3",
+            4 => "skeleton_warrior_4",
+            else => "skeleton_warrior_5",
+        },
     };
 }
 
@@ -265,6 +309,7 @@ pub fn planMonsterSpawns(world_seed: u64, floor_index: u32, spawn: loc.Loc) Mons
 
     var list: [6]MonsterSpawn = undefined;
     var count: usize = 0;
+    const d_tier = dangerTier(floor_index);
 
     const goblin_count = 1 + (floor_rng.nextU8() % 2);
     var g: u8 = 0;
@@ -275,6 +320,7 @@ pub fn planMonsterSpawns(world_seed: u64, floor_index: u32, spawn: loc.Loc) Mons
             .kind = .goblin,
             .name = monsterName(.goblin, count),
             .position = offsetLoc(spawn, offset_x, offset_y),
+            .danger_tier = d_tier,
         };
         count += 1;
     }
@@ -286,6 +332,7 @@ pub fn planMonsterSpawns(world_seed: u64, floor_index: u32, spawn: loc.Loc) Mons
             .kind = .skeleton,
             .name = monsterName(.skeleton, 0),
             .position = offsetLoc(spawn, offset_x, offset_y),
+            .danger_tier = d_tier,
         };
         count += 1;
     }
@@ -302,8 +349,28 @@ pub fn planMonsterSpawns(world_seed: u64, floor_index: u32, spawn: loc.Loc) Mons
                 .kind = kind,
                 .name = monsterName(kind, count),
                 .position = offsetLoc(spawn, offset_x, offset_y),
+                .danger_tier = d_tier,
             };
             count += 1;
+        }
+    }
+
+    // Elite upgrades: separate stream, only when danger_tier > 0 (floor ≥ 4).
+    // Does not consume depthBonusRng, so floor-3 paths stay byte-identical.
+    if (d_tier > 0) {
+        var elite_rng = eliteRng(world_seed, floor_index);
+        var i: usize = 0;
+        while (i < count) : (i += 1) {
+            // ~25% chance per spawn to upgrade to the elite of its family.
+            if ((elite_rng.nextU8() % 4) != 0) continue;
+            const upgraded: monsters.Kind = switch (list[i].kind) {
+                .goblin => .hobgoblin,
+                .skeleton => .skeleton_warrior,
+                .hobgoblin, .skeleton_warrior => list[i].kind,
+            };
+            if (upgraded == list[i].kind) continue;
+            list[i].kind = upgraded;
+            list[i].name = monsterName(upgraded, i);
         }
     }
 
@@ -333,33 +400,282 @@ pub fn planFloorLoot(
 
     var list: [8]LootSpawn = undefined;
     var count: usize = 0;
-    const candidates = [_]items.Id{ .bandage, .antidote, .rations, .leather_armour };
+    const d_tier = dangerTier(floor_index);
+    // Floors 1–3: legacy bandage-rich base table (frozen goldens).
+    // Floor ≥ 4: no free bandage in base; ration cap applies to all placements.
+    const base_table = if (d_tier > 0)
+        [_]items.Id{ .antidote, .rations, .leather_armour, .war_axe }
+    else
+        [_]items.Id{ .bandage, .antidote, .rations, .leather_armour };
+    const legacy_candidates = [_]items.Id{ .bandage, .antidote, .rations, .leather_armour };
+    var rations_placed: u8 = 0;
+    const ration_cap: u8 = 1;
     var c: usize = 0;
-    while (c < candidates.len and count < list.len) : (c += 1) {
+    while (c < base_table.len and count < list.len) : (c += 1) {
+        // Consume the same offset draws as the legacy 4-slot loop so floor RNG
+        // for walkability checks stays aligned on shallow floors; on danger floors
+        // the table itself differs (intentional scarcity, not a frozen golden path).
         const offset_x: i64 = @intCast((floor_rng.nextU8() % 4) + 1);
         const offset_y: i64 = @as(i64, @intCast(floor_rng.nextU8() % 4)) - 2;
         const pos = offsetLoc(spawn, offset_x, offset_y);
         if (!map.isWalkable(pos)) continue;
-        list[count] = .{ .item = candidates[c], .position = pos };
+        var item = base_table[c];
+        if (d_tier > 0 and item == .rations) {
+            if (rations_placed >= ration_cap) item = .antidote;
+            rations_placed +%= 1;
+        }
+        list[count] = .{ .item = item, .position = pos };
         count += 1;
     }
 
     const tier = depthTier(floor_index);
-    if (tier > 0) {
+    if (tier > 0 and d_tier == 0) {
+        // Legacy floor-3 path: keep depthBonusRng draws and bandage-rich table frozen.
         var bonus_rng = depthBonusRng(world_seed, floor_index);
         var attempt: u8 = 0;
         const max_attempts: u8 = @intCast(tier * 4);
         while (attempt < max_attempts and count < list.len) : (attempt += 1) {
-            const pick = bonus_rng.nextU8() % @as(u8, @intCast(candidates.len));
+            const pick = bonus_rng.nextU8() % @as(u8, @intCast(legacy_candidates.len));
             const offset_x: i64 = @intCast((bonus_rng.nextU8() % 8) + 1);
             const offset_y: i64 = @as(i64, @intCast(bonus_rng.nextU8() % 8)) - 4;
             const pos = offsetLoc(spawn, offset_x, offset_y);
             if (!map.isWalkable(pos)) continue;
-            list[count] = .{ .item = candidates[pick], .position = pos };
+            list[count] = .{ .item = legacy_candidates[pick], .position = pos };
+            count += 1;
+        }
+    } else if (d_tier > 0) {
+        // Danger floors: scarce heals, ration cap (shared with base), weapon roster.
+        var bonus_rng = depthBonusRng(world_seed, floor_index);
+        const deep_table = [_]items.Id{ .antidote, .rations, .leather_armour, .war_axe, .greatsword, .bandage };
+        var attempt: u8 = 0;
+        const max_attempts: u8 = @intCast(d_tier); // small cap replaces tier*4 glut
+        while (attempt < max_attempts and count < list.len) : (attempt += 1) {
+            const pick = bonus_rng.nextU8() % @as(u8, @intCast(deep_table.len));
+            const offset_x: i64 = @intCast((bonus_rng.nextU8() % 8) + 1);
+            const offset_y: i64 = @as(i64, @intCast(bonus_rng.nextU8() % 8)) - 4;
+            const pos = offsetLoc(spawn, offset_x, offset_y);
+            if (!map.isWalkable(pos)) continue;
+            var item = deep_table[pick];
+            if (item == .rations) {
+                // The cap counts only rations actually placed: a skipped
+                // (unwalkable) draw must not burn the cap and starve the floor.
+                if (rations_placed >= ration_cap) item = .antidote;
+                rations_placed +%= 1;
+            }
+            list[count] = .{ .item = item, .position = pos };
             count += 1;
         }
     }
+
+    if (d_tier > 0) {
+        // Survival floor (v1.6 tuning): every danger floor guarantees at least
+        // one placed ration. `ration_cap` bounds food from above; this bounds
+        // it from below — without it roughly half of all seeds generated zero
+        // food on floors whose steady move cost is 2 ticks/move, so starvation
+        // was a seed roll, not a play outcome (economy audit; playtest seed 7).
+        // Dedicated `rationRng` stream + deterministic fallback: floors ≤ 3
+        // draw nothing new, frozen goldens stay byte-identical.
+        var placed_rations: usize = 0;
+        var li: usize = 0;
+        while (li < count) : (li += 1) {
+            if (list[li].item == .rations) placed_rations += 1;
+        }
+        if (placed_rations == 0 and count < list.len) {
+            // Avoid planned monster tiles: placeFloorLoot drops loot on
+            // entity-occupied tiles, which would silently void the guarantee.
+            const monster_plan = planMonsterSpawns(world_seed, floor_index, spawn);
+            var food_rng = rationRng(world_seed, floor_index);
+            var attempt: u8 = 0;
+            var placed = false;
+            while (attempt < 16 and !placed) : (attempt += 1) {
+                const offset_x: i64 = @intCast((food_rng.nextU8() % 8) + 1);
+                const offset_y: i64 = @as(i64, @intCast(food_rng.nextU8() % 8)) - 4;
+                const pos = offsetLoc(spawn, offset_x, offset_y);
+                if (!lootTileFree(map, &monster_plan, list[0..count], pos)) continue;
+                list[count] = .{ .item = .rations, .position = pos };
+                count += 1;
+                placed = true;
+            }
+            if (!placed) {
+                // Deterministic ring around the room-center spawn; rooms are
+                // ≥ 4×3 so a free neighbour exists. The spawn tile itself is
+                // excluded: the player lands there on descend and
+                // placeFloorLoot skips occupied tiles.
+                const ring = [_][2]i64{
+                    .{ 1, 0 },  .{ 0, 1 },  .{ -1, 0 }, .{ 0, -1 },
+                    .{ 1, 1 },  .{ 1, -1 }, .{ -1, 1 }, .{ -1, -1 },
+                    .{ 2, 0 },  .{ 0, 2 },  .{ -2, 0 }, .{ 0, -2 },
+                };
+                for (ring) |d| {
+                    const pos = offsetLoc(spawn, d[0], d[1]);
+                    if (!lootTileFree(map, &monster_plan, list[0..count], pos)) continue;
+                    list[count] = .{ .item = .rations, .position = pos };
+                    count += 1;
+                    break;
+                }
+            }
+        }
+    }
     return .{ .spawns = list, .count = count };
+}
+
+/// A tile can host the guaranteed ration: walkable, no planned loot, and no
+/// planned monster spawn (loot on an entity tile is skipped at placement).
+fn lootTileFree(
+    map: *const terrain.TerrainMap,
+    monster_plan: *const MonsterPlan,
+    placed: []const LootSpawn,
+    pos: loc.Loc,
+) bool {
+    if (!map.isWalkable(pos)) return false;
+    for (placed) |entry| {
+        if (entry.position.x == pos.x and entry.position.y == pos.y) return false;
+    }
+    var i: usize = 0;
+    while (i < monster_plan.count) : (i += 1) {
+        const m = monster_plan.spawns[i].position;
+        if (m.x == pos.x and m.y == pos.y) return false;
+    }
+    return true;
+}
+
+/// Clock ticks one player move costs on this floor in the survival steady state.
+/// `rest_fatigue_floor` (20) sits exactly at exhaustion tier 1, so between sleeps
+/// every player is tier >= 1 and `movement.moveEntity` charges the danger-floor
+/// extra tick: 2 ticks/move on floor >= 4, 1 below.
+pub fn steadyMoveTicks(floor_index: u32) u64 {
+    return if (dangerTier(floor_index) > 0) 2 else 1;
+}
+
+pub const FloorEconomy = struct {
+    floor_index: u32,
+    /// Rations the loot plan actually places (walkability already applied).
+    plan_rations: usize,
+    plan_loot: usize,
+    /// BFS shortest spawn->stairs path in moves; 0 with `stairs_reachable`
+    /// means the spawn room's center doubles as the stairs tile.
+    stairs_distance: usize,
+    stairs_reachable: bool,
+    /// stairs_distance * steadyMoveTicks: the floor's minimum hunger cost for a
+    /// direct crossing with zero exploration, fights, or recovery actions.
+    min_cross_ticks: u64,
+};
+
+/// Deterministic food-vs-ticks audit of a generated floor: food obtainable from
+/// the loot plan vs the minimum clock cost of crossing spawn->stairs. Pure
+/// function of (seed, floor_index), so sweeping seeds is cheap.
+pub fn auditFloorEconomy(
+    allocator: std.mem.Allocator,
+    world_seed: u64,
+    floor_index: u32,
+) !FloorEconomy {
+    var map = terrain.TerrainMap.init(allocator);
+    defer map.deinit();
+    const gen = try generateFloor(&map, world_seed, floor_index);
+    const loot = planFloorLoot(world_seed, floor_index, gen.spawn, &map);
+
+    var rations: usize = 0;
+    var i: usize = 0;
+    while (i < loot.count) : (i += 1) {
+        if (loot.spawns[i].item == .rations) rations += 1;
+    }
+
+    const maybe_dist = planDirectRoute(&map, gen.spawn, gen.stairs_down orelse gen.spawn, &.{});
+    const dist = maybe_dist orelse 0;
+    return .{
+        .floor_index = floor_index,
+        .plan_rations = rations,
+        .plan_loot = loot.count,
+        .stairs_distance = dist,
+        .stairs_reachable = maybe_dist != null,
+        .min_cross_ticks = @as(u64, dist) * steadyMoveTicks(floor_index),
+    };
+}
+
+/// Cardinal step of a planned direct route (decoupled from movement.Direction
+/// to keep dungeon free of a movement->world->dungeon import cycle). Uses the
+/// engine compass from `movement.step`: north/south move along loc.x (−/+),
+/// east/west along loc.y (+/−).
+pub const RouteStep = enum { north, south, east, west };
+
+/// BFS-plan the shortest walkable route `from` -> `to` on the generated grid.
+/// Fills `buf` (when large enough) with the steps in walk order and returns the
+/// route length, or null when unreachable. Pass an empty buffer to get only the
+/// distance. Deterministic: fixed north/south/east/west expansion order.
+pub fn planDirectRoute(
+    map: *const terrain.TerrainMap,
+    from: loc.Loc,
+    to: loc.Loc,
+    buf: []RouteStep,
+) ?usize {
+    var dist = [_][grid_w]i32{[_]i32{-1} ** grid_w} ** grid_h;
+    var parent = [_][grid_w]?RouteStep{[_]?RouteStep{null} ** grid_w} ** grid_h;
+    var queue: [grid_w * grid_h][2]usize = undefined;
+
+    const fx = gridIndex(from) orelse return null;
+    const tx = gridIndex(to) orelse return null;
+    if (fx[0] == tx[0] and fx[1] == tx[1]) return 0;
+
+    dist[fx[1]][fx[0]] = 0;
+    queue[0] = fx;
+    var head: usize = 0;
+    var tail: usize = 1;
+    outer: while (head < tail) : (head += 1) {
+        const cur = queue[head];
+        const d = dist[cur[1]][cur[0]];
+        // Engine compass (movement.step): north/south are loc.x −/+, east/west
+        // are loc.y +/−. Grid axis 0 tracks loc.x, axis 1 tracks loc.y.
+        const steps = [_]struct { dx: i64, dy: i64, step: RouteStep }{
+            .{ .dx = -1, .dy = 0, .step = .north },
+            .{ .dx = 1, .dy = 0, .step = .south },
+            .{ .dx = 0, .dy = 1, .step = .east },
+            .{ .dx = 0, .dy = -1, .step = .west },
+        };
+        for (steps) |s| {
+            const nx = @as(i64, @intCast(cur[0])) + s.dx;
+            const ny = @as(i64, @intCast(cur[1])) + s.dy;
+            if (nx < 0 or ny < 0 or nx >= grid_w or ny >= grid_h) continue;
+            const ux: usize = @intCast(nx);
+            const uy: usize = @intCast(ny);
+            if (dist[uy][ux] != -1) continue;
+            if (!map.isWalkable(gridToLoc(ux, uy))) continue;
+            dist[uy][ux] = d + 1;
+            parent[uy][ux] = s.step;
+            queue[tail] = .{ ux, uy };
+            tail += 1;
+            if (ux == tx[0] and uy == tx[1]) break :outer;
+        }
+    }
+
+    const total = dist[tx[1]][tx[0]];
+    if (total < 0) return null;
+    const len: usize = @intCast(total);
+
+    if (buf.len >= len) {
+        // Walk parents backwards from the goal, writing steps in forward order.
+        var cx = tx[0];
+        var cy = tx[1];
+        var remaining = len;
+        while (remaining > 0) : (remaining -= 1) {
+            const step = parent[cy][cx] orelse return null;
+            buf[remaining - 1] = step;
+            switch (step) {
+                .north => cx += 1,
+                .south => cx -= 1,
+                .east => cy -= 1,
+                .west => cy += 1,
+            }
+        }
+    }
+    return len;
+}
+
+fn gridIndex(position: loc.Loc) ?[2]usize {
+    if (position.x < origin_x or position.y < origin_y) return null;
+    const gx = position.x - origin_x;
+    const gy = position.y - origin_y;
+    if (gx >= grid_w or gy >= grid_h) return null;
+    return .{ @intCast(gx), @intCast(gy) };
 }
 
 pub const TrapSpawn = struct {
@@ -494,12 +810,116 @@ test "deeper floors scale monster and loot counts on seed 42" {
     const loot2 = planFloorLoot(42, 2, gen2.spawn, &map2);
     const loot5 = planFloorLoot(42, 5, gen5.spawn, &map5);
 
-    try std.testing.expect(monsters5.count > monsters2.count or loot5.count > loot2.count);
+    // Monsters still scale with depth; danger-floor loot is intentionally scarcer (v1.6).
     try std.testing.expectEqual(@as(usize, 3), monsters2.count);
     try std.testing.expectEqual(@as(usize, 4), loot2.count);
     try std.testing.expect(monsters5.count > monsters2.count);
     try std.testing.expectEqual(@as(usize, 5), monsters5.count);
-    try std.testing.expect(loot5.count > loot2.count);
+    try std.testing.expect(loot5.count < loot2.count); // scarcity on floor ≥ 4
+    try std.testing.expectEqual(@as(u32, 2), dangerTier(5));
+    try std.testing.expectEqual(@as(u32, 0), dangerTier(3));
+}
+
+test "eliteRng upgrades only on danger floors" {
+    const allocator = std.testing.allocator;
+    var map3 = terrain.TerrainMap.init(allocator);
+    defer map3.deinit();
+    const gen3 = try generateFloor(&map3, 42, 3);
+
+    const plan3 = planMonsterSpawns(42, 3, gen3.spawn);
+    var i: usize = 0;
+    while (i < plan3.count) : (i += 1) {
+        try std.testing.expect(!monsters.isElite(plan3.spawns[i].kind));
+        try std.testing.expectEqual(@as(u32, 0), plan3.spawns[i].danger_tier);
+    }
+
+    // Search a band of seeds for a natural elite upgrade on floor 4 (eliteRng ~25%/spawn).
+    var found_elite = false;
+    var seed: u64 = 1;
+    while (seed < 64) : (seed += 1) {
+        var map = terrain.TerrainMap.init(allocator);
+        defer map.deinit();
+        const gen = try generateFloor(&map, seed, 4);
+        const plan = planMonsterSpawns(seed, 4, gen.spawn);
+        var j: usize = 0;
+        while (j < plan.count) : (j += 1) {
+            try std.testing.expectEqual(@as(u32, 1), plan.spawns[j].danger_tier);
+            if (monsters.isElite(plan.spawns[j].kind)) {
+                found_elite = true;
+                // Name tracks the upgraded kind.
+                try std.testing.expect(std.mem.indexOf(u8, plan.spawns[j].name, "hobgoblin") != null or
+                    std.mem.indexOf(u8, plan.spawns[j].name, "skeleton_warrior") != null);
+            }
+        }
+        if (found_elite) break;
+    }
+    try std.testing.expect(found_elite);
+}
+
+test "danger floor base loot has no free bandage glut" {
+    const allocator = std.testing.allocator;
+    var map = terrain.TerrainMap.init(allocator);
+    defer map.deinit();
+    const gen = try generateFloor(&map, 42, 5);
+    const loot = planFloorLoot(42, 5, gen.spawn, &map);
+    var bandages: usize = 0;
+    var rations: usize = 0;
+    var i: usize = 0;
+    while (i < loot.count) : (i += 1) {
+        if (loot.spawns[i].item == .bandage) bandages += 1;
+        if (loot.spawns[i].item == .rations) rations += 1;
+    }
+    // Base table drops bandage; deep bonus may add at most ~1-in-6 and ration cap is 1.
+    try std.testing.expect(bandages <= 1);
+    try std.testing.expect(rations <= 1);
+}
+
+test "danger floors always plan at least one ration and reachable stairs (seed sweep)" {
+    // v1.6 survival floor: scarcity caps food from above (ration_cap), the
+    // guaranteed ration bounds it from below. Before the guarantee, ~half of
+    // all seeds generated zero food on floors whose steady move cost is
+    // 2 ticks/move — starvation by seed roll (playtest seed 7, floor 4).
+    const allocator = std.testing.allocator;
+    var seed: u64 = 1;
+    while (seed <= 64) : (seed += 1) {
+        var floor: u32 = 4;
+        while (floor <= 5) : (floor += 1) {
+            const econ = try auditFloorEconomy(allocator, seed, floor);
+            try std.testing.expect(econ.plan_rations >= 1);
+            // Distance 0 is legal (seed 44 floor 4 spawns on the stairs tile);
+            // unreachable stairs are not.
+            try std.testing.expect(econ.stairs_reachable);
+        }
+    }
+}
+
+test "planDirectRoute matches audited stairs distance on seed 42 floor 4" {
+    const allocator = std.testing.allocator;
+    var map = terrain.TerrainMap.init(allocator);
+    defer map.deinit();
+    const gen = try generateFloor(&map, 42, 4);
+    const stairs = gen.stairs_down orelse return error.TestUnexpectedResult;
+
+    var route: [512]RouteStep = undefined;
+    const len = planDirectRoute(&map, gen.spawn, stairs, &route) orelse
+        return error.TestUnexpectedResult;
+    const econ = try auditFloorEconomy(allocator, 42, 4);
+    try std.testing.expectEqual(econ.stairs_distance, len);
+
+    // Replaying the route lands exactly on the stairs tile via walkable tiles
+    // (engine compass: north/south move loc.x, east/west move loc.y).
+    var at = gen.spawn;
+    for (route[0..len]) |step| {
+        at = switch (step) {
+            .north => loc.Loc.init(at.x - 1, at.y),
+            .south => loc.Loc.init(at.x + 1, at.y),
+            .east => loc.Loc.init(at.x, at.y + 1),
+            .west => loc.Loc.init(at.x, at.y - 1),
+        };
+        try std.testing.expect(map.isWalkable(at));
+    }
+    try std.testing.expectEqual(stairs.x, at.x);
+    try std.testing.expectEqual(stairs.y, at.y);
 }
 
 test "trap spawn plan is deterministic and places poison traps" {
