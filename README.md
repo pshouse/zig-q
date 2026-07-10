@@ -2,7 +2,7 @@
 
 A Zig prototype for deterministic **dungeon crawl** simulation: character creation, dungeon tiles, level-1 combat sheet (HP/AC), turn-based combat, and SQLite save/load.
 
-**Requires Zig 0.15+** (tested on 0.15.2). **Version:** `1.7.0` — Fair Danger: survival recovery paths, combat step-toward, anti-recurrence gates (see SPRINT_V1.7.md).
+**Requires Zig 0.15+** (tested on 0.15.2). **Version:** `1.7.1` — Fair Danger patch: sleep no longer accrues fatigue mid-loop (fixes #55 tier-6 permadeath).
 
 SQLite is bundled via the amalgamation in `deps/sqlite3/` (no system SQLite install required).
 
@@ -119,7 +119,8 @@ zig build dst -- @scenarios/reference_crawl.txt 42
 - **catch_breath** — exhausted fighter trades combat turns to `catch breath`, shedding fatigue as the goblin counters
 - **combat_reposition** — step out of the goblin's reach mid-combat, then `end turn` / `catch breath`; the unreachable goblin forfeits its counter (crash regression), re-engage proves combat stayed live
 - **rest_floor** — rest sheds fatigue only to the floor (20); only sleep clears exhaustion (survival-economy guard)
-- **exhausted_sleep** — sleep from fatigue 60 crosses the tier-4 "HP max halved" band mid-sleep yet wakes at full HP (the halving caps recovery, it never drains); at tier 4 a bandage heals only to half max and is refused at the cap
+- **exhausted_sleep** — sleep from fatigue 60 wakes at full HP; at tier 4 a bandage heals only to half max and is refused at the cap (recovery-cap pin)
+- **sleep_high_fatigue** — sleep at fatigue 71 / 84 / 100 recovers without permadeath (#55: no fatigue accrual while asleep)
 - **starve_out** — starvation drains HP to 0 outside combat; permadeath gate blocks further play (walking-dead guard)
 - **glyph_look** — viewport glyph legend: live monsters render as kind letters (`g` goblin, `s` skeleton, `h` hobgoblin, `w` skeleton_warrior), dead ones stop rendering; `*` no longer marks monsters
 - **deadly_floor** — floor-4 danger-tier counters after every player attack; `flee` under pressure
@@ -212,6 +213,7 @@ zig build run -- --help
 
 | Version | Theme |
 |---------|--------|
+| **1.7.1** | Sleep does not accrue fatigue while asleep (#55): starting sleep at fatigue ≥71 no longer climbs into tier-6 collapse / permadeath; DST `sleep_high_fatigue` locks the boundary |
 | **1.7.0** | Fair Danger: exhaustion-5 sleep recovery, in-combat step-toward + lost-contact, loot/trap placement fairness, anti-recurrence gates, chase memory, load slot validation. Survival retune (#40) open pending fleet A/B |
 | **1.6.1** | Exhaustion tier 4 "HP max halved" is a recovery cap, not a drain: crossing fatigue 70 (e.g. mid-`sleep`) no longer permanently halves current HP; instead bandage healing stops at half max while the tier is active |
 | **1.6.0** | Depth danger: initiative counters on floor ≥4, danger-tier stats, elites, scarce heals, save v4 |

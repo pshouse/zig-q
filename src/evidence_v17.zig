@@ -17,6 +17,14 @@ pub fn run(allocator: std.mem.Allocator, writer: anytype) !void {
     try evidence_format.marker(writer, "you collapse into sleep", collapse_out, "you collapse into sleep");
     try evidence_format.marker(writer, "slept (ticks=", collapse_out, "slept (ticks=");
 
+    // #55: sleep at fatigue ≥71 must complete without tier-6 permadeath.
+    var high_fatigue_buf: [65536]u8 = undefined;
+    const high_fatigue_out = try evidence_format.runScenario(allocator, "sleep_high_fatigue", 42, &high_fatigue_buf, gate);
+    try writer.print("--- scenario sleep_high_fatigue ---\n", .{});
+    try evidence_format.marker(writer, "slept (ticks=72 fatigue=0)", high_fatigue_out, "slept (ticks=72 fatigue=0)");
+    const no_permadeath = std.mem.indexOf(u8, high_fatigue_out, "permadeath") == null;
+    try writer.print("marker no_sleep_permadeath: {}\n", .{no_permadeath});
+
     var reposition_buf: [65536]u8 = undefined;
     const reposition_out = try evidence_format.runScenario(allocator, "combat_reposition", 42, &reposition_buf, gate);
     try writer.print("--- scenario combat_reposition ---\n", .{});
@@ -36,6 +44,8 @@ test "evidence v17 fair danger markers" {
     try run(allocator, fbs.writer());
     const out = fbs.getWritten();
     try evidence_format.expectMarkerLineTrue(out, "marker you collapse into sleep: true");
+    try evidence_format.expectMarkerLineTrue(out, "marker slept (ticks=72 fatigue=0): true");
+    try evidence_format.expectMarkerLineTrue(out, "marker no_sleep_permadeath: true");
     try evidence_format.expectMarkerLineTrue(out, "marker goblin_0 advances to: true");
     try evidence_format.expectMarkerLineTrue(out, "marker max_floor_depth=5: true");
 }
