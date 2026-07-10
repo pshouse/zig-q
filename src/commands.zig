@@ -1367,6 +1367,10 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                     try writer.print("cannot descend during combat\n", .{});
                     return .continue_repl;
                 },
+                error.MaxDepthReached => {
+                    try writer.print("cannot descend further (max depth {})\n", .{world.max_floor_depth});
+                    return .continue_repl;
+                },
                 else => |e| return e,
             };
             try writer.print("descended to floor {}\n", .{ctx.w.floor_index});

@@ -15,6 +15,10 @@ const conditions = @import("conditions.zig");
 const doors = @import("doors.zig");
 const survival = @import("survival.zig");
 
+/// Deepest floor the product ships and the fuzz harness exercises. Descent past
+/// this is refused so reachable-but-unfuzzed depth cannot exist (#34 / SD product scope).
+pub const max_floor_depth: u32 = 5;
+
 pub const World = struct {
     allocator: std.mem.Allocator,
     seed: u64,
@@ -152,12 +156,17 @@ pub const World = struct {
         if (combat.isInCombat(self)) return error.InCombat;
         if (ent.char.status == .fighting) return error.InCombat;
 
+        // Product scope and fuzz depth are the same constant (#34): refuse
+        // descent past the deepest fuzzed floor so reachable-but-unfuzzed
+        // depth cannot exist.
+        const next_floor = self.floor_index + 1;
+        if (next_floor > max_floor_depth) return error.MaxDepthReached;
+
         combat.endCombat(self);
         self.removeAllMonsters();
         self.floor_objects.clear(self.allocator);
         self.doors.clear();
 
-        const next_floor = self.floor_index + 1;
         try self.loadFloor(next_floor);
         try self.relocatePlayer(player_id, self.floor_spawn);
         try self.placeFloorMonsters();
@@ -406,4 +415,19 @@ test "descend clears corpses from previous floor" {
     for (w.floor_objects.objects.items) |obj| {
         try std.testing.expect(obj.kind != .corpse);
     }
+}
+
+test "descend refuses past max_floor_depth" {
+    // #34: floors past the fuzz depth must not be reachable.
+    const allocator = std.testing.allocator;
+    var w = try World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(max_floor_depth);
+    var scratch = terrain.TerrainMap.init(allocator);
+    defer scratch.deinit();
+    const gen = try dungeon.generateFloor(&scratch, 42, max_floor_depth);
+    const stairs = gen.stairs_down orelse return error.TestUnexpectedResult;
+    const player_id = try w.spawnTestPlayer(stairs);
+    try std.testing.expectError(error.MaxDepthReached, w.descend(player_id));
+    try std.testing.expectEqual(max_floor_depth, w.floor_index);
 }

@@ -291,7 +291,8 @@ fn countLiveMonsters(w: *const world.World) usize {
     return n;
 }
 
-pub const max_floor_depth: u32 = 5;
+/// Re-export product depth cap (single source of truth in world.zig).
+pub const max_floor_depth: u32 = world.max_floor_depth;
 
 const OscillationTracker = struct {
     entries: [32]struct {
