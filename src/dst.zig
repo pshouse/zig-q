@@ -553,14 +553,11 @@ pub const rest_floor_scenario = Scenario{
     },
 };
 
-/// Seed 42: regression for sleep-from-moderate-fatigue. cmdSleep runs all 24
-/// ticks before applySleep resets fatigue, so a sleep started at fatigue 60
-/// climbs through exhaustion tier 4 ("HP max halved", fatigue 70-84) mid-sleep.
-/// The halving is a recovery cap, not a drain: George wakes at full HP — the
-/// removed onTick clamp used to cut him to half permanently. The bandage legs
-/// pin the cap's actual bite: at tier 4 healing stops at effectiveMaxHp, a
-/// bandage that cannot heal is refused (not consumed), and once exhaustion
-/// clears the same bandage heals past the old cap.
+/// Seed 42: sleep from moderate fatigue keeps full HP, then the tier-4 recovery
+/// cap is exercised while awake. Sleep no longer accrues fatigue mid-loop
+/// (#55 / v1.7.1); the bandage legs still pin that at exhaustion 4 healing
+/// stops at effectiveMaxHp, a bandage that cannot heal is refused (not
+/// consumed), and once exhaustion clears the same bandage heals past the cap.
 pub const exhausted_sleep_scenario = Scenario{
     .name = "exhausted_sleep",
     .seed = 42,
@@ -574,7 +571,7 @@ pub const exhausted_sleep_scenario = Scenario{
         .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
         .{ .set_fatigue = .{ .entity = "entity_0", .value = 60 } },
         .{ .command = "stats" }, // HP: 13 before sleeping
-        .{ .command = "sleep" }, // fatigue peaks at 84 (tier 4) before the reset
+        .{ .command = "sleep" }, // fatigue frozen while asleep; applySleep → 0
         .{ .command = "stats" }, // HP: 13 — sleeping cost nothing
         .{ .set_fatigue = .{ .entity = "entity_0", .value = 75 } }, // tier 4 while awake
         .{ .set_hp = .{ .entity = "entity_0", .current = 3 } },
@@ -608,6 +605,39 @@ pub const collapse_sleep_scenario = Scenario{
         .{ .command = "rest" }, // still blocked while incapacitated
         .{ .command = "sleep" }, // recovery path: collapses into sleep and wakes clear
         .{ .command = "conditions" }, // exhaustion gone
+        .{ .command = "exit" },
+    },
+};
+
+/// #55: sleep at high fatigue must never self-kill. Pre-1.7.1, unguarded fatigue
+/// accrual across the 24 sleep ticks climbed start≥71 into tier 6 and
+/// resolveDeath mid-sleep — while the tier-4 UI said "sleep soon". Locks the
+/// lethal boundary (71), the observed playtest death (84), and fatigue_max.
+pub const sleep_high_fatigue_scenario = Scenario{
+    .name = "sleep_high_fatigue",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 },
+        .{ .choose_class = 1 },
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        // Boundary: old accrual 71+24 → 95 = tier 6 collapse.
+        .{ .set_fatigue = .{ .entity = "entity_0", .value = 71 } },
+        .{ .command = "stats" },
+        .{ .command = "sleep" },
+        .{ .command = "stats" }, // alive, fatigue=0, HP intact
+        // Observed playtest death (fatigue 84, tier 4 "sleep soon").
+        .{ .set_fatigue = .{ .entity = "entity_0", .value = 84 } },
+        .{ .command = "sleep" },
+        .{ .command = "stats" },
+        // Ceiling: sleep from fatigue_max must also recover, not collapse.
+        .{ .set_fatigue = .{ .entity = "entity_0", .value = 100 } },
+        .{ .command = "sleep" },
+        .{ .command = "stats" },
+        .{ .command = "conditions" }, // no dead / no exhaustion
         .{ .command = "exit" },
     },
 };
@@ -1523,8 +1553,8 @@ pub const registered_scenario_names = [_][]const u8{
     "corpse_loot",       "encumbered",        "hunt",              "flee",
     "trap_trigger",      "door_route",        "survive",           "starve",
     "starve_out",        "sleep_cycle",       "rest_floor",        "exhausted_sleep",
-    "collapse_sleep",    "reference_survive", "monster_endurance", "bleed_out",
-    "heal_bandage",
+    "collapse_sleep",    "sleep_high_fatigue","reference_survive", "monster_endurance",
+    "bleed_out",         "heal_bandage",
     "trap_floor",        "deep_floor",        "combat_flee",       "catch_breath",
     "combat_reposition", "glyph_look",        "deadly_floor",      "elite_brawl",
     "scarce_heals",      "save_v4_roundtrip", "unequip_cycle",     "drop_clears_slot",
@@ -1590,6 +1620,8 @@ pub fn scenarioByName(name: []const u8, seed: u64) ?Scenario {
         return Scenario{ .name = "exhausted_sleep", .seed = seed, .steps = exhausted_sleep_scenario.steps };
     if (std.mem.eql(u8, name, "collapse_sleep"))
         return Scenario{ .name = "collapse_sleep", .seed = seed, .steps = collapse_sleep_scenario.steps };
+    if (std.mem.eql(u8, name, "sleep_high_fatigue"))
+        return Scenario{ .name = "sleep_high_fatigue", .seed = seed, .steps = sleep_high_fatigue_scenario.steps };
     if (std.mem.eql(u8, name, "reference_survive"))
         return Scenario{ .name = "reference_survive", .seed = seed, .steps = reference_survive_scenario.steps };
     if (std.mem.eql(u8, name, "monster_endurance"))
@@ -2040,7 +2072,7 @@ test "dst exhausted_sleep scenario is byte-identical across runs" {
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "exhausted_sleep", 65536);
     defer allocator.free(out);
-    // Sleep crossed the tier-4 band; the fatigue reset landed...
+    // Sleep reset fatigue; no mid-sleep HP confiscation (#55 freezes fatigue while asleep).
     try std.testing.expect(std.mem.indexOf(u8, out, "slept (ticks=24 fatigue=0)") != null);
     // ...and no HP was confiscated anywhere in the run: with no combat, poison,
     // or starvation here, any "lost N hp" line is the old onTick clamp resurfacing.
@@ -2051,6 +2083,21 @@ test "dst exhausted_sleep scenario is byte-identical across runs" {
     try std.testing.expect(std.mem.indexOf(u8, out, "too exhausted to heal (hp=6 capped at 6)") != null);
     // Exhaustion cleared, the full flat heal resumes.
     try std.testing.expect(std.mem.indexOf(u8, out, "used bandage; healed 5 hp") != null);
+}
+
+test "dst sleep_high_fatigue scenario survives tier-6 boundary" {
+    // #55: sleep at fatigue ≥71 used to permadeath mid-loop via tier-6 collapse.
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "sleep_high_fatigue", 65536);
+    defer allocator.free(out);
+    // Three full sleeps (71, 84, 100) all complete.
+    try std.testing.expect(std.mem.indexOf(u8, out, "slept (ticks=24 fatigue=0)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "slept (ticks=48 fatigue=0)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "slept (ticks=72 fatigue=0)") != null);
+    // Never died — no permadeath line, no "lost N hp" from collapse.
+    try std.testing.expect(std.mem.indexOf(u8, out, "permadeath") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "lost ") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "status: dead") == null);
 }
 
 test "dst reference_survive scenario is byte-identical across runs" {

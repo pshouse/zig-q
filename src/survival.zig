@@ -256,8 +256,12 @@ pub fn onTick(w: *world.World, ent: *entity.Entity) void {
         return;
     }
 
+    // Hunger still advances while asleep (time passes; you wake hungrier).
+    // Fatigue does not: sleep is the full recovery action, and accruing fatigue
+    // across the 24 sleep ticks used to drive tier-4 sleepers into tier-6
+    // collapse (permadeath) before applySleep could reset the meter (#55).
     if (ent.hunger < hunger_max) ent.hunger += 1;
-    if (ent.fatigue < fatigue_max) ent.fatigue += 1;
+    if (!ent.sleeping and ent.fatigue < fatigue_max) ent.fatigue += 1;
 
     _ = syncStarving(ent);
 
@@ -278,7 +282,9 @@ pub fn onTick(w: *world.World, ent: *entity.Entity) void {
     // halving caps recovery (see effectiveMaxHp), it does not confiscate HP.
     // HP loss from exhaustion comes only from the tier-6 collapse below.
 
-    if (conditions.exhaustionLevel(ent) >= 6) {
+    // Tier-6 collapse is waking-only. Belt-and-suspenders with the fatigue
+    // accrual guard above: a sleeper must never die of exhaustion mid-sleep.
+    if (!ent.sleeping and conditions.exhaustionLevel(ent) >= 6) {
         // Collapse from exhaustion ends the run whether or not a fight is in
         // progress. Unreachable for monsters (they exit above) but routed
         // through the same death path in case the exemption ever narrows.
@@ -621,11 +627,10 @@ test "crossing exhaustion tier 4 halves the recovery cap but drains no hp" {
     try std.testing.expectEqual(@as(u32, 10), ent.current_hp); // ...but current hp intact
 }
 
-test "sleeping through the tier 4 band keeps current hp" {
-    // Reproduces the cmdSleep shape: 24 ticks accrue fatigue first, applySleep
-    // resets it after. Started at fatigue 60 the sleeper peaks at 84 (tier 4);
-    // waking must cost nothing — sleep is the only full fatigue reset, so a
-    // clamp here made recovery itself the thing that halved your HP for good.
+test "sleeping does not accrue fatigue; applySleep resets and keeps hp" {
+    // #55: cmdSleep used to tick 24 times *before* applySleep, and unguarded
+    // onTick fatigue accrual climbed 60→84 (and at start ≥71, into tier 6 /
+    // permadeath). Sleeping must freeze fatigue so sleep only ever reduces it.
     var ent = testEntity();
     ent.fatigue = 60;
     ent.sleeping = true;
@@ -633,13 +638,43 @@ test "sleeping through the tier 4 band keeps current hp" {
     w.combat = null;
     var i: u32 = 0;
     while (i < sleep_ticks) : (i += 1) onTick(&w, &ent);
-    try std.testing.expectEqual(@as(u16, 84), ent.fatigue);
+    try std.testing.expectEqual(@as(u16, 60), ent.fatigue); // frozen while asleep
     ent.sleeping = false;
     _ = applySleep(&ent);
     try std.testing.expectEqual(@as(u16, 0), ent.fatigue);
     try std.testing.expectEqual(@as(u3, 0), conditions.exhaustionLevel(&ent));
     try std.testing.expectEqual(@as(u32, 10), ent.current_hp);
     try std.testing.expectEqual(@as(u32, 10), effectiveMaxHp(&ent));
+}
+
+test "sleep at high fatigue never collapses into permadeath" {
+    // Bracketed lethal boundary under the old unguarded accrual: start ≥71
+    // climbed to ≥95 mid-sleep → tier-6 resolveDeath. Sleep at 84 (observed
+    // playtest death) and at fatigue_max must both recover cleanly.
+    const allocator = std.testing.allocator;
+    for ([_]u16{ 71, 84, fatigue_max }) |start_fatigue| {
+        var w = try world.World.init(allocator, 42);
+        defer w.deinit();
+        const id = try w.spawnTestPlayer(@import("loc.zig").Loc.init(49, 49));
+        const ent = w.store.get(id).?;
+        const hp_before = ent.current_hp;
+        ent.fatigue = start_fatigue;
+        _ = syncExhaustion(ent);
+        ent.sleeping = true;
+        var i: u32 = 0;
+        while (i < sleep_ticks) : (i += 1) {
+            w.tick();
+            try std.testing.expect(!conditions.isDead(ent));
+            try std.testing.expectEqual(start_fatigue, ent.fatigue);
+        }
+        ent.sleeping = false;
+        _ = applySleep(ent);
+        try std.testing.expect(!conditions.isDead(ent));
+        try std.testing.expect(!w.isPlayerDead());
+        try std.testing.expectEqual(@as(u16, 0), ent.fatigue);
+        try std.testing.expectEqual(@as(u3, 0), conditions.exhaustionLevel(ent));
+        try std.testing.expectEqual(hp_before, ent.current_hp);
+    }
 }
 
 test "ticks increase hunger" {

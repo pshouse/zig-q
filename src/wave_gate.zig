@@ -120,7 +120,7 @@ pub const plans = [_]WavePlan{
         .prefix = "v17",
         .evidence_step = "evidence-v17",
         .new_scenarios = &.{
-            "collapse_sleep", "combat_reposition", "reference_crawl",
+            "collapse_sleep", "combat_reposition", "sleep_high_fatigue", "reference_crawl",
         },
         .all_scenarios = &.{
             "bootstrap",         "explore",         "create",            "crawl_start",      "playthrough",       "brawl",         "save_roundtrip",
@@ -130,7 +130,7 @@ pub const plans = [_]WavePlan{
             "deep_floor",        "rest_floor",      "combat_flee",       "catch_breath",     "deadly_floor",      "elite_brawl",   "scarce_heals",
             "save_v4_roundtrip", "sleep_interrupt", "unequip_cycle",     "drop_clears_slot", "bare_loot_corpse",  "weaker_weapon",
             "starve_out",        "combat_reposition", "survival_economy",  "monster_endurance",
-            "exhausted_sleep",   "bleed_out",         "glyph_look",       "collapse_sleep",
+            "exhausted_sleep",   "bleed_out",         "glyph_look",       "collapse_sleep",  "sleep_high_fatigue",
         },
         .run_migration = false,
     },

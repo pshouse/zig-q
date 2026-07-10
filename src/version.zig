@@ -1,7 +1,7 @@
 //! Single source of truth for release identity (semver).
 const std = @import("std");
 
-pub const semver: []const u8 = "1.7.0";
+pub const semver: []const u8 = "1.7.1";
 
 /// Wave gate versions recorded in DST/evidence transcripts per release plan.
 pub const v11: []const u8 = "1.1.0";
@@ -10,7 +10,7 @@ pub const v13: []const u8 = "1.3.0";
 pub const v14: []const u8 = "1.4.0";
 pub const v15: []const u8 = "1.5.3";
 pub const v16: []const u8 = "1.6.0";
-pub const v17: []const u8 = "1.7.0";
+pub const v17: []const u8 = "1.7.1";
 
 pub const GateConfig = struct {
     wave: u8,
@@ -74,7 +74,7 @@ test "forGate maps wave to emit semver" {
     try std.testing.expectEqualStrings("1.2.0", forGate(12).?.emit);
     try std.testing.expectEqualStrings("1.1.0", forGate(14).?.reference_header);
     try std.testing.expectEqualStrings("1.6.0", forGate(16).?.emit);
-    try std.testing.expectEqualStrings("1.7.0", forGate(17).?.emit);
+    try std.testing.expectEqualStrings("1.7.1", forGate(17).?.emit);
 }
 
 test "wave and forGate reject unknown waves" {
@@ -85,7 +85,7 @@ test "wave and forGate reject unknown waves" {
 }
 
 test "resolve defaults to shipped semver" {
-    try std.testing.expectEqualStrings("1.7.0", resolve(null));
+    try std.testing.expectEqualStrings("1.7.1", resolve(null));
     try std.testing.expectEqualStrings("0.6.0-dev", resolve("0.6.0-dev"));
 }
 
