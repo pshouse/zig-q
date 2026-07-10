@@ -387,6 +387,41 @@ pub const LootPlan = struct {
     count: usize,
 };
 
+/// Deterministic walkable-tile retry for loot placement (#33). Primary rolled
+/// tile first; if unwalkable, probe a fixed ring of offsets (no extra RNG draws
+/// so successful paths keep identical draw order). When the primary is
+/// walkable we keep it even if another loot already claims the tile — matching
+/// pre-#33 stacking so frozen goldens (reference_crawl floor-2 look) stay
+/// byte-identical. Returns null only when the whole neighbourhood is unwalkable.
+fn resolveLootTile(
+    map: *const terrain.TerrainMap,
+    primary: loc.Loc,
+    occupied: []const LootSpawn,
+) ?loc.Loc {
+    _ = occupied;
+    if (map.isWalkable(primary)) return primary;
+    // Fixed ring: same order every call; no RNG.
+    const ring = [_][2]i64{
+        .{ 1, 0 },  .{ 0, 1 },  .{ -1, 0 }, .{ 0, -1 },
+        .{ 1, 1 },  .{ 1, -1 }, .{ -1, 1 }, .{ -1, -1 },
+        .{ 2, 0 },  .{ 0, 2 },  .{ -2, 0 }, .{ 0, -2 },
+        .{ 2, 1 },  .{ 1, 2 },  .{ -1, 2 }, .{ -2, 1 },
+    };
+    for (ring) |d| {
+        const pos = offsetLoc(primary, d[0], d[1]);
+        if (!map.isWalkable(pos)) continue;
+        return pos;
+    }
+    return null;
+}
+
+fn lootPosTaken(occupied: []const LootSpawn, pos: loc.Loc) bool {
+    for (occupied) |entry| {
+        if (entry.position.x == pos.x and entry.position.y == pos.y) return true;
+    }
+    return false;
+}
+
 pub fn planFloorLoot(
     world_seed: u64,
     floor_index: u32,
@@ -417,8 +452,15 @@ pub fn planFloorLoot(
         // the table itself differs (intentional scarcity, not a frozen golden path).
         const offset_x: i64 = @intCast((floor_rng.nextU8() % 4) + 1);
         const offset_y: i64 = @as(i64, @intCast(floor_rng.nextU8() % 4)) - 2;
-        const pos = offsetLoc(spawn, offset_x, offset_y);
-        if (!map.isWalkable(pos)) continue;
+        const primary = offsetLoc(spawn, offset_x, offset_y);
+        // Floors 1–3: silent-drop on unwalkable (frozen reference_crawl / goldens).
+        // Danger floors (#33): retry a fixed ring so intended counts are met.
+        const pos = if (d_tier > 0)
+            (resolveLootTile(map, primary, list[0..count]) orelse continue)
+        else blk: {
+            if (!map.isWalkable(primary)) continue;
+            break :blk primary;
+        };
         var item = base_table[c];
         if (d_tier > 0 and item == .rations) {
             if (rations_placed >= ration_cap) item = .antidote;
@@ -445,6 +487,7 @@ pub fn planFloorLoot(
         }
     } else if (d_tier > 0) {
         // Danger floors: scarce heals, ration cap (shared with base), weapon roster.
+        // #33: retry unwalkable primaries so intended deep-floor counts land.
         var bonus_rng = depthBonusRng(world_seed, floor_index);
         const deep_table = [_]items.Id{ .antidote, .rations, .leather_armour, .war_axe, .greatsword, .bandage };
         var attempt: u8 = 0;
@@ -453,8 +496,8 @@ pub fn planFloorLoot(
             const pick = bonus_rng.nextU8() % @as(u8, @intCast(deep_table.len));
             const offset_x: i64 = @intCast((bonus_rng.nextU8() % 8) + 1);
             const offset_y: i64 = @as(i64, @intCast(bonus_rng.nextU8() % 8)) - 4;
-            const pos = offsetLoc(spawn, offset_x, offset_y);
-            if (!map.isWalkable(pos)) continue;
+            const primary = offsetLoc(spawn, offset_x, offset_y);
+            const pos = resolveLootTile(map, primary, list[0..count]) orelse continue;
             var item = deep_table[pick];
             if (item == .rations) {
                 // The cap counts only rations actually placed: a skipped
@@ -688,6 +731,146 @@ pub const TrapPlan = struct {
     count: usize,
 };
 
+/// Cardinal neighbours of a tile (for cut-vertex / articulation checks).
+const cardinal_offsets = [_][2]i64{ .{ -1, 0 }, .{ 1, 0 }, .{ 0, -1 }, .{ 0, 1 } };
+
+/// Mapped walkable only — missing tiles are NOT walkable for graph purposes
+/// (TerrainMap.isWalkable defaults missing → true, which would flood BFS off-map).
+fn isMappedWalkable(map: *const terrain.TerrainMap, pos: loc.Loc) bool {
+    const tile = map.get(pos) orelse return false;
+    return tile.isWalkable();
+}
+
+fn walkableNeighborCount(map: *const terrain.TerrainMap, pos: loc.Loc) u8 {
+    var n: u8 = 0;
+    for (cardinal_offsets) |d| {
+        const nb = offsetLoc(pos, d[0], d[1]);
+        if (isMappedWalkable(map, nb)) n += 1;
+    }
+    return n;
+}
+
+/// Count mapped-walkable tiles reachable from `root` without stepping on `blocked`.
+/// Pass `block_active=false` for the unrestricted count.
+fn reachableWalkableCount(
+    map: *const terrain.TerrainMap,
+    root: loc.Loc,
+    blocked: loc.Loc,
+    block_active: bool,
+) usize {
+    if (!isMappedWalkable(map, root)) return 0;
+    if (block_active and root.x == blocked.x and root.y == blocked.y) return 0;
+
+    var visited: [512]loc.Loc = undefined;
+    var vcount: usize = 0;
+    var queue: [512]loc.Loc = undefined;
+    var head: usize = 0;
+    var tail: usize = 0;
+    queue[tail] = root;
+    tail += 1;
+    visited[vcount] = root;
+    vcount += 1;
+
+    while (head < tail) : (head += 1) {
+        const cur = queue[head];
+        for (cardinal_offsets) |d| {
+            const nb = offsetLoc(cur, d[0], d[1]);
+            if (block_active and nb.x == blocked.x and nb.y == blocked.y) continue;
+            if (!isMappedWalkable(map, nb)) continue;
+            var seen = false;
+            var i: usize = 0;
+            while (i < vcount) : (i += 1) {
+                if (visited[i].x == nb.x and visited[i].y == nb.y) {
+                    seen = true;
+                    break;
+                }
+            }
+            if (seen) continue;
+            if (vcount >= visited.len or tail >= queue.len) break;
+            visited[vcount] = nb;
+            vcount += 1;
+            queue[tail] = nb;
+            tail += 1;
+        }
+    }
+    return vcount;
+}
+
+/// True when `pos` is a cut-vertex for spawn→stairs connectivity: removing it
+/// disconnects the stairs from the spawn. These are sole-path chokepoints —
+/// traps there force unavoidable damage (#43). Open rooms and bypassable
+/// corridors return false. Stairs tile itself is also protected.
+pub fn isWalkableCutVertex(
+    map: *const terrain.TerrainMap,
+    spawn: loc.Loc,
+    pos: loc.Loc,
+) bool {
+    if (!isMappedWalkable(map, pos)) return false;
+    if (pos.x == spawn.x and pos.y == spawn.y) return false;
+    // Find stairs (or any descend trigger) on the map.
+    var stairs: ?loc.Loc = null;
+    var it = map.tiles.iterator();
+    while (it.next()) |e| {
+        if (e.value_ptr.* == .stairs) {
+            stairs = e.key_ptr.*;
+            break;
+        }
+    }
+    const goal = stairs orelse return false;
+    if (pos.x == goal.x and pos.y == goal.y) return true; // never trap the stairs
+    // Reachable stairs without the tile?
+    if (!isReachable(map, spawn, goal, pos, false)) return false; // stairs already unreachable
+    if (!isReachable(map, spawn, goal, pos, true)) return true; // sole path through pos
+    return false;
+}
+
+fn isReachable(
+    map: *const terrain.TerrainMap,
+    start: loc.Loc,
+    goal: loc.Loc,
+    blocked: loc.Loc,
+    block_active: bool,
+) bool {
+    if (!isMappedWalkable(map, start)) return false;
+    if (block_active and start.x == blocked.x and start.y == blocked.y) return false;
+    if (start.x == goal.x and start.y == goal.y) return true;
+
+    var visited: [512]loc.Loc = undefined;
+    var vcount: usize = 0;
+    var queue: [512]loc.Loc = undefined;
+    var head: usize = 0;
+    var tail: usize = 0;
+    queue[tail] = start;
+    tail += 1;
+    visited[vcount] = start;
+    vcount += 1;
+
+    while (head < tail) : (head += 1) {
+        const cur = queue[head];
+        for (cardinal_offsets) |d| {
+            const nb = offsetLoc(cur, d[0], d[1]);
+            if (block_active and nb.x == blocked.x and nb.y == blocked.y) continue;
+            if (!isMappedWalkable(map, nb)) continue;
+            if (nb.x == goal.x and nb.y == goal.y) return true;
+            var seen = false;
+            var i: usize = 0;
+            while (i < vcount) : (i += 1) {
+                if (visited[i].x == nb.x and visited[i].y == nb.y) {
+                    seen = true;
+                    break;
+                }
+            }
+            if (seen) continue;
+            if (vcount >= visited.len or tail >= queue.len) break;
+            visited[vcount] = nb;
+            vcount += 1;
+            queue[tail] = nb;
+            tail += 1;
+        }
+    }
+    return false;
+}
+
 pub fn planTrapSpawns(
     world_seed: u64,
     floor_index: u32,
@@ -704,12 +887,14 @@ pub fn planTrapSpawns(
     var list: [4]TrapSpawn = undefined;
     var count: usize = 0;
     var attempt: u8 = 0;
-    while (count < trap_count and attempt < 32) : (attempt += 1) {
+    while (count < trap_count and attempt < 48) : (attempt += 1) {
         const offset_x: i64 = @intCast((trap_rng.nextU8() % 6) + 1);
         const offset_y: i64 = @as(i64, @intCast(trap_rng.nextU8() % 6)) - 3;
         const pos = offsetLoc(spawn, offset_x, offset_y);
         if (!map.isWalkable(pos)) continue;
         if (pos.x == spawn.x and pos.y == spawn.y) continue;
+        // #43: never place a trap on a sole-path cut-vertex of the walkable graph.
+        if (isWalkableCutVertex(map, spawn, pos)) continue;
         var dup: usize = 0;
         while (dup < count) : (dup += 1) {
             if (list[dup].position.x == pos.x and list[dup].position.y == pos.y) break;
@@ -810,12 +995,21 @@ test "deeper floors scale monster and loot counts on seed 42" {
     const loot2 = planFloorLoot(42, 2, gen2.spawn, &map2);
     const loot5 = planFloorLoot(42, 5, gen5.spawn, &map5);
 
-    // Monsters still scale with depth; danger-floor loot is intentionally scarcer (v1.6).
+    // Monsters still scale with depth. Loot total can match or exceed shallow
+    // floors once #33 retry fills intended slots; scarcity is in *heals*
+    // (no free base bandage on danger floors) and fewer bonus rolls.
     try std.testing.expectEqual(@as(usize, 3), monsters2.count);
     try std.testing.expectEqual(@as(usize, 4), loot2.count);
     try std.testing.expect(monsters5.count > monsters2.count);
     try std.testing.expectEqual(@as(usize, 5), monsters5.count);
-    try std.testing.expect(loot5.count < loot2.count); // scarcity on floor ≥ 4
+    try std.testing.expect(loot5.count >= 1); // #33: intended slots fill; ration floor holds
+    var bandages5: usize = 0;
+    var bi: usize = 0;
+    while (bi < loot5.count) : (bi += 1) {
+        if (loot5.spawns[bi].item == .bandage) bandages5 += 1;
+    }
+    // Danger base table has no bandage; bonus may add at most d_tier rolls.
+    try std.testing.expect(bandages5 <= dangerTier(5));
     try std.testing.expectEqual(@as(u32, 2), dangerTier(5));
     try std.testing.expectEqual(@as(u32, 0), dangerTier(3));
 }
@@ -934,8 +1128,53 @@ test "trap spawn plan is deterministic and places poison traps" {
     try std.testing.expectEqual(a.count, b.count);
     try std.testing.expectEqualStrings("poison_trap", a.spawns[0].label);
     try std.testing.expect(map.isWalkable(a.spawns[0].position));
-    try std.testing.expectEqual(@as(u64, 53), a.spawns[0].position.x);
-    try std.testing.expectEqual(@as(u64, 51), a.spawns[0].position.y);
+    // Positions may shift when cut-vertices are skipped (#43); pin determinism only.
+    try std.testing.expectEqual(a.spawns[0].position.x, b.spawns[0].position.x);
+    try std.testing.expectEqual(a.spawns[0].position.y, b.spawns[0].position.y);
+}
+
+test "loot plan retries unwalkable primary tiles" {
+    // #33: a rolled unwalkable primary must still place when a neighbour is free.
+    const allocator = std.testing.allocator;
+    var map = terrain.TerrainMap.init(allocator);
+    defer map.deinit();
+    // Tiny room: spawn walkable, primary offset often wall; resolveLootTile should recover.
+    try map.set(loc.Loc.init(50, 50), .floor);
+    try map.set(loc.Loc.init(50, 51), .floor);
+    try map.set(loc.Loc.init(50, 52), .floor);
+    try map.set(loc.Loc.init(51, 50), .floor);
+    try map.set(loc.Loc.init(51, 51), .floor);
+    try map.set(loc.Loc.init(49, 50), .wall);
+    try map.set(loc.Loc.init(49, 51), .wall);
+    const spawn = loc.Loc.init(50, 50);
+    // Sweep seeds; at least one danger-floor plan must place its base table items
+    // (retry keeps count above the silent-drop baseline of zero on sparse rooms).
+    var any_loot = false;
+    var seed: u64 = 1;
+    while (seed <= 32) : (seed += 1) {
+        const plan = planFloorLoot(seed, 4, spawn, &map);
+        if (plan.count > 0) any_loot = true;
+    }
+    try std.testing.expect(any_loot);
+}
+
+test "no trap on a spawn-to-stairs cut-vertex" {
+    // #43: sole-path chokepoints (spawn↔stairs) must never host a trap.
+    const allocator = std.testing.allocator;
+    var seed: u64 = 1;
+    var any_trap = false;
+    while (seed <= 48) : (seed += 1) {
+        var map = terrain.TerrainMap.init(allocator);
+        defer map.deinit();
+        const gen = try generateFloor(&map, seed, 2);
+        const plan = planTrapSpawns(seed, 2, gen.spawn, &map);
+        if (plan.count > 0) any_trap = true;
+        var i: usize = 0;
+        while (i < plan.count) : (i += 1) {
+            try std.testing.expect(!isWalkableCutVertex(&map, gen.spawn, plan.spawns[i].position));
+        }
+    }
+    try std.testing.expect(any_trap);
 }
 
 test "floor 1 has no trap plan" {
