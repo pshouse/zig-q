@@ -744,9 +744,17 @@ fn cmdSleep(ctx: *Context, writer: anytype) !Result {
         try writer.print("cannot sleep during combat\n", .{});
         return .continue_repl;
     }
+    // SD2 / #26: exhaustion-5 applies `.unconscious`, which makes `blocksMove`
+    // true and used to lock out rest *and* sleep — a soft-lock with no recovery
+    // path short of death. Carve sleep out as the collapse recovery action
+    // (ambush interrupt still applies). Other incapacitation sources stay blocked.
     if (conditions.blocksMove(ent) and !ent.sleeping) {
-        try writer.print("cannot sleep while incapacitated\n", .{});
-        return .continue_repl;
+        const collapsed = conditions.has(ent, .unconscious) and conditions.exhaustionLevel(ent) >= 5;
+        if (!collapsed) {
+            try writer.print("cannot sleep while incapacitated\n", .{});
+            return .continue_repl;
+        }
+        try writer.print("you collapse into sleep (exhaustion recovery)\n", .{});
     }
     ent.sleeping = true;
     conditions.apply(ent, .unconscious);

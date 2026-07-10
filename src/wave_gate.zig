@@ -97,7 +97,8 @@ pub const plans = [_]WavePlan{
             "deadly_floor",     "elite_brawl",   "scarce_heals",    "save_v4_roundtrip", "sleep_interrupt",
             "rest_floor",       "combat_flee",   "catch_breath",    "unequip_cycle",     "drop_clears_slot",
             "bare_loot_corpse", "weaker_weapon", "starve_out",      "combat_reposition", "survival_economy",
-            "monster_endurance", "exhausted_sleep", "bleed_out",    "glyph_look",        "reference_crawl",
+            "monster_endurance", "exhausted_sleep", "bleed_out",    "glyph_look",        "collapse_sleep",
+            "reference_crawl",
         },
         .all_scenarios = &.{
             "bootstrap",         "explore",         "create",            "crawl_start",      "playthrough",       "brawl",         "save_roundtrip",
@@ -109,6 +110,8 @@ pub const plans = [_]WavePlan{
             "starve_out",        "combat_reposition", "survival_economy",  "monster_endurance",
             // Was registered in scenarioByName during v1.6 but never gated (#28 recurrence).
             "exhausted_sleep",   "bleed_out",         "glyph_look",
+            // v1.7 Track A: exhaustion-5 recovery path (#26).
+            "collapse_sleep",
         },
         .run_migration = true,
     },

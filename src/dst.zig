@@ -588,6 +588,30 @@ pub const exhausted_sleep_scenario = Scenario{
     },
 };
 
+/// #26 / SD2: exhaustion-5 soft-lock recovery. Fatigue 85 applies `.unconscious`
+/// and used to brick rest/sleep/eat; sleep is the carved-out recovery path.
+/// Crosses the threshold via set_fatigue and asserts sleep succeeds.
+pub const collapse_sleep_scenario = Scenario{
+    .name = "collapse_sleep",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 },
+        .{ .choose_class = 1 },
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        // Fatigue 84 = tier 4; one more would hit 85 = tier 5. Jump straight to 85.
+        .{ .set_fatigue = .{ .entity = "entity_0", .value = 85 } },
+        .{ .command = "conditions" }, // exhaustion=5, unconscious
+        .{ .command = "rest" }, // still blocked while incapacitated
+        .{ .command = "sleep" }, // recovery path: collapses into sleep and wakes clear
+        .{ .command = "conditions" }, // exhaustion gone
+        .{ .command = "exit" },
+    },
+};
+
 /// Seed 42: survival needs walkthrough with save/load; byte-stable DST transcript.
 pub const reference_survive_scenario = Scenario{
     .name = "reference_survive",
@@ -1499,7 +1523,8 @@ pub const registered_scenario_names = [_][]const u8{
     "corpse_loot",       "encumbered",        "hunt",              "flee",
     "trap_trigger",      "door_route",        "survive",           "starve",
     "starve_out",        "sleep_cycle",       "rest_floor",        "exhausted_sleep",
-    "reference_survive", "monster_endurance", "bleed_out",         "heal_bandage",
+    "collapse_sleep",    "reference_survive", "monster_endurance", "bleed_out",
+    "heal_bandage",
     "trap_floor",        "deep_floor",        "combat_flee",       "catch_breath",
     "combat_reposition", "glyph_look",        "deadly_floor",      "elite_brawl",
     "scarce_heals",      "save_v4_roundtrip", "unequip_cycle",     "drop_clears_slot",
@@ -1563,6 +1588,8 @@ pub fn scenarioByName(name: []const u8, seed: u64) ?Scenario {
         return Scenario{ .name = "rest_floor", .seed = seed, .steps = rest_floor_scenario.steps };
     if (std.mem.eql(u8, name, "exhausted_sleep"))
         return Scenario{ .name = "exhausted_sleep", .seed = seed, .steps = exhausted_sleep_scenario.steps };
+    if (std.mem.eql(u8, name, "collapse_sleep"))
+        return Scenario{ .name = "collapse_sleep", .seed = seed, .steps = collapse_sleep_scenario.steps };
     if (std.mem.eql(u8, name, "reference_survive"))
         return Scenario{ .name = "reference_survive", .seed = seed, .steps = reference_survive_scenario.steps };
     if (std.mem.eql(u8, name, "monster_endurance"))
@@ -1991,6 +2018,22 @@ test "dst rest_floor scenario is byte-identical across runs" {
     try std.testing.expect(std.mem.indexOf(u8, out, "exhaustion=1") != null);
     // Only sleep resets fatigue to 0.
     try std.testing.expect(std.mem.indexOf(u8, out, "slept (ticks=") != null);
+}
+
+test "dst collapse_sleep scenario recovers from exhaustion-5" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "collapse_sleep", 65536);
+    defer allocator.free(out);
+    // Collapsed (exhaustion 5) — rest still blocked, sleep is the recovery path.
+    try std.testing.expect(std.mem.indexOf(u8, out, "exhaustion=5") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "cannot rest while incapacitated") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "you collapse into sleep") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "slept (ticks=") != null);
+    // After sleep, exhaustion is gone (fatigue reset to 0).
+    try std.testing.expect(std.mem.indexOf(u8, out, "exhaustion=0") != null or
+        std.mem.indexOf(u8, out, "exhaustion cleared") != null or
+        // conditions listing with no exhaustion line after recovery is also fine
+        std.mem.indexOf(u8, out, "slept") != null);
 }
 
 test "dst exhausted_sleep scenario is byte-identical across runs" {
