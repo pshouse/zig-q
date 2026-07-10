@@ -35,7 +35,7 @@ pub fn runMigrationEvidence(allocator: std.mem.Allocator, writer: anytype) !void
 }
 
 pub fn run(allocator: std.mem.Allocator, writer: anytype) !void {
-    const gate = version.forGate(11);
+    const gate = version.forGate(11).?;
     try writer.print("=== evidence: v1.1 foundation (version={s}) ===\n", .{gate.emit});
 
     var version_line_buf: [64]u8 = undefined;

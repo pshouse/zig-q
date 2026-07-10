@@ -80,8 +80,10 @@ pub fn defaultAttributes(allocator: std.mem.Allocator) !std.ArrayList(Attribute)
 pub fn defaultRaces(allocator: std.mem.Allocator) !std.ArrayList(Race) {
     var list: std.ArrayList(Race) = .empty;
 
+    // #32 option C: INT/CHA are cosmetic; move dragonborn's +2 onto a live stat
+    // (STR — attack/damage/carry) instead of dead CHA. See docs/INT_CHA_DECISION.md.
     var drb_bonuses: std.ArrayList(Attribute) = .empty;
-    try drb_bonuses.append(allocator, .{ .name = "charisma_bonus", .abbr = "CHA", .stat = 2 });
+    try drb_bonuses.append(allocator, .{ .name = "strength_bonus", .abbr = "STR", .stat = 2 });
     try list.append(allocator, .{ .name = "dragonborn", .speed = 30, .attr_bonuses = drb_bonuses });
 
     var dwf_bonuses: std.ArrayList(Attribute) = .empty;

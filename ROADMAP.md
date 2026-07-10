@@ -354,4 +354,4 @@ floor-4 monster lands damage on an attack-spamming player.
 
 | Version | Theme |
 |---------|--------|
-| 1.6+ | Skeleton bones sink, locked doors, permadeath summary |
+| 1.7+ backlog | Skeleton bones sink, locked doors, permadeath summary (parked until danger is *fair*; see SPRINT_V1.7) |

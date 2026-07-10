@@ -647,8 +647,9 @@ fn unequipFromSlot(ctx: *Context, inv: *inventory.State, slot: inventory.Slot, w
     };
     // Equipped gear stays in the bag, so clearing the slot already returns it to
     // the pack. Guard against a legacy dangling slot (item no longer carried) by
-    // putting the item back so `unequip` can never delete gear.
-    if (!inv.has(id)) try inv.add(ctx.allocator, id, 1);
+    // #30: no re-add guard. Phantom slots are cleared at load (fromSave); if a
+    // slot somehow points at a missing id, unequip just clears it without
+    // materializing gear back into the bag.
     try writer.print("unequipped {s}\n", .{items.def(id).name});
     if (combat.isInCombat(ctx.w)) {
         try combat.endTurn(ctx.w, ctx.player_id, writer);
@@ -1223,7 +1224,7 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
             if (try rejectCreationAfterSpawn(ctx, writer, "race")) return .continue_repl;
             try writer.print(
                 \\usage: race <1-3>
-                \\       1=dragonborn (+2 CHA)  2=dwarf (+2 CON)  3=elf (+2 DEX)
+                \\       1=dragonborn (+2 STR)  2=dwarf (+2 CON)  3=elf (+2 DEX)
                 \\
             , .{});
         },

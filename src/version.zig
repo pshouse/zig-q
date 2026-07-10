@@ -22,7 +22,9 @@ pub const GateConfig = struct {
     }
 };
 
-pub fn wave(w: u8) []const u8 {
+/// Known shipped waves only. Unknown N returns null so callers fail loudly
+/// instead of silently yielding the live semver (#37).
+pub fn wave(w: u8) ?[]const u8 {
     return switch (w) {
         11 => v11,
         12 => v12,
@@ -30,14 +32,15 @@ pub fn wave(w: u8) []const u8 {
         14 => v14,
         15 => v15,
         16 => v16,
-        else => semver,
+        else => null,
     };
 }
 
-pub fn forGate(w: u8) GateConfig {
+pub fn forGate(w: u8) ?GateConfig {
+    const emit = wave(w) orelse return null;
     return .{
         .wave = w,
-        .emit = wave(w),
+        .emit = emit,
         .reference_header = v11,
     };
 }
@@ -66,9 +69,16 @@ pub fn cliVersion(cli_override: ?[]const u8) []const u8 {
 }
 
 test "forGate maps wave to emit semver" {
-    try std.testing.expectEqualStrings("1.2.0", forGate(12).emit);
-    try std.testing.expectEqualStrings("1.1.0", forGate(14).reference_header);
-    try std.testing.expectEqualStrings("1.6.0", forGate(16).emit);
+    try std.testing.expectEqualStrings("1.2.0", forGate(12).?.emit);
+    try std.testing.expectEqualStrings("1.1.0", forGate(14).?.reference_header);
+    try std.testing.expectEqualStrings("1.6.0", forGate(16).?.emit);
+}
+
+test "wave and forGate reject unknown waves" {
+    // #37: no silent else-fallthrough to live semver.
+    try std.testing.expect(wave(99) == null);
+    try std.testing.expect(forGate(99) == null);
+    try std.testing.expect(wave(10) == null);
 }
 
 test "resolve defaults to shipped semver" {
@@ -83,7 +93,7 @@ test "transcriptSemver pins reference_crawl unconditionally" {
 }
 
 test "semverForScenario pins reference_crawl header under gate" {
-    const gate = forGate(14);
+    const gate = forGate(14).?;
     try std.testing.expectEqualStrings("1.4.0", gate.semverForScenario("survive"));
     try std.testing.expectEqualStrings("1.1.0", gate.semverForScenario("reference_crawl"));
 }

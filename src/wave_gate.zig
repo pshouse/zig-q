@@ -507,9 +507,9 @@ fn parseFuzzIters(output: []const u8) !u32 {
     return try std.fmt.parseInt(u32, n_str, 10);
 }
 
-fn dstSemverForScenario(wave: u8, scenario: []const u8) []const u8 {
+fn dstSemverForScenario(wave: u8, scenario: []const u8) ![]const u8 {
     if (version.isFrozenReference(scenario)) return version.v11;
-    return version.wave(wave);
+    return version.wave(wave) orelse error.UnknownWave;
 }
 
 fn isV15PlanDstScenario(scenario: []const u8) bool {
@@ -593,7 +593,7 @@ fn captureDstPair(
     prefix: []const u8,
     scenario: []const u8,
 ) !void {
-    const semver = dstSemverForScenario(wave, scenario);
+    const semver = try dstSemverForScenario(wave, scenario);
     var header_buf: [64]u8 = undefined;
     const header = try version.versionLine(&header_buf, semver);
 
@@ -651,7 +651,7 @@ fn captureDstAll(
 
     for (scenarios) |scenario| {
         try list.writer(allocator).print("=== {s} ===\n", .{scenario});
-        const semver = dstSemverForScenario(wave, scenario);
+        const semver = try dstSemverForScenario(wave, scenario);
         const dst_args = [_][]const u8{ "dst", "--", scenario, "42", "--semver", semver };
         const result = try runZigBuild(allocator, &dst_args);
         const output = try requireExit(result, allocator);
@@ -668,7 +668,7 @@ fn captureVersionTwice(
     scratch: []const u8,
     prefix: []const u8,
 ) !void {
-    const gate = version.forGate(wave);
+    const gate = version.forGate(wave) orelse return error.UnknownWave;
     const args = [_][]const u8{ "run", "--", "--version", "--semver", gate.emit };
 
     const leaf1 = try std.fmt.allocPrint(allocator, "{s}_version1.log", .{prefix});
@@ -698,7 +698,7 @@ fn captureVersionTwice(
 }
 
 fn verifyEvidence(output: []const u8, wave: u8) !void {
-    const gate = version.forGate(wave);
+    const gate = version.forGate(wave) orelse return error.UnknownWave;
     if (std.mem.indexOf(u8, output, ": true") == null) return error.EvidenceMissingTrue;
     if (std.mem.indexOf(u8, output, gate.emit) == null) return error.EvidenceMissingWaveVersion;
 }
@@ -821,7 +821,7 @@ pub fn runWave(
         .build_bytes = build_bytes,
         .tests_passed = test_counts.passed,
         .tests_total = test_counts.total,
-        .version = version.forGate(wave).emit,
+        .version = (version.forGate(wave) orelse return error.UnknownWave).emit,
         .ref_hash = ref_hash,
         .fuzz_iters = fuzz_iters,
     };
@@ -834,8 +834,8 @@ test "planForWave covers v11-v15" {
 }
 
 test "dstSemverForScenario pins reference_crawl" {
-    try std.testing.expectEqualStrings("1.1.0", dstSemverForScenario(14, "reference_crawl"));
-    try std.testing.expectEqualStrings("1.4.0", dstSemverForScenario(14, "survive"));
+    try std.testing.expectEqualStrings("1.1.0", try dstSemverForScenario(14, "reference_crawl"));
+    try std.testing.expectEqualStrings("1.4.0", try dstSemverForScenario(14, "survive"));
 }
 
 test "parseTestCounts reads 144/144 from build summary" {

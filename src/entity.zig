@@ -29,6 +29,10 @@ pub const Entity = struct {
     ai_origin: loc.Loc = loc.Loc.init(0, 0),
     ai_patrol_phase: u8 = 0,
     last_move_dir: ?movement.Direction = null,
+    /// #35 chase-memory: last player tile seen with LOS; chase continues here
+    /// for `chase_memory_turns` explore turns after LOS breaks.
+    chase_last_seen: ?loc.Loc = null,
+    chase_memory_left: u8 = 0,
 };
 
 pub const EntityStore = struct {
