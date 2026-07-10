@@ -2132,18 +2132,20 @@ test "dst catch_breath scenario is byte-identical across runs" {
 }
 
 test "dst combat_reposition scenario is byte-identical across runs" {
+    // Re-blessed for #27: out-of-reach goblin advances (does not forfeit).
     const allocator = std.testing.allocator;
     const out = try expectScenarioDeterministic(allocator, "combat_reposition", 65536);
     defer allocator.free(out);
-    // The out-of-reach goblin forfeits: the turn comes straight back to the player
-    // after both `end turn` and `catch breath`, with no goblin counterattack between.
     try std.testing.expect(std.mem.indexOf(u8, out, "turn: entity_0") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "catches their breath") != null);
+    // Monster closes the gap with a deterministic step-toward (no RNG).
+    try std.testing.expect(std.mem.indexOf(u8, out, "goblin_0 advances to") != null);
     const move_away = std.mem.indexOf(u8, out, "step command move west").?;
-    const move_back = std.mem.indexOf(u8, out, "step command move east").?;
-    try std.testing.expect(std.mem.indexOf(u8, out[move_away..move_back], "attack goblin_0->") == null);
-    // Stepping back adjacent revives the exchange, proving combat never ended.
-    try std.testing.expect(std.mem.indexOf(u8, out[move_back..], "attack goblin_0->entity_0") != null);
+    // On the advance turn itself there is no attack (move spends the turn).
+    const first_advance = std.mem.indexOf(u8, out[move_away..], "goblin_0 advances to").?;
+    const after_advance = move_away + first_advance;
+    // Combat stays live through the reposition (disengaging costs pressure).
+    try std.testing.expect(std.mem.indexOf(u8, out[after_advance..], "turn: entity_0") != null);
 }
 
 test "dst glyph_look scenario is byte-identical across runs" {
