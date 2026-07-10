@@ -157,8 +157,10 @@ pub fn exhaustionEffectHint(level: u3) ?[]const u8 {
         // Tier 3: attack disadvantage + movement −1 (display and extra move tick everywhere).
         1, 2 => "rest cannot fully clear this; deeper floors cost extra move ticks",
         3 => "disadvantage on attacks; movement -1",
-        4 => "HP max halved; near collapse — rest or sleep soon",
-        5, 6 => "risk of collapse",
+        4 => "HP max halved; near collapse — sleep soon (rest cannot fully clear this)",
+        // Level 5 is recoverable via sleep (#26); level 6 is death.
+        5 => "collapsed — sleep to recover (or die at level 6)",
+        6 => "risk of collapse",
         else => null,
     };
 }
