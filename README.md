@@ -178,6 +178,16 @@ src/
   main.zig       CLI entry point
 ```
 
+## Playtest fleet (balance instrument)
+
+`.claude/workflows/survival-fleet.js` is a committed agent-playtest harness: 4 personas
+(speedrunner / cautious / hoarder / exploit-hunter) x N seeds play ironman runs against a build and
+report a death-cause + depth summary. Used to A/B balance changes (see SPRINT_V1.7 SD5): run with
+identical `seeds`/`turnBudget` on baseline and candidate builds and diff the summaries. Invoke from a
+Claude Code session: `Workflow({ name: 'survival-fleet', args: { label: 'retuned' } })`. The v1.6.1
+baseline (0/12 reached floor 5; 3 of 4 deaths were clock/environment) is recorded on issue #40.
+Raw session logs land in `.fleet/<label>/` (gitignored); each is a deterministic replay file.
+
 ## Help
 
 ```bash
