@@ -674,7 +674,7 @@ test "apply syncs starving from hunger on load" {
     try w.loadFloor(1);
     const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
     const ent = w.store.get(player_id).?;
-    ent.hunger = 80;
+    ent.hunger = survival.starving_threshold;
     ent.conditions = types.ConditionSet.initEmpty();
     ent.exhaustion_level = 0;
 

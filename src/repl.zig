@@ -317,13 +317,12 @@ test "harvested playthrough transcript is deterministic" {
     try std.testing.expectEqualSlices(u8, out_a, out_b);
 }
 
-// Long-horizon regression from a 177-command ironman playtest (seed 7) that originally
-// exposed monster mass-starvation and the walking-dead permadeath hole. The session runs
-// far past the 95-tick horizon short DST scenarios never reach. Assertions pin the FIXED
-// behaviors: the player's starvation death ends in a permadeath lockout, and the replay
-// stays byte-identical. Re-bless the transcript deliberately if survival tuning changes
-// this route's outcome (see SPRINT_V1.6.md).
-test "harvested george2 ironman transcript is deterministic and permadeath-locked" {
+// Long-horizon regression from a 177-command ironman playtest (seed 7).
+// Originally exposed monster mass-starvation and walking-dead permadeath; under
+// v1.6 the same script starved on floor 4. v1.7 #40 survival retune re-blesses
+// the outcome: a provisioned ironman reaches floor 4 and finishes the script
+// *alive* (no clock death). Determinism is still the hard pin.
+test "harvested george2 ironman transcript is deterministic and long-horizon" {
     const allocator = std.testing.allocator;
     const path = "transcripts/session-george2-ironman-seed7.txt";
 
@@ -346,8 +345,9 @@ test "harvested george2 ironman transcript is deterministic and permadeath-locke
     const out_b = fbs_b.getWritten();
     try std.testing.expect(std.mem.indexOf(u8, out_a, "descended to floor 4") != null);
     try std.testing.expect(std.mem.indexOf(u8, out_a, "equipped greatsword") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out_a, "starvation deals") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out_a, "you are dead (permadeath)") != null);
+    // #40 retune: this route no longer ends in clock death.
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "you are dead (permadeath)") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out_a, "exiting") != null);
     try std.testing.expectEqualSlices(u8, out_a, out_b);
 }
 

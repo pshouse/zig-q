@@ -494,9 +494,9 @@ pub const starve_out_scenario = Scenario{
         .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
         .{ .set_hunger = .{ .entity = "entity_0", .value = 100 } },
         .{ .set_hp = .{ .entity = "entity_0", .current = 3 } },
-        // Out-of-combat starving DoT lands on even clock ticks (v1.6 half
-        // rate), so 6 ticks bound the 3 hits that take hp 3 -> 0.
-        .{ .tick = 6 },
+        // Out-of-combat starving DoT lands every starvation_out_of_combat_period
+        // ticks (#40); 9 ticks bound 3 period hits that take hp 3 -> 0.
+        .{ .tick = 9 },
         .{ .command = "move east" }, // blocked: permadeath gate
         .{ .command = "look" }, // blocked: permadeath gate
         .{ .command = "stats" }, // allowed for the dead: shows permadeath status
@@ -2268,8 +2268,9 @@ test "dst survival_economy scenario is byte-identical across runs" {
     const out = try expectScenarioDeterministic(allocator, "survival_economy", 65536);
     defer allocator.free(out);
     // Danger floors always audit >= 1 planned ration (v1.6 survival floor).
-    try std.testing.expect(std.mem.indexOf(u8, out, "economy_report floor=4 plan_rations=1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "economy_report floor=5 plan_rations=1") != null);
+    // #40 retune: deep_floor_guaranteed_rations (=2) is the floor.
+    try std.testing.expect(std.mem.indexOf(u8, out, "economy_report floor=4 plan_rations=2") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "economy_report floor=5 plan_rations=2") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "ration_ticks=50") != null);
 }
 

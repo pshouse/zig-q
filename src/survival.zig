@@ -10,10 +10,20 @@ pub const hunger_max: u16 = 100;
 pub const fatigue_max: u16 = 100;
 
 /// Hunger at or above this threshold applies the starving condition.
-pub const starving_threshold: u16 = 75;
+/// v1.7 #40 retune: raised from 75 so a provisioned direct-route player has a
+/// longer window before DoT on a 1→5 descent (SD1). Careless over-exploration
+/// still crosses this threshold.
+pub const starving_threshold: u16 = 85;
 
-pub const rest_ticks: u32 = 6;
+/// Clock ticks a short `rest` costs. v1.7 #40 retune: reduced from 6 so
+/// recovery is less of a net hunger loss on the survival clock.
+pub const rest_ticks: u32 = 4;
 pub const sleep_ticks: u32 = 24;
+
+/// Out-of-combat starvation DoT lands when `game_clock.ticks % this == 0`.
+/// v1.7 #40 retune: was effectively every-other-tick (2); slower rate gives
+/// more room to reach food/stairs without removing combat severity (full rate).
+pub const starvation_out_of_combat_period: u64 = 3;
 
 pub const hunger_restore_food: u16 = 50;
 pub const fatigue_restore_rest: u16 = 30;
@@ -263,13 +273,11 @@ pub fn onTick(w: *world.World, ent: *entity.Entity) void {
 
     if (conditions.has(ent, .poisoned)) applyHpDot(w, ent, 1);
     if (conditions.has(ent, .starving)) {
-        // v1.6 balance: out of combat, starving drains 1 HP every other clock
-        // tick (even ticks), doubling the window to reach food or stairs on
-        // 2-tick-per-move danger floors. In combat the full 1 HP/tick stays —
-        // fighting while starving remains as deadly as before. Clock parity is
-        // saved state, so the rate is deterministic across save/load and
-        // identical in REPL, DST, and fuzz.
-        const dot_tick = w.combat != null or (w.game_clock.ticks % 2 == 0);
+        // Out of combat: drain on ticks divisible by starvation_out_of_combat_period
+        // (#40 retune). In combat the full 1 HP/tick stays — fighting while
+        // starving remains as deadly as before. Clock parity is saved state.
+        const period = starvation_out_of_combat_period;
+        const dot_tick = w.combat != null or (period == 0) or (w.game_clock.ticks % period == 0);
         if (dot_tick) applyHpDot(w, ent, 1);
     }
 
@@ -326,7 +334,7 @@ test "eating clears starving" {
     ent.exhaustion_level = 0;
     ent.current_hp = 10;
     ent.max_hp = 10;
-    ent.hunger = 80;
+    ent.hunger = starving_threshold;
     ent.fatigue = 0;
     ent.sleeping = false;
     _ = syncStarving(&ent);
@@ -349,7 +357,7 @@ test "high fatigue reaches exhaustion 6" {
     try std.testing.expectEqual(@as(u3, 6), conditions.exhaustionLevel(&ent));
 }
 
-test "starving deals hp damage on even ticks out of combat" {
+test "starving deals hp damage on period ticks out of combat" {
     var ent: entity.Entity = undefined;
     ent.conditions = @import("types.zig").ConditionSet.initEmpty();
     ent.exhaustion_level = 0;
@@ -361,13 +369,13 @@ test "starving deals hp damage on even ticks out of combat" {
     var w: world.World = undefined;
     w.combat = null;
     w.game_clock = @import("clock.zig").Clock.init(0.0, 120.0, 5.0, 1.0);
-    onTick(&w, &ent); // ticks=0: even -> DoT lands
+    onTick(&w, &ent); // ticks=0: divisible by period -> DoT lands
     try std.testing.expectEqual(@as(u32, 9), ent.current_hp);
     try std.testing.expect(conditions.has(&ent, .starving));
     w.game_clock.ticks = 1;
-    onTick(&w, &ent); // odd tick out of combat -> no starving DoT
+    onTick(&w, &ent); // not on period -> no starving DoT
     try std.testing.expectEqual(@as(u32, 9), ent.current_hp);
-    w.game_clock.ticks = 2;
+    w.game_clock.ticks = starvation_out_of_combat_period;
     onTick(&w, &ent);
     try std.testing.expectEqual(@as(u32, 8), ent.current_hp);
 }
@@ -401,9 +409,9 @@ test "starvation death outside combat is permadeath" {
     const ent = w.store.get(id).?;
     ent.hunger = hunger_max;
     ent.current_hp = 1;
-    // Out-of-combat starving DoT lands on even clock ticks: tick 1 is skipped,
-    // tick 2 kills. Two ticks bound the death instead of one (v1.6 half rate).
-    w.tickAction(2);
+    // Out-of-combat starving DoT lands on period ticks; advance enough ticks
+    // that a period boundary is crossed (period may be > 2 after #40 retune).
+    w.tickAction(@intCast(starvation_out_of_combat_period));
     try std.testing.expect(conditions.isDead(ent));
     try std.testing.expect(w.isPlayerDead());
 }

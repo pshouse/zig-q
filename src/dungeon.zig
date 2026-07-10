@@ -444,7 +444,9 @@ pub fn planFloorLoot(
         [_]items.Id{ .bandage, .antidote, .rations, .leather_armour };
     const legacy_candidates = [_]items.Id{ .bandage, .antidote, .rations, .leather_armour };
     var rations_placed: u8 = 0;
-    const ration_cap: u8 = 1;
+    // v1.7 #40: raised with deep_floor_guaranteed_rations so the floor can
+    // actually host the guarantee (cap was 1 when guarantee became 2).
+    const ration_cap: u8 = if (d_tier > 0) deep_floor_guaranteed_rations else 1;
     var c: usize = 0;
     while (c < base_table.len and count < list.len) : (c += 1) {
         // Consume the same offset draws as the legacy 4-slot loop so floor RNG
@@ -511,25 +513,21 @@ pub fn planFloorLoot(
     }
 
     if (d_tier > 0) {
-        // Survival floor (v1.6 tuning): every danger floor guarantees at least
-        // one placed ration. `ration_cap` bounds food from above; this bounds
-        // it from below — without it roughly half of all seeds generated zero
-        // food on floors whose steady move cost is 2 ticks/move, so starvation
-        // was a seed roll, not a play outcome (economy audit; playtest seed 7).
-        // Dedicated `rationRng` stream + deterministic fallback: floors ≤ 3
-        // draw nothing new, frozen goldens stay byte-identical.
+        // Survival floor: every danger floor guarantees at least
+        // `deep_floor_guaranteed_rations` placed rations (#40). `ration_cap`
+        // bounds food from above; this bounds it from below. Dedicated
+        // `rationRng` stream + deterministic fallback: floors ≤ 3 draw nothing
+        // new, frozen goldens stay byte-identical.
         var placed_rations: usize = 0;
         var li: usize = 0;
         while (li < count) : (li += 1) {
             if (list[li].item == .rations) placed_rations += 1;
         }
-        if (placed_rations == 0 and count < list.len) {
-            // Avoid planned monster tiles: placeFloorLoot drops loot on
-            // entity-occupied tiles, which would silently void the guarantee.
-            const monster_plan = planMonsterSpawns(world_seed, floor_index, spawn);
-            var food_rng = rationRng(world_seed, floor_index);
-            var attempt: u8 = 0;
+        const monster_plan = planMonsterSpawns(world_seed, floor_index, spawn);
+        var food_rng = rationRng(world_seed, floor_index);
+        while (placed_rations < deep_floor_guaranteed_rations and count < list.len) {
             var placed = false;
+            var attempt: u8 = 0;
             while (attempt < 16 and !placed) : (attempt += 1) {
                 const offset_x: i64 = @intCast((food_rng.nextU8() % 8) + 1);
                 const offset_y: i64 = @as(i64, @intCast(food_rng.nextU8() % 8)) - 4;
@@ -537,13 +535,10 @@ pub fn planFloorLoot(
                 if (!lootTileFree(map, &monster_plan, list[0..count], pos)) continue;
                 list[count] = .{ .item = .rations, .position = pos };
                 count += 1;
+                placed_rations += 1;
                 placed = true;
             }
             if (!placed) {
-                // Deterministic ring around the room-center spawn; rooms are
-                // ≥ 4×3 so a free neighbour exists. The spawn tile itself is
-                // excluded: the player lands there on descend and
-                // placeFloorLoot skips occupied tiles.
                 const ring = [_][2]i64{
                     .{ 1, 0 },  .{ 0, 1 },  .{ -1, 0 }, .{ 0, -1 },
                     .{ 1, 1 },  .{ 1, -1 }, .{ -1, 1 }, .{ -1, -1 },
@@ -554,9 +549,12 @@ pub fn planFloorLoot(
                     if (!lootTileFree(map, &monster_plan, list[0..count], pos)) continue;
                     list[count] = .{ .item = .rations, .position = pos };
                     count += 1;
+                    placed_rations += 1;
+                    placed = true;
                     break;
                 }
             }
+            if (!placed) break; // map exhausted
         }
     }
     return .{ .spawns = list, .count = count };
@@ -582,12 +580,19 @@ fn lootTileFree(
     return true;
 }
 
-/// Clock ticks one player move costs on this floor in the survival steady state.
-/// `rest_fatigue_floor` (20) sits exactly at exhaustion tier 1, so between sleeps
-/// every player is tier >= 1 and `movement.moveEntity` charges the danger-floor
-/// extra tick: 2 ticks/move on floor >= 4, 1 below.
+/// v1.7 #40: guaranteed rations placed on each danger floor (bounds food from
+/// below after the ration_cap bounds it from above). Was 1; raised so a
+/// provisioned direct-route player can refuel once per deep floor.
+pub const deep_floor_guaranteed_rations: u8 = 2;
+
+/// Clock ticks one player move costs on this floor in the survival steady state
+/// for a rested player at `rest_fatigue_floor` (exhaustion tier 1).
+/// v1.7 #40: deep-floor extra tick now starts at exhaustion tier 2
+/// (`movement.deep_floor_extra_tick_exhaustion_min`), so a rested player pays
+/// 1 tick/move even on floor ≥ 4. Tier 2+ still pays 2.
 pub fn steadyMoveTicks(floor_index: u32) u64 {
-    return if (dangerTier(floor_index) > 0) 2 else 1;
+    _ = floor_index;
+    return 1;
 }
 
 pub const FloorEconomy = struct {
@@ -1063,9 +1068,10 @@ test "danger floor base loot has no free bandage glut" {
         if (loot.spawns[i].item == .bandage) bandages += 1;
         if (loot.spawns[i].item == .rations) rations += 1;
     }
-    // Base table drops bandage; deep bonus may add at most ~1-in-6 and ration cap is 1.
+    // Base table drops bandage; deep bonus may add at most ~1-in-6.
+    // Ration cap tracks deep_floor_guaranteed_rations (#40).
     try std.testing.expect(bandages <= 1);
-    try std.testing.expect(rations <= 1);
+    try std.testing.expect(rations <= deep_floor_guaranteed_rations);
 }
 
 test "danger floors always plan at least one ration and reachable stairs (seed sweep)" {
@@ -1079,7 +1085,7 @@ test "danger floors always plan at least one ration and reachable stairs (seed s
         var floor: u32 = 4;
         while (floor <= 5) : (floor += 1) {
             const econ = try auditFloorEconomy(allocator, seed, floor);
-            try std.testing.expect(econ.plan_rations >= 1);
+            try std.testing.expect(econ.plan_rations >= deep_floor_guaranteed_rations);
             // Distance 0 is legal (seed 44 floor 4 spawns on the stairs tile);
             // unreachable stairs are not.
             try std.testing.expect(econ.stairs_reachable);

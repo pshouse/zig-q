@@ -45,11 +45,18 @@ pub fn step(from: loc.Loc, dir: Direction) ?loc.Loc {
     };
 }
 
+/// v1.7 #40: minimum exhaustion tier that costs an extra move tick on danger
+/// floors (floor ≥ 4). Was 1 (every post-rest move cost 2 ticks); raised to 2
+/// so a rested player at the rest floor (tier 1) pays 1 tick/move on deep
+/// floors — pressure still bites once you climb into tier 2+.
+pub const deep_floor_extra_tick_exhaustion_min: u3 = 2;
+
 /// Moves entity on the sparse map, ticks the clock on success.
 /// Exhaustion movement cost (beyond the free tile step):
 /// - tier ≥ 3: always an extra clock tick (promised movement −1, for real)
-/// - tiers 1–2: extra tick only on danger floors (floor ≥ 4), so frozen
-///   floor 1–3 goldens (incl. `reference_crawl`) stay byte-identical
+/// - tiers ≥ deep_floor_extra_tick_exhaustion_min: extra tick only on danger
+///   floors (floor ≥ 4), so frozen floor 1–3 goldens (incl. `reference_crawl`)
+///   stay byte-identical
 pub fn moveEntity(w: *world.World, id: entity.EntityId, dir: Direction) !loc.Loc {
     const ent = w.store.get(id) orelse return error.EntityNotFound;
     const old_loc = ent.loc;
@@ -68,7 +75,7 @@ pub fn moveEntity(w: *world.World, id: entity.EntityId, dir: Direction) !loc.Loc
     w.tick();
     if (!ent.is_monster) {
         const ex = @import("conditions.zig").exhaustionLevel(ent);
-        const extra = ex >= 3 or (ex >= 1 and w.floor_index >= 4);
+        const extra = ex >= 3 or (ex >= deep_floor_extra_tick_exhaustion_min and w.floor_index >= 4);
         if (extra) w.tick();
     }
     return new_loc;
