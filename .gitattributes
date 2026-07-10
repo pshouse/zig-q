@@ -1,3 +1,4 @@
 # Golden capture files are compared byte-for-byte against process stdout (LF).
 # Keep them from being converted to CRLF on checkout so the gate comparison is stable.
 references/*.txt -text
+.claude/workflows/*.js text eol=lf

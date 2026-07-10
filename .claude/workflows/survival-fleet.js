@@ -3,12 +3,17 @@
 // Runs 4 personas x N seeds of agent-driven ironman playthroughs against a zig-q
 // build and returns a death-cause/depth summary plus raw per-run metrics.
 //
-// Invoke from Claude Code:   Workflow({ name: 'survival-fleet', args: { label: 'retuned' } })
+// Invoke from Claude Code by SCRIPT PATH (name-resolution does not pick this file up):
+//   Workflow({ scriptPath: '.claude/workflows/survival-fleet.js',
+//              args: { label: 'retuned', exe: '<build>/zig-q.exe' } })
 // A/B protocol: run once with label 'baseline' on main, once with label '<branch>' on the
 // candidate build, HOLDING seeds/turnBudget CONSTANT so navigation friction cancels out
 // and the delta isolates the economy change. v1.6.1 baseline lives on issue #40.
 //
-// args (all optional):
+// NOTE: the balance A/B is navigation-limited — most runs stall finding stairs before the
+// deep floors, so it discriminates BUGS well but balance numbers poorly (see #40 / #52).
+//
+// args (all optional) — passed as a JSON object OR a JSON string (both handled):
 //   label      - output subdir + report tag (default 'baseline')
 //   seeds      - array of world seeds (default [11, 137, 313])
 //   exe        - absolute path to zig-q.exe (default this repo's zig-out build)
@@ -21,10 +26,12 @@ export const meta = {
   phases: [{ title: 'Playtest', detail: 'personas x seeds, deterministic REPL runs' }],
 }
 
-const label = (args && args.label) || 'baseline'
-const seeds = (args && args.seeds) || [11, 137, 313]
-const EXE = (args && args.exe) || 'C:/Users/admin/workspace/zig-q/zig-out/bin/zig-q.exe'
-const turnBudget = (args && args.turnBudget) || 45
+// args may arrive as a JSON string depending on the invocation path — normalize to an object.
+const A = (typeof args === 'string' ? JSON.parse(args) : (args || {}))
+const label = A.label || 'baseline'
+const seeds = A.seeds || [11, 137, 313]
+const EXE = A.exe || 'C:/Users/admin/workspace/zig-q/zig-out/bin/zig-q.exe'
+const turnBudget = A.turnBudget || 45
 const OUT = `C:/Users/admin/workspace/zig-q/.fleet/${label}`
 
 const HARNESS = `You are playtesting a deterministic Zig roguelike (zig-q) to measure how players DIE. The engine replays deterministically: same seed + same command list = identical output, so you play by maintaining an append-only command file and re-running it.
