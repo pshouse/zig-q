@@ -4,7 +4,7 @@ const version = @import("version.zig");
 const evidence_format = @import("evidence_format.zig");
 
 pub fn run(allocator: std.mem.Allocator, writer: anytype) !void {
-    const gate = version.forGate(13);
+    const gate = version.forGate(13).?;
     try writer.print("=== evidence: v1.3 living dungeon (version={s}) ===\n", .{gate.emit});
 
     var version_line_buf: [64]u8 = undefined;

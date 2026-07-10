@@ -27,7 +27,7 @@ pub const gear_golden =
     \\gear: get [item], get from corpse, loot (corpse first), drop <item>
     \\      inventory (inv), examine <item>, equip <item>, unequip <slot|item>, use <item>
     \\      look lists nearby items/corpses; stand adjacent to pick up
-    \\ai:    monsters act after wait/move when explore AI is on; ambush when they reach you
+    \\ai:    monsters act after wait/move/get/drop/loot/use/open/close/wound when explore AI is on; ambush when they reach you
     \\
 ;
 
@@ -36,7 +36,7 @@ pub const repl_v11_golden =
     \\explore:  look (l), time, move <n|s|e|w|nw|...>, m <dir>, wait, food, rest, sleep, conditions, descend, help, help gear, exit
     \\          chains: move w w   or   move w; move w
     \\gear:     get [item], get from corpse, loot (corpse first), drop <item>, inventory (inv), examine <item>, equip <item>, unequip <slot|item>, use <item>  (help gear)
-    \\ai:      monsters act on wait/move when explore AI is on; ambush seats the monster first
+    \\ai:      monsters act on wait/move/get/drop/loot/use/open/close/wound when explore AI is on; ambush seats the monster first
     \\combat:   attack [target], end turn, flee (disengage/retreat), catch breath
     \\persist:  save [slot], load <slot>
     \\

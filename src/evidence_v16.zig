@@ -56,7 +56,7 @@ pub fn runMigrationEvidence(allocator: std.mem.Allocator, writer: anytype) !void
 }
 
 pub fn run(allocator: std.mem.Allocator, writer: anytype) !void {
-    const gate = version.forGate(16);
+    const gate = version.forGate(16).?;
     try writer.print("=== evidence: v1.6 depth danger (version={s}) ===\n", .{gate.emit});
 
     var version_line_buf: [64]u8 = undefined;

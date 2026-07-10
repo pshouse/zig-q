@@ -4,7 +4,7 @@ const version = @import("version.zig");
 const evidence_format = @import("evidence_format.zig");
 
 pub fn run(allocator: std.mem.Allocator, writer: anytype) !void {
-    const gate = version.forGate(14);
+    const gate = version.forGate(14).?;
     try writer.print("=== evidence: v1.4 survival clock (version={s}) ===\n", .{gate.emit});
 
     var version_line_buf: [64]u8 = undefined;

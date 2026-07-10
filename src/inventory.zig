@@ -49,17 +49,17 @@ pub const State = struct {
         return @intCast(str * 5);
     }
 
+    /// Binary encumbrance model (#36): weight > cap hard-blocks movement.
+    /// Graduated 10/20 speed bands were dead code (blocksMove fired first).
     pub fn encumbrancePenalty(self: *const State, ent: *const entity.Entity) i32 {
-        const cap = carryCapacity(character.statByAbbr(ent.char, "STR"));
-        const weight = self.totalWeight();
-        if (weight <= cap) return 0;
-        if (weight <= cap * 2) return 10;
-        return 20;
+        _ = self;
+        _ = ent;
+        return 0;
     }
 
     pub fn isOverloaded(self: *const State, ent: *const entity.Entity) bool {
-        const cap = carryCapacity(character.statByAbbr(ent.char, "STR"));
-        return self.totalWeight() > cap * 2;
+        // Alias of blocksMove under the binary model (was unreachable >2*cap tier).
+        return self.blocksMove(ent);
     }
 
     pub fn blocksMove(self: *const State, ent: *const entity.Entity) bool {
@@ -292,6 +292,18 @@ pub fn fromSave(allocator: std.mem.Allocator, save: GearSave) !State {
     state.weapon = save.weapon;
     state.armour = save.armour;
     state.shield = save.shield;
+    // #30: clear phantom equipment slots whose id is not in the bag (pre-fix
+    // saves / corrupt rows). Prevents weaponDamageDie/playerAc honoring ghost
+    // gear and unequip's old re-add guard from duplicating it back into the bag.
+    if (state.weapon) |id| {
+        if (!state.has(id)) _ = state.unequip(id);
+    }
+    if (state.armour) |id| {
+        if (!state.has(id)) _ = state.unequip(id);
+    }
+    if (state.shield) |id| {
+        if (!state.has(id)) _ = state.unequip(id);
+    }
     return state;
 }
 
@@ -321,6 +333,38 @@ test "resolve bag item by category" {
     try std.testing.expectEqual(.leather_armour, state.resolveBagItem("armour").found);
     try std.testing.expectEqual(.leather_armour, state.resolveBagItem("armor").found);
     try std.testing.expect(state.resolveBagItem("weapon") == .none_in_category);
+}
+
+test "fromSave clears phantom equipment slots absent from the bag" {
+    // #30: equipped id not in bag → slot cleared, no phantom combat bonus.
+    const allocator = std.testing.allocator;
+    const save = GearSave{
+        .bag = &.{}, // empty bag
+        .weapon = .short_sword,
+        .armour = .leather_armour,
+        .shield = null,
+    };
+    var state = try fromSave(allocator, save);
+    defer state.deinit(allocator);
+    try std.testing.expect(state.weapon == null);
+    try std.testing.expect(state.armour == null);
+    try std.testing.expect(!state.has(.short_sword));
+    try std.testing.expect(!state.has(.leather_armour));
+}
+
+test "fromSave keeps slots whose id is still in the bag" {
+    const allocator = std.testing.allocator;
+    var bag = [_]ItemSave{.{ .id = .short_sword, .count = 1 }};
+    const save = GearSave{
+        .bag = bag[0..],
+        .weapon = .short_sword,
+        .armour = null,
+        .shield = null,
+    };
+    var state = try fromSave(allocator, save);
+    defer state.deinit(allocator);
+    try std.testing.expectEqual(.short_sword, state.weapon.?);
+    try std.testing.expect(state.has(.short_sword));
 }
 
 test "clearSlot returns the item and leaves it in the bag" {

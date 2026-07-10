@@ -54,11 +54,13 @@ The REPL loads **floor 1** dungeon tiles, rolls six stats on start, then accepts
 
 **Gear commands:** `get [item]` (nearest floor item), `get from corpse` / `loot from corpse` (an adjacent corpse's gear), `loot` (an adjacent corpse's gear first, else the nearest floor item), `drop <item>`, `inventory`, `examine <item>`, `equip <item>`, `unequip <slot|item>` (aliases `unwield`, `remove`, `take off`), `use <item>`. `look` lists nearby items and corpses; stand adjacent to pick up. Equipped gear stays in the bag; `unequip` clears the slot, and dropping an equipped item clears its slot too.
 
-**Combat commands:** `attack [target]`, `end turn` (melee d20 + STR mod vs AC; monsters counter on their turn)
+**Combat commands:** `attack [target]`, `end turn`, `flee` (disengage with opportunity attacks), `catch breath` (partial in-combat fatigue relief)
 
 **Persistence commands:** `save [slot]`, `load <slot>` (slots 1–9; default save slot 1; database file `zig-q.sqlite` in the working directory)
 
-Races: 1=dragonborn, 2=dwarf (+2 CON), 3=elf (+2 DEX). Classes: 1=barbarian, 2=fighter, 3=bard.
+Races: 1=dragonborn (+2 STR), 2=dwarf (+2 CON), 3=elf (+2 DEX). Classes: 1=barbarian, 2=fighter, 3=bard.
+
+**Ability scores:** STR/DEX/CON/WIS drive combat, carry, AC, and perception. **INT and CHA are cosmetic** (rolled, assigned, shown, persisted) until a future mundane use lands — see `docs/INT_CHA_DECISION.md`.
 
 Piped crawl script (PowerShell):
 
@@ -162,20 +164,32 @@ Each iteration loads floor 1, generates random command scripts, executes through
 
 ```
 src/
-  terrain.zig    Dungeon tile types and terrain map
-  dungeon.zig    Floor layout data
-  character.zig  Stat assignment, racial bonus, HP/AC sheet
-  choose.zig     1-based pick indexing
-  movement.zig   Entity movement on sparse map
-  commands.zig   REPL command parse/execute
-  repl.zig       REPL loop and scripted driver
-  session.zig    Stat rolls and creation draft
-  dice.zig       Dice rolling
-  rng.zig        Seeded deterministic RNG
-  world.zig      World init/spawn/deinit
-  dst.zig        DST harness scenarios
-  fuzz.zig       Deterministic REPL fuzz harness
-  main.zig       CLI entry point
+  terrain.zig      Dungeon tile types and terrain map
+  dungeon.zig      Floor layout + depth-scaled spawn plans
+  character.zig    Stat assignment, racial bonus, HP/AC sheet
+  choose.zig       1-based pick indexing
+  movement.zig     Entity movement on sparse map
+  pathfinding.zig  Cardinal BFS (player + AI)
+  perception.zig   WIS-gated LOS / trap spotting
+  combat.zig       Turn combat, counters, flee/catch breath
+  monsters.zig     Monster kinds and elite upgrades
+  conditions.zig   Condition registry + exhaustion levels
+  survival.zig     Hunger/fatigue/exhaustion clock
+  items.zig        Item definitions
+  inventory.zig    Bag, equipment slots, encumbrance
+  explore.zig      Explore AI, traps, doors, ambush
+  commands.zig     REPL command parse/execute
+  repl.zig         REPL loop and scripted driver
+  session.zig      Stat rolls and creation draft
+  dice.zig         Dice rolling
+  rng.zig          Seeded deterministic RNG
+  world.zig        World init/spawn/deinit
+  dst.zig          DST harness scenarios
+  fuzz.zig         Deterministic REPL fuzz harness
+  save_state.zig   WorldSave schema + migrations
+  sqlite_store.zig SQLite slot persistence
+  wave_gate.zig    Release-gate capture plans
+  main.zig         CLI entry point
 ```
 
 ## Playtest fleet (balance instrument)

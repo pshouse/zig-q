@@ -13,6 +13,10 @@ const doors = @import("doors.zig");
 const items = @import("items.zig");
 
 pub const chase_radius: u8 = 6;
+/// Explore turns a monster keeps pathing to the last-seen player tile after
+/// LOS breaks (#35). Long enough to finish a chokepoint funnel; short enough
+/// that fully escaping still works.
+pub const chase_memory_turns: u8 = 4;
 
 const patrol_dirs = [_]movement.Direction{ .east, .south, .west, .north };
 
@@ -36,7 +40,7 @@ fn manhattan(a: loc.Loc, b: loc.Loc) u64 {
     return adx + ady;
 }
 
-fn shouldChase(w: *const world.World, monster: *const entity.Entity, player: *const entity.Entity) bool {
+fn hasLosToPlayer(w: *const world.World, monster: *const entity.Entity, player: *const entity.Entity) bool {
     if (manhattan(monster.loc, player.loc) > chase_radius) return false;
     return perception.hasLineOfSight(&w.terrain, monster.loc, player.loc);
 }
@@ -45,9 +49,11 @@ fn patrolDirection(monster: *const entity.Entity) movement.Direction {
     return patrol_dirs[monster.ai_patrol_phase % patrol_dirs.len];
 }
 
+/// Update chase memory from current LOS, then choose a step. Mutates monster
+/// memory fields. Returns null when adjacent (ready to ambush) or idle.
 fn chooseMonsterDirection(
-    w: *const world.World,
-    monster: *const entity.Entity,
+    w: *world.World,
+    monster: *entity.Entity,
     player: *const entity.Entity,
 ) ?movement.Direction {
     if (conditions.has(monster, .frightened)) {
@@ -66,9 +72,29 @@ fn chooseMonsterDirection(
         }
         return best;
     }
-    if (isAdjacent(monster.loc, player.loc)) return null;
-    if (shouldChase(w, monster, player)) {
+    if (isAdjacent(monster.loc, player.loc)) {
+        monster.chase_memory_left = 0;
+        monster.chase_last_seen = null;
+        return null;
+    }
+    // #35: refresh memory while LOS holds; otherwise path to last-seen tile.
+    if (hasLosToPlayer(w, monster, player)) {
+        monster.chase_last_seen = player.loc;
+        monster.chase_memory_left = chase_memory_turns;
         return pathfinding.firstStepToward(w, monster.loc, player.loc, monster.id, monster.last_move_dir);
+    }
+    if (monster.chase_memory_left > 0) {
+        if (monster.chase_last_seen) |goal| {
+            monster.chase_memory_left -= 1;
+            if (monster.loc.x == goal.x and monster.loc.y == goal.y) {
+                monster.chase_memory_left = 0;
+                monster.chase_last_seen = null;
+            } else {
+                return pathfinding.firstStepToward(w, monster.loc, goal, monster.id, monster.last_move_dir);
+            }
+        } else {
+            monster.chase_memory_left = 0;
+        }
     }
     const dir = patrolDirection(monster);
     const next = movement.step(monster.loc, dir) orelse return null;
@@ -225,4 +251,36 @@ test "frightened monster flees away from player" {
     const monster = w.store.get(monster_id).?;
     try std.testing.expect(monster.loc.x != before.x or monster.loc.y != before.y);
     try std.testing.expect(!isAdjacent(monster.loc, w.store.get(player_id).?.loc));
+}
+
+test "chase memory pathing continues after LOS breaks" {
+    // #35: after seeing the player, a monster keeps pathing to last-seen for
+    // chase_memory_turns even without LOS (chokepoint baiting).
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    w.has_dungeon = true;
+    // Open corridor with a wall blocking LOS between goblin and player.
+    try w.terrain.set(loc.Loc.init(50, 50), .floor);
+    try w.terrain.set(loc.Loc.init(50, 51), .wall); // LOS block
+    try w.terrain.set(loc.Loc.init(50, 52), .floor);
+    try w.terrain.set(loc.Loc.init(51, 50), .floor);
+    try w.terrain.set(loc.Loc.init(51, 51), .floor); // path around the wall
+    try w.terrain.set(loc.Loc.init(51, 52), .floor);
+
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(50, 50));
+    const monster_id = try w.spawnMonster(.goblin, loc.Loc.init(50, 52), "goblin_0");
+    // Seed memory as if LOS just broke mid-chase (last saw player at 50,50).
+    if (w.store.get(monster_id)) |m| {
+        m.chase_last_seen = loc.Loc.init(50, 50);
+        m.chase_memory_left = chase_memory_turns;
+    }
+    try std.testing.expect(!hasLosToPlayer(&w, w.store.get(monster_id).?, w.store.get(player_id).?));
+    const before = w.store.get(monster_id).?.loc;
+    var buf: [256]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    _ = try runExploreMonsterTurns(&w, player_id, fbs.writer());
+    const after = w.store.get(monster_id).?.loc;
+    try std.testing.expect(after.x != before.x or after.y != before.y);
+    try std.testing.expect(w.store.get(monster_id).?.chase_memory_left < chase_memory_turns);
 }
