@@ -97,7 +97,7 @@ pub const plans = [_]WavePlan{
             "deadly_floor",     "elite_brawl",   "scarce_heals",    "save_v4_roundtrip", "sleep_interrupt",
             "rest_floor",       "combat_flee",   "catch_breath",    "unequip_cycle",     "drop_clears_slot",
             "bare_loot_corpse", "weaker_weapon", "starve_out",      "combat_reposition", "survival_economy",
-            "monster_endurance", "reference_crawl",
+            "monster_endurance", "exhausted_sleep", "bleed_out",    "glyph_look",        "reference_crawl",
         },
         .all_scenarios = &.{
             "bootstrap",         "explore",         "create",            "crawl_start",      "playthrough",       "brawl",         "save_roundtrip",
@@ -107,6 +107,8 @@ pub const plans = [_]WavePlan{
             "deep_floor",        "rest_floor",      "combat_flee",       "catch_breath",     "deadly_floor",      "elite_brawl",   "scarce_heals",
             "save_v4_roundtrip", "sleep_interrupt", "unequip_cycle",     "drop_clears_slot", "bare_loot_corpse",  "weaker_weapon",
             "starve_out",        "combat_reposition", "survival_economy",  "monster_endurance",
+            // Was registered in scenarioByName during v1.6 but never gated (#28 recurrence).
+            "exhausted_sleep",   "bleed_out",         "glyph_look",
         },
         .run_migration = true,
     },
@@ -925,6 +927,31 @@ test "live reference_crawl output matches the committed golden" {
             .{reference_golden_path},
         );
         return error.ReferenceCrawlRegression;
+    }
+}
+
+// #28 / SD4: every name resolvable by `scenarioByName` must appear in at least
+// one wave plan's `all_scenarios`. Without this, scenarios register as green
+// unit tests and then silently drop out of the release gate — the class that
+// recurred for rest_floor/combat_flee and again for exhausted_sleep.
+fn scenarioInAnyPlan(name: []const u8) bool {
+    for (plans) |plan| {
+        for (plan.all_scenarios) |s| {
+            if (std.mem.eql(u8, s, name)) return true;
+        }
+    }
+    return false;
+}
+
+test "no orphan scenarios: every scenarioByName entry is in a wave plan" {
+    const dst = @import("dst.zig");
+    for (dst.registered_scenario_names) |name| {
+        // Resolvable by name (list must stay in lockstep with scenarioByName).
+        try std.testing.expect(dst.scenarioByName(name, 42) != null);
+        if (!scenarioInAnyPlan(name)) {
+            std.debug.print("orphan scenario (registered but in no wave plan): {s}\n", .{name});
+            return error.OrphanScenario;
+        }
     }
 }
 

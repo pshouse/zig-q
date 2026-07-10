@@ -1487,6 +1487,25 @@ pub const Harness = struct {
     }
 };
 
+/// Every name `scenarioByName` resolves. The orphan-scenario gate test
+/// (`wave_gate.zig`) asserts each of these appears in some `WavePlan.all_scenarios`
+/// so a newly registered scenario fails `zig build test` until it is wired into
+/// a gate plan (#28 / SD4). Keep this list in lockstep with the matchers below.
+pub const registered_scenario_names = [_][]const u8{
+    "bootstrap",         "explore",           "create",            "crawl_start",
+    "brawl",             "save_roundtrip",    "playthrough",       "descend_crawl",
+    "reference_crawl",   "save_v2_roundtrip", "conditions_brawl",  "los_peek",
+    "ambush",            "permadeath",        "loot_roundtrip",    "geared_brawl",
+    "corpse_loot",       "encumbered",        "hunt",              "flee",
+    "trap_trigger",      "door_route",        "survive",           "starve",
+    "starve_out",        "sleep_cycle",       "rest_floor",        "exhausted_sleep",
+    "reference_survive", "monster_endurance", "bleed_out",         "heal_bandage",
+    "trap_floor",        "deep_floor",        "combat_flee",       "catch_breath",
+    "combat_reposition", "glyph_look",        "deadly_floor",      "elite_brawl",
+    "scarce_heals",      "save_v4_roundtrip", "unequip_cycle",     "drop_clears_slot",
+    "bare_loot_corpse",  "weaker_weapon",     "sleep_interrupt",   "survival_economy",
+};
+
 pub fn scenarioByName(name: []const u8, seed: u64) ?Scenario {
     if (std.mem.eql(u8, name, "bootstrap"))
         return Scenario{ .name = "bootstrap", .seed = seed, .steps = default_scenario.steps };

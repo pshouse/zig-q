@@ -17,6 +17,10 @@ pub const schema_version: u32 = 4;
 pub const schema_version_v1: u32 = 1;
 pub const schema_version_v2: u32 = 2;
 pub const schema_version_v3: u32 = 3;
+/// Fixed target for the v3→v4 migration step. Must never be `schema_version`
+/// (the live constant) — stamping the live value reintroduces the mislabel
+/// class: when a v5 lands, v3 saves would skip v4→v5 (#29).
+pub const schema_version_v4: u32 = 4;
 
 pub const EntitySave = struct {
     id: entity.EntityId,
@@ -377,7 +381,8 @@ pub fn migrateV2ToV3(save: *WorldSave) void {
 
 pub fn migrateV3ToV4(save: *WorldSave) void {
     if (save.schema_version != schema_version_v3) return;
-    save.schema_version = schema_version;
+    // Pin to v4 (not live schema) so a future v5 step cannot be skipped (#29).
+    save.schema_version = schema_version_v4;
     for (save.entities) |*ent| {
         ent.danger_tier = 0;
     }
@@ -430,8 +435,67 @@ test "migrate v2 inverts hunger to rising scale" {
     try std.testing.expectEqual(schema_version_v3, save.schema_version);
     try std.testing.expectEqual(@as(u16, 95), save.entities[0].hunger);
     migrateV3ToV4(&save);
-    try std.testing.expectEqual(schema_version, save.schema_version);
+    try std.testing.expectEqual(schema_version_v4, save.schema_version);
     try std.testing.expectEqual(@as(u32, 0), save.entities[0].danger_tier);
+}
+
+// Full v2→v3→v4 chain: each step stamps its own fixed target, never the live
+// constant. Guards the mislabel class that recurred when v3→v4 used
+// `schema_version` instead of `schema_version_v4` (#29).
+test "migration chain v2 to v3 to v4 pins every step" {
+    var entities = [_]EntitySave{.{
+        .id = 0,
+        .name = "entity_0",
+        .x = 49,
+        .y = 49,
+        .movement = 30,
+        .char_name = "George",
+        .race_name = "dwarf",
+        .class_name = "barbarian",
+        .status = .exploring,
+        .str = 10,
+        .dex = 10,
+        .con = 10,
+        .int_stat = 10,
+        .wis = 10,
+        .cha = 10,
+        .conditions_bits = 0,
+        .current_hp = 10,
+        .max_hp = 10,
+        .damage_die = 0,
+        .is_monster = false,
+        .hunger = 5,
+        .danger_tier = 7,
+    }};
+    var save = WorldSave{
+        .schema_version = schema_version_v2,
+        .seed = 42,
+        .rng_state = 1,
+        .rng_offset = 0,
+        .floor_index = 1,
+        .has_dungeon = true,
+        .clock_ticks = 0,
+        .clock_time_of_day = 0,
+        .clock_seconds_per_day = 120,
+        .clock_update_rate = 5,
+        .clock_time_multiplier = 1,
+        .next_entity_id = 1,
+        .player_id = 0,
+        .entities = entities[0..],
+        .map_cells = &.{},
+        .combat = null,
+    };
+    migrateV2ToV3(&save);
+    try std.testing.expectEqual(schema_version_v3, save.schema_version);
+    try std.testing.expectEqual(@as(u16, 95), save.entities[0].hunger);
+    migrateV3ToV4(&save);
+    try std.testing.expectEqual(schema_version_v4, save.schema_version);
+    try std.testing.expectEqual(schema_version, save.schema_version); // live == v4 today
+    try std.testing.expectEqual(@as(u32, 0), save.entities[0].danger_tier);
+    // Fixed targets are distinct compile-time constants (not aliases of live).
+    try std.testing.expectEqual(@as(u32, 2), schema_version_v2);
+    try std.testing.expectEqual(@as(u32, 3), schema_version_v3);
+    try std.testing.expectEqual(@as(u32, 4), schema_version_v4);
 }
 
 test "migrate v3 to v4 defaults danger_tier" {
@@ -477,7 +541,7 @@ test "migrate v3 to v4 defaults danger_tier" {
         .combat = null,
     };
     migrateV3ToV4(&save);
-    try std.testing.expectEqual(schema_version, save.schema_version);
+    try std.testing.expectEqual(schema_version_v4, save.schema_version);
     try std.testing.expectEqual(@as(u32, 0), save.entities[0].danger_tier);
 }
 
