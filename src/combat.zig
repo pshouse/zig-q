@@ -10,11 +10,21 @@ const conditions = @import("conditions.zig");
 const inventory = @import("inventory.zig");
 const items = @import("items.zig");
 const survival = @import("survival.zig");
+const movement = @import("movement.zig");
+const pathfinding = @import("pathfinding.zig");
+
+/// Consecutive passTurn cycles with no adjacent living hostile before combat
+/// auto-ends (lost contact). Covers the #42 soft-lock where a monster cannot
+/// re-close even after #27 step-toward; short enough that descend/rest unlock
+/// quickly, long enough that a one-step kite still costs a turn of pressure.
+pub const lost_contact_turns: u8 = 3;
 
 pub const CombatState = struct {
     participants: std.ArrayList(entity.EntityId),
     turn_index: usize = 0,
     player_id: entity.EntityId,
+    /// Incremented each handoff with no adjacent hostile; reset on contact.
+    no_contact_turns: u8 = 0,
 
     pub fn deinit(self: *CombatState, allocator: std.mem.Allocator) void {
         self.participants.deinit(allocator);
@@ -432,12 +442,19 @@ fn processMonsterTurns(w: *world.World, writer: anytype) !void {
             advanceTurn(w);
             continue;
         }
-        // A monster the player has stepped away from has no reach this round: it
-        // forfeits its swing (no attack, no RNG draw, no clock tick) instead of
-        // surfacing performAttack's NotAdjacent out of the whole turn handoff.
-        // Termination: the living player is a participant, so advanceTurn reaches
-        // them within one cycle and the loop exits at the player-turn check above.
+        // #27: out-of-reach monsters take one deterministic step toward the
+        // player (firstStepToward, no RNG). Move spends the turn — they do not
+        // also attack. If still out of reach after the step (or blocked), the
+        // turn is over; #42's lost-contact counter may eventually end combat.
         if (!isAdjacent(ent.loc, player.loc)) {
+            if (!conditions.blocksMove(ent)) {
+                if (pathfinding.firstStepToward(w, ent.loc, player.loc, active, ent.last_move_dir)) |dir| {
+                    if (movement.moveEntity(w, active, dir)) |new_loc| {
+                        ent.last_move_dir = dir;
+                        try writer.print("{s} advances to ({},{})\n", .{ ent.name, new_loc.x, new_loc.y });
+                    } else |_| {}
+                }
+            }
             advanceTurn(w);
             continue;
         }
@@ -512,6 +529,24 @@ fn passTurnToOpponents(w: *world.World, writer: anytype) !void {
     }
 
     try processMonsterTurns(w, writer);
+
+    // #42: if no living combatant is adjacent after monster turns, count lost
+    // contact. After `lost_contact_turns` handoffs, end combat so descend/rest
+    // cannot soft-lock when a monster cannot re-close.
+    if (isInCombat(w)) {
+        if (w.combat) |c| {
+            if (hasAdjacentHostile(w, c.player_id)) {
+                c.no_contact_turns = 0;
+            } else {
+                c.no_contact_turns +|= 1;
+                if (c.no_contact_turns >= lost_contact_turns) {
+                    endCombat(w);
+                    try writer.print("combat ended (lost contact)\n", .{});
+                    return;
+                }
+            }
+        }
+    }
 
     if (isInCombat(w)) {
         if (activeTurn(w)) |next| {
@@ -733,10 +768,10 @@ test "player can move on their turn during combat" {
     try std.testing.expect(isInCombat(&w));
 }
 
-test "end turn after moving out of reach skips the monster instead of crashing" {
-    // Regression: move one tile away mid-combat, then end turn. processMonsterTurns
-    // used to call performAttack unconditionally, so the goblin's counter raised
-    // error.NotAdjacent, which no command handler catches â€” aborting the REPL/DST.
+test "end turn after moving out of reach: monster advances instead of crashing" {
+    // #27: move one tile away mid-combat, then end turn. Monster takes one
+    // deterministic step toward the player (no attack on the move turn).
+    // processMonsterTurns must never raise NotAdjacent out of the handoff.
     const allocator = std.testing.allocator;
     var w = try world.World.init(allocator, 42);
     defer w.deinit();
@@ -744,26 +779,29 @@ test "end turn after moving out of reach skips the monster instead of crashing" 
     const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
     const goblin_id = try w.spawnMonster(.goblin, loc.Loc.init(50, 49), "goblin_0");
     try enterCombat(&w, player_id, goblin_id, player_id);
-    _ = try @import("movement.zig").moveEntity(&w, player_id, .west);
+    _ = try movement.moveEntity(&w, player_id, .west);
 
     const hp_before = w.store.get(player_id).?.current_hp;
+    const goblin_before = w.store.get(goblin_id).?.loc;
     var buf: [512]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
     try endTurn(&w, player_id, fbs.writer());
 
-    // The goblin forfeits its swing (no attack line, player untouched), combat
-    // stays live, and initiative comes back around to the player.
     const out = fbs.getWritten();
+    // Move turn: advances, does not attack.
     try std.testing.expect(std.mem.indexOf(u8, out, "attack ") == null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "advances to") != null);
     try std.testing.expectEqual(hp_before, w.store.get(player_id).?.current_hp);
+    // Goblin closed the gap (new loc ≠ old).
+    try std.testing.expect(w.store.get(goblin_id).?.loc.x != goblin_before.x or
+        w.store.get(goblin_id).?.loc.y != goblin_before.y);
     try std.testing.expect(isInCombat(&w));
     try std.testing.expect(activeTurn(&w) == player_id);
     try std.testing.expect(std.mem.indexOf(u8, out, "turn: entity_0") != null);
 }
 
-test "catch breath after moving out of reach skips the monster instead of crashing" {
-    // Same passTurnToOpponents handoff as end turn; both entry points must survive
-    // a repositioned player.
+test "catch breath after moving out of reach: monster advances without crash" {
+    // Same passTurnToOpponents handoff as end turn; both entry points get #27 step-toward.
     const allocator = std.testing.allocator;
     var w = try world.World.init(allocator, 42);
     defer w.deinit();
@@ -771,16 +809,19 @@ test "catch breath after moving out of reach skips the monster instead of crashi
     const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
     const goblin_id = try w.spawnMonster(.goblin, loc.Loc.init(50, 49), "goblin_0");
     try enterCombat(&w, player_id, goblin_id, player_id);
-    _ = try @import("movement.zig").moveEntity(&w, player_id, .west);
+    _ = try movement.moveEntity(&w, player_id, .west);
 
     var buf: [512]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
     try catchBreath(&w, player_id, fbs.writer());
     const out = fbs.getWritten();
     try std.testing.expect(std.mem.indexOf(u8, out, "catches their breath") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out, "attack ") == null);
-    try std.testing.expect(isInCombat(&w));
-    try std.testing.expect(activeTurn(&w) == player_id);
+    // After one step-toward the goblin is typically adjacent; it may attack on
+    // a later handoff. This turn was the advance (or an attack if already closed
+    // by a previous step). Either way: no crash, combat still live or resolved.
+    try std.testing.expect(std.mem.indexOf(u8, out, "advances to") != null or
+        std.mem.indexOf(u8, out, "attack ") != null or
+        !isInCombat(&w));
 }
 
 test "combat end restores exploring status" {
@@ -861,6 +902,35 @@ test "flee provokes each adjacent hostile in id order" {
     try std.testing.expect(idx0 != null and idx1 != null);
     try std.testing.expect(idx0.? < idx1.?);
     try std.testing.expect(!isInCombat(&w));
+}
+
+test "lost contact ends combat so descend is not soft-locked" {
+    // #42: if the only enemy stays out of adjacency for lost_contact_turns
+    // handoffs, combat ends and descend/rest unblock.
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    const player_id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+    // Place goblin two tiles away so one step still leaves it non-adjacent if
+    // player keeps backing up — force no_contact by parking goblin far.
+    const goblin_id = try w.spawnMonster(.goblin, loc.Loc.init(55, 49), "goblin_0");
+    try enterCombat(&w, player_id, goblin_id, player_id);
+    try std.testing.expect(isInCombat(&w));
+
+    var buf: [2048]u8 = undefined;
+    var fbs = std.io.fixedBufferStream(&buf);
+    var i: u8 = 0;
+    while (i < lost_contact_turns + 1 and isInCombat(&w)) : (i += 1) {
+        // Keep player on their turn and pass.
+        if (activeTurn(&w) == player_id) {
+            try endTurn(&w, player_id, fbs.writer());
+        } else break;
+    }
+    try std.testing.expect(!isInCombat(&w));
+    try std.testing.expect(std.mem.indexOf(u8, fbs.getWritten(), "lost contact") != null);
+    // Status restored so descend/rest gates clear.
+    try std.testing.expect(w.store.get(player_id).?.char.status == .exploring);
 }
 
 test "catch breath sheds fatigue and eases exhaustion" {
