@@ -2,7 +2,7 @@
 
 A Zig prototype for deterministic **dungeon crawl** simulation: character creation, dungeon tiles, level-1 combat sheet (HP/AC), turn-based combat, and SQLite save/load.
 
-**Requires Zig 0.15+** (tested on 0.15.2). **Version:** `1.6.1` — deterministic dungeon crawl through crawl completeness (see ROADMAP.md).
+**Requires Zig 0.15+** (tested on 0.15.2). **Version:** `1.7.0` — Fair Danger: survival recovery paths, combat step-toward, anti-recurrence gates (see SPRINT_V1.7.md).
 
 SQLite is bundled via the amalgamation in `deps/sqlite3/` (no system SQLite install required).
 
@@ -212,6 +212,7 @@ zig build run -- --help
 
 | Version | Theme |
 |---------|--------|
+| **1.7.0** | Fair Danger: exhaustion-5 sleep recovery, in-combat step-toward + lost-contact, loot/trap placement fairness, anti-recurrence gates, chase memory, load slot validation. Survival retune (#40) open pending fleet A/B |
 | **1.6.1** | Exhaustion tier 4 "HP max halved" is a recovery cap, not a drain: crossing fatigue 70 (e.g. mid-`sleep`) no longer permanently halves current HP; instead bandage healing stops at half max while the tier is active |
 | **1.6.0** | Depth danger: initiative counters on floor ≥4, danger-tier stats, elites, scarce heals, save v4 |
 | **1.5.5** | Monsters exempt from hunger/fatigue/exhaustion: survival pressure is player-only, so floors no longer die off corpseless ~95 ticks after spawning (poison DoT still applies to monsters) |

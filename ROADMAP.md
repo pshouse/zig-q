@@ -346,6 +346,7 @@ floor-4 monster lands damage on an attack-spamming player.
 | 1.5 | Bandage heal, procedural traps, depth-scaled crawl |
 | 1.5.1 | Trap `look` listing gated on WIS perception check (d20 + mod vs DC 12 + distance) |
 | 1.6 | Depth danger: counters, danger-tier, elites, scarce heals, save v4 |
+| 1.7 | Fair Danger: survival recovery, combat closes gap, anti-recurrence tests |
 | 1.5.2 | Poison/starvation DoT prints HP loss each tick (`poison deals N hp; hp=X/Y`) |
 | 1.5.3 | Review fixes: `look` uses a local RNG copy (no combat-stream coupling), unique deep-floor monster names, monster tile-occupancy guard, honest cross-wave gate, `wound` gated behind `--playtest` |
 | 1.5.4 | Survival economy: `rest` floored at `rest_fatigue_floor` (fatigue 20 / exhaustion tier 1); only `sleep` resets fatigue to 0, so sleep is no longer strictly dominated by repeated resting. DST `rest_floor` guards the rule |
