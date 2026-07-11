@@ -45,10 +45,11 @@ Use tail -20 to -30; the LAST 'look' map and any 'hp='/'exhaustion'/'starvation'
 
 RULES OF THE WORLD:
 - Coordinates: north = x-1, south = x+1, EAST = y+1, WEST = y-1. Map: '@'=you, '#'=wall, '.'=floor, '>'=stairs down, 'g/s/h/w'=monsters, '*'=floor object/trap.
-- Creation: 'assign <STR DEX CON INT WIS CHA>' (six pool-slot picks from the printed stat_rolls), 'race <1|2 dwarf +2CON|3 elf +2DEX>', 'class <1 barbarian|2 fighter|3 bard>', 'spawn'.
+- Creation: 'assign <STR DEX CON INT WIS CHA>' (six pool-slot picks from the printed stat_rolls), 'race <1 dragonborn +2STR|2 dwarf +2CON|3 elf +2DEX|4 human +2INT>', 'class <1 barbarian|2 fighter|3 rogue>', 'spawn'.
 - Floor 1: small room; the '>' is 1 south + 1 east of spawn; 'descend' on it. Floors 2+ are procedural — LOOK and navigate to the '>'.
-- Commands: look (l), move <n/s/e/w> (m <dir>), attack [name], end turn, wait, food, rest, sleep, use bandage, use antidote, get <item>, get from corpse, descend, inventory, stats.
-- Survival: every action ticks the clock; deep floors cost extra ticks per move. Starvation and exhaustion deal HP damage; exhaustion 5 = incapacitated. Eat before hunger maxes; rest sheds fatigue (floor 20); only sleep clears fully.
+- Commands: look (l), move <n/s/e/w> (m <dir>), attack [name], end turn, wait, food, rest, sleep, use bandage, use antidote, get <item>, get from corpse, EQUIP <item> (wield weapons / wear armour — DO THIS after looting; picking gear up does NOT auto-equip it), unequip <slot>, descend, inventory, stats. NEW (v1.8): reckless, guard, second wind, sneak, backstab, disarm, pick, intimidate <target>.
+- Classes (v1.8): barbarian attacks with STR (d12; 'reckless' = advantage on attacks but -4 AC). fighter attacks with STR (d10; 'guard' = +2 AC skipping the attack; 'second wind' = CON-scaled heal; only class with shield proficiency). rogue attacks with DEX when wielding a LIGHT/unarmed weapon (a heavy weapon reverts it to STR with NO backstab); 'sneak' (DEX) → hidden; 'backstab' = +1 damage die vs a hidden/unaware/frightened target; 'disarm' (INT) a WIS-SPOTTED adjacent trap; 'pick' (INT) a locked door; 'intimidate <target>' (CHA) frightens a wounded monster so it flees instead of attacking.
+- Survival: every action ticks the clock; deep floors cost extra ticks per move (slow races e.g. dwarf pay +1 on floors >=4; fast races e.g. elf pay less). Starvation and exhaustion deal HP damage; exhaustion 5 = incapacitated. Eat before hunger maxes; rest sheds fatigue (floor 20); only sleep clears fully — and do NOT sleep at high fatigue.
 
 YOUR JOB: play ONE run as your persona from creation until: you DESCEND past floor 5, you DIE, you soft-lock (no legal recovery), or you hit ~${turnBudget} gameplay commands after spawn (a fixed budget — circling = a valid 'stuck' outcome). Then STOP and report. Batch obvious sequences; don't narrate. Note WHAT KILLED YOU. Your final message is consumed as data.`
 
@@ -72,7 +73,9 @@ const personas = {
   speedrunner: 'SPEEDRUNNER: dwarf barbarian (highest roll to STR, next to CON), rush. Each floor: LOOK, head straight for the >, fight only blockers, no looting/resting unless forced. Eat only on a starvation HP tick.',
   cautious: 'CAUTIOUS SURVIVOR: dwarf barbarian, play safe. Rest when exhaustion appears, eat before hunger maxes, grab bandages/rations, fight from chokepoints, clear each floor before descending. Health over speed.',
   hoarder: 'HOARDER: elf barbarian, loot EVERYTHING on every floor before taking the stairs. Fight what you must. Tests whether greed + the clock kills.',
-  exploiter: 'EXPLOIT-HUNTER: any build; try to BREAK the game. Probe: (a) attack-spam on floors 1-3 — any counters? (b) step away mid-combat + end turn — does the monster follow, does combat ever end? (c) push exhaustion high — can you recover at level 5? (d) drop equipped gear — slot cleared? Report which exploits work. Death is fine.',
+  exploiter: 'EXPLOIT-HUNTER: any build; try to BREAK the game. Probe: (a) attack-spam on floors 1-3 — any counters? (b) step away mid-combat + end turn — does the monster follow, does combat ever end? (c) push exhaustion high — can you recover at level 5? (d) drop equipped gear — slot cleared? (e) NEW: can a rogue backstab every fight for free, or intimidate to trivialize combat? Report which exploits work. Death is fine.',
+  fighter: 'FIGHTER (v1.8 class): dwarf or human fighter (STR then CON), disciplined tank. Wield the best armour + a shield (fighter-only), use guard at chokepoints and second wind when hurt. Clear floors methodically. Tests the durability build.',
+  rogue: 'ROGUE (the new class — TEST IT HARD): elf rogue (DEX highest, INT next), finesse skirmisher. Wield a LIGHT weapon (short sword/dagger), NEVER a heavy one. Use sneak to go hidden then backstab for the alpha strike; disarm WIS-spotted traps with INT; pick locked doors; intimidate wounded monsters so they flee. Reach as deep as you can. In notes, judge whether the rogue feels OVERPOWERED, underpowered, or balanced vs the barbarian, and why.',
 }
 
 phase('Playtest')
