@@ -2,6 +2,30 @@ const std = @import("std");
 const types = @import("types.zig");
 const session = @import("session.zig");
 const world = @import("world.zig");
+const entity = @import("entity.zig");
+
+/// Ability abbreviation used for TO-HIT. Class-routed seam for Phase 0 of the
+/// character rework (see docs/CHARACTER_REWORK.md / PR #58). All current classes
+/// and monsters resolve to STR; a future `"rogue" => "DEX"` branch is a one-liner.
+pub fn attackAbbr(ent: *const entity.Entity) []const u8 {
+    return attackStatAbbr(ent.char.class.name);
+}
+
+/// Ability abbreviation used for DAMAGE modifier. Same routing as attackAbbr
+/// today (both STR); kept separate so future phases can diverge if needed.
+pub fn damageAbbr(ent: *const entity.Entity) []const u8 {
+    return attackStatAbbr(ent.char.class.name);
+}
+
+fn attackStatAbbr(class_name: []const u8) []const u8 {
+    // Explicit cases document the current roster; default covers monsters and
+    // any future class that stays STR-based until a dedicated branch is added.
+    if (std.mem.eql(u8, class_name, "barbarian")) return "STR";
+    if (std.mem.eql(u8, class_name, "fighter")) return "STR";
+    if (std.mem.eql(u8, class_name, "bard")) return "STR";
+    // Future: if (std.mem.eql(u8, class_name, "rogue")) return "DEX";
+    return "STR";
+}
 
 pub fn assignStatPool(
     attributes: *std.ArrayList(types.Attribute),
@@ -132,6 +156,30 @@ test "abilityModifier floors toward negative infinity" {
     try std.testing.expectEqual(@as(i32, -1), abilityModifier(9));
     try std.testing.expectEqual(@as(i32, -2), abilityModifier(7));
     try std.testing.expectEqual(@as(i32, 2), abilityModifier(14));
+}
+
+test "attackAbbr and damageAbbr return STR for current classes and monsters" {
+    const allocator = std.testing.allocator;
+    const classes = [_][]const u8{ "barbarian", "fighter", "bard", "monster" };
+    for (classes) |class_name| {
+        var attrs = try types.defaultAttributes(allocator);
+        defer attrs.deinit(allocator);
+        var char = types.Character{
+            .name = "t",
+            .attributes = attrs,
+            .race = .{ .name = "human", .speed = 30, .attr_bonuses = .empty },
+            .class = .{ .name = class_name, .hit_die = 8 },
+        };
+        const ent = entity.Entity{
+            .id = 0,
+            .name = undefined,
+            .loc = .{ .x = 0, .y = 0 },
+            .char = &char,
+            .conditions = types.ConditionSet.initEmpty(),
+        };
+        try std.testing.expectEqualStrings("STR", attackAbbr(&ent));
+        try std.testing.expectEqualStrings("STR", damageAbbr(&ent));
+    }
 }
 
 test "maxHpLevel1 with low con uses floor modifier" {

@@ -86,7 +86,7 @@ pub fn attackRoll(w: *world.World, attacker: *const entity.Entity) u8 {
 }
 
 pub fn attackModifier(attacker: *const entity.Entity, target: *const entity.Entity) i32 {
-    var mod = character.abilityModifier(character.statByAbbr(attacker.char, "STR"));
+    var mod = character.abilityModifier(character.statByAbbr(attacker.char, character.attackAbbr(attacker)));
     mod += conditions.attackAdvantageVs(target);
     // Danger-tier attack bonus (0 for players and floor 1â€“3 monsters).
     mod += @as(i32, @intCast(attacker.danger_tier));
@@ -100,7 +100,7 @@ fn weaponDamageBonus(attacker: *const entity.Entity) i32 {
 
 fn rollDamage(w: *world.World, attacker: *const entity.Entity) i32 {
     var buf: [1]u8 = undefined;
-    var mod = character.abilityModifier(character.statByAbbr(attacker.char, "STR"));
+    var mod = character.abilityModifier(character.statByAbbr(attacker.char, character.damageAbbr(attacker)));
     mod += @as(i32, @intCast(attacker.danger_tier));
     mod += weaponDamageBonus(attacker);
     const die = inventory.State.weaponDamageDie(&attacker.inventory, attacker);
