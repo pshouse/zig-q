@@ -12,6 +12,7 @@ const conditions = @import("conditions.zig");
 const survival = @import("survival.zig");
 const world_objects = @import("world_objects.zig");
 const entity = @import("entity.zig");
+const doors = @import("doors.zig");
 
 pub const Step = union(enum) {
     roll_stats,
@@ -35,6 +36,10 @@ pub const Step = union(enum) {
     command: []const u8,
     render_map: struct { x: u64, y: u64, radius: u8 },
     set_tile: struct { x: u64, y: u64, tile: terrain.Tile },
+    /// Harness-only: set door state at a tile (for `pick` / locked-door tests).
+    set_door: struct { x: u64, y: u64, state: doors.State },
+    /// Harness-only: mark a trap at (x,y) as WIS-spotted (disarm prerequisite).
+    mark_trap_spotted: struct { x: u64, y: u64 },
     apply_condition: struct { entity: []const u8, condition: types.Condition },
     remove_condition: struct { entity: []const u8, condition: types.Condition },
     set_exhaustion: struct { entity: []const u8, level: u3 },
@@ -1199,6 +1204,89 @@ pub const human_create_scenario = Scenario{
     },
 };
 
+/// Phase 3: INT skills — spot→disarm trap; pick locked door; failed disarm triggers.
+pub const disarm_pick_scenario = Scenario{
+    .name = "disarm_pick",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 4 }, // human (+2 INT)
+        .{ .choose_class = 3 }, // rogue (−2 skill DC)
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .set_attribute = .{ .entity = "entity_0", .abbr = "INT", .value = 30 } }, // always pass DC
+        // Success path: spotted trap → disarm removes it.
+        .{ .add_floor_object = .{ .kind = .trap, .x = 50, .y = 49, .label = "poison_trap" } },
+        .{ .mark_trap_spotted = .{ .x = 50, .y = 49 } },
+        .{ .command = "disarm" },
+        .list_floor_objects,
+        // Pick locked door (south = +x in this engine).
+        .{ .set_tile = .{ .x = 50, .y = 49, .tile = .door } },
+        .{ .set_door = .{ .x = 50, .y = 49, .state = .locked } },
+        .{ .command = "pick south" },
+        // Fail path: low INT, spotted trap → spring.
+        .{ .set_attribute = .{ .entity = "entity_0", .abbr = "INT", .value = 1 } },
+        .{ .add_floor_object = .{ .kind = .trap, .x = 48, .y = 49, .label = "poison_trap" } },
+        .{ .mark_trap_spotted = .{ .x = 48, .y = 49 } },
+        .{ .command = "disarm" },
+        .{ .command = "conditions" },
+        .{ .command = "exit" },
+    },
+};
+
+/// Phase 3: CHA intimidate → frightened monster flees (does not attack).
+pub const intimidate_flee_scenario = Scenario{
+    .name = "intimidate_flee",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 },
+        .{ .choose_class = 1 },
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .set_attribute = .{ .entity = "entity_0", .abbr = "CHA", .value = 30 } }, // always break morale
+        .{ .spawn_monster = .{ .kind = .goblin, .name = "goblin_0", .x = 50, .y = 49 } },
+        .{ .set_hp = .{ .entity = "goblin_0", .current = 50 } }, // survive the opening swing
+        .{ .command = "attack goblin_0" },
+        .{ .set_hp = .{ .entity = "goblin_0", .current = 1 } }, // wounded → low morale DC
+        .{ .command = "intimidate goblin_0" },
+        .{ .command = "look" },
+        .{ .command = "exit" },
+    },
+};
+
+/// Phase 3: CON poison-resist — high CON expires DoT sooner than low CON.
+pub const poison_resist_scenario = Scenario{
+    .name = "poison_resist",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 }, // dwarf
+        .{ .choose_class = 2 }, // fighter
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        // High CON: duration 10 - 4 = 6 ticks. Raise max HP so DoT doesn't kill mid-scenario.
+        .{ .set_attribute = .{ .entity = "entity_0", .abbr = "CON", .value = 18 } },
+        .{ .set_hp = .{ .entity = "entity_0", .current = 20 } },
+        .{ .apply_condition = .{ .entity = "entity_0", .condition = .poisoned } },
+        .{ .tick = 6 },
+        .{ .command = "conditions" }, // poison cleared
+        // Low CON: duration 10 - (-1) = 11; six ticks leave it active.
+        .{ .set_attribute = .{ .entity = "entity_0", .abbr = "CON", .value = 8 } },
+        .{ .set_hp = .{ .entity = "entity_0", .current = 20 } },
+        .{ .apply_condition = .{ .entity = "entity_0", .condition = .poisoned } },
+        .{ .tick = 6 },
+        .{ .command = "conditions" }, // still poisoned
+        .{ .command = "exit" },
+    },
+};
+
 pub const trap_trigger_scenario = Scenario{
     .name = "trap_trigger",
     .seed = 42,
@@ -1568,14 +1656,33 @@ pub const Harness = struct {
                 try self.w.terrain.set(loc.Loc.init(cfg.x, cfg.y), cfg.tile);
                 try writer.print("step set_tile ({},{}) {s}\n", .{ cfg.x, cfg.y, @tagName(cfg.tile) });
             },
+            .set_door => |cfg| {
+                try self.w.doors.set(loc.Loc.init(cfg.x, cfg.y), cfg.state);
+                try writer.print("step set_door ({},{}) {s}\n", .{ cfg.x, cfg.y, @tagName(cfg.state) });
+            },
+            .mark_trap_spotted => |cfg| {
+                const pos = loc.Loc.init(cfg.x, cfg.y);
+                const obj = self.w.floor_objects.at(pos) orelse return error.NoFloorObject;
+                if (obj.kind != .trap) return error.NotATrap;
+                obj.spotted = true;
+                try writer.print("step mark_trap_spotted ({},{})\n", .{ cfg.x, cfg.y });
+            },
             .apply_condition => |cfg| {
                 const ent = findEntityByName(&self.w, cfg.entity) orelse return error.EntityNotFound;
-                conditions.apply(ent, cfg.condition);
+                if (cfg.condition == .poisoned) {
+                    survival.applyPoison(ent);
+                } else {
+                    conditions.apply(ent, cfg.condition);
+                }
                 try writer.print("step apply_condition {s} {s}\n", .{ cfg.entity, @tagName(cfg.condition) });
             },
             .remove_condition => |cfg| {
                 const ent = findEntityByName(&self.w, cfg.entity) orelse return error.EntityNotFound;
-                conditions.remove(ent, cfg.condition);
+                if (cfg.condition == .poisoned) {
+                    survival.clearPoison(ent);
+                } else {
+                    conditions.remove(ent, cfg.condition);
+                }
                 try writer.print("step remove_condition {s} {s}\n", .{ cfg.entity, @tagName(cfg.condition) });
             },
             .set_exhaustion => |cfg| {
@@ -1729,6 +1836,7 @@ pub const registered_scenario_names = [_][]const u8{
     "rogue_finesse",     "rogue_leather",     "reckless",          "guard",
     "discipline_second_wind",
     "elf_speed_deepfloor", "human_create",
+    "disarm_pick",       "intimidate_flee",   "poison_resist",
 };
 
 pub fn scenarioByName(name: []const u8, seed: u64) ?Scenario {
@@ -1846,6 +1954,12 @@ pub fn scenarioByName(name: []const u8, seed: u64) ?Scenario {
         return Scenario{ .name = "elf_speed_deepfloor", .seed = seed, .steps = elf_speed_deepfloor_scenario.steps };
     if (std.mem.eql(u8, name, "human_create"))
         return Scenario{ .name = "human_create", .seed = seed, .steps = human_create_scenario.steps };
+    if (std.mem.eql(u8, name, "disarm_pick"))
+        return Scenario{ .name = "disarm_pick", .seed = seed, .steps = disarm_pick_scenario.steps };
+    if (std.mem.eql(u8, name, "intimidate_flee"))
+        return Scenario{ .name = "intimidate_flee", .seed = seed, .steps = intimidate_flee_scenario.steps };
+    if (std.mem.eql(u8, name, "poison_resist"))
+        return Scenario{ .name = "poison_resist", .seed = seed, .steps = poison_resist_scenario.steps };
     return null;
 }
 
@@ -2549,6 +2663,36 @@ test "dst survival_economy scenario is byte-identical across runs" {
     try std.testing.expect(std.mem.indexOf(u8, out, "economy_report floor=4 plan_rations=1") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "economy_report floor=5 plan_rations=1") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "ration_ticks=50") != null);
+}
+
+test "dst disarm_pick scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "disarm_pick", 65536);
+    defer allocator.free(out);
+    try std.testing.expect(std.mem.indexOf(u8, out, "disarmed trap") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "picked lock") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "disarm failed; trap triggered") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "poisoned") != null);
+}
+
+test "dst intimidate_flee scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "intimidate_flee", 65536);
+    defer allocator.free(out);
+    try std.testing.expect(std.mem.indexOf(u8, out, "is frightened") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "flees to") != null);
+    // Frightened: flee, never attack on that turn.
+    const fright = std.mem.indexOf(u8, out, "is frightened").?;
+    try std.testing.expect(std.mem.indexOf(u8, out[fright..], "attack goblin_0->entity_0") == null);
+}
+
+test "dst poison_resist scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "poison_resist", 65536);
+    defer allocator.free(out);
+    // After high-CON duration expires: conditions: none. After low-CON partial: still poisoned.
+    try std.testing.expect(std.mem.indexOf(u8, out, "conditions: none") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "conditions: poisoned") != null);
 }
 
 test "provisioned player on a direct stairs route reaches floor 5 alive on all tested seeds" {

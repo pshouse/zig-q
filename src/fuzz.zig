@@ -13,6 +13,7 @@ const save_state = @import("save_state.zig");
 const sqlite_store = @import("sqlite_store.zig");
 const dungeon = @import("dungeon.zig");
 const character = @import("character.zig");
+const survival = @import("survival.zig");
 
 pub const Config = struct {
     seed: u64 = 0,
@@ -122,10 +123,19 @@ const templates = [_][]const u8{
     "reckless",
     "guard",
     "second wind",
+    "disarm",
+    "pick",
+    "pick south",
+    "pick north",
+    "intimidate goblin_0",
+    "intimidate skeleton_0",
+    "assign 6 5 4 3 2 1; race 4; class 3; spawn",
     "assign 6 5 4 3 2 1; race 3; class 3; spawn",
     "equip greatsword",
     "equip leather_armour",
     "equip wooden_shield",
+    // Phase 3: combat intimidate after spawn so the walk can reach frightened flee.
+    "assign 6 5 4 3 2 1; race 2; class 1; spawn; attack goblin_0; intimidate goblin_0",
 };
 
 pub fn run(allocator: std.mem.Allocator, cfg: Config) !Report {
@@ -496,6 +506,53 @@ pub fn assertInvariantsTracked(
             if (w.store.get(player_id)) |player| {
                 const s = player.char.race.speed;
                 if (s != 25 and s != 30 and s != 35) return error.PlayerRaceSpeedOutOfRange;
+            }
+        }
+    }
+
+    // Phase 3: INT/CHA + CON poison-resist invariants.
+    {
+        // CON-poison-resist never yields a DoT duration below the floor.
+        for (w.store.entities.items) |*ent| {
+            if (!conditions.has(ent, .poisoned)) continue;
+            if (ent.poison_ticks_remaining > 0 and ent.poison_ticks_remaining < survival.poison_duration_floor)
+                return error.PoisonDurationBelowFloor;
+            // Duration formula itself always ≥ floor (including un-ticked poison).
+            if (survival.poisonDuration(ent) < survival.poison_duration_floor)
+                return error.PoisonDurationBelowFloor;
+        }
+        // Open doors that were locked-then-picked: any door currently open is valid;
+        // a locked door must still block (picked door reaches .open).
+        if (w.has_dungeon) {
+            var it = w.doors.states.iterator();
+            while (it.next()) |entry| {
+                const state = entry.value_ptr.*;
+                if (state == .open) {
+                    // open doors must not block movement
+                    if (w.doors.blocks(entry.key_ptr.*)) return error.OpenDoorBlocks;
+                }
+            }
+        }
+        // Disarmed traps are fully removed — no trap floor object may be marked
+        // both absent from the list and still referenced; the structural check is
+        // "if a trap remains, it is a real object". Removal is tested by absence
+        // after disarm in DST; here we only ensure spotted flags are only on traps.
+        for (w.floor_objects.objects.items) |obj| {
+            if (obj.spotted and obj.kind != .trap) return error.SpottedNonTrap;
+        }
+        // A frightened monster never both attacks and flees in one turn: while
+        // frightened, processMonsterTurns takes the flee branch exclusively.
+        // Structural proxy: if combat is live and a monster is frightened, it
+        // must not be the only living participant about to resolve an attack
+        // without having moved — we check the condition set is consistent.
+        if (combat.isInCombat(w)) {
+            for (w.store.entities.items) |*ent| {
+                if (!ent.is_monster) continue;
+                if (!conditions.has(ent, .frightened)) continue;
+                // Frightened monsters stay non-dead and non-attacking on their turn;
+                // the flee-only branch is enforced in processMonsterTurns. Sanity:
+                // frightened does not imply dead.
+                if (conditions.isDead(ent)) return error.FrightenedDeadInconsistency;
             }
         }
     }

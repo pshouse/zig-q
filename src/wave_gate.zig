@@ -125,6 +125,8 @@ pub const plans = [_]WavePlan{
             "rogue_finesse", "rogue_leather", "reckless", "guard", "discipline_second_wind",
             // Phase 2 races + speed (additive at 1.7.1).
             "elf_speed_deepfloor", "human_create",
+            // Phase 3 INT/CHA commands + CON poison-resist (additive at 1.7.1).
+            "disarm_pick", "intimidate_flee", "poison_resist",
         },
         .all_scenarios = &.{
             "bootstrap",         "explore",         "create",            "crawl_start",      "playthrough",       "brawl",         "save_roundtrip",
@@ -137,6 +139,7 @@ pub const plans = [_]WavePlan{
             "exhausted_sleep",   "bleed_out",         "glyph_look",       "collapse_sleep",  "sleep_high_fatigue",
             "rogue_finesse",     "rogue_leather",     "reckless",          "guard",            "discipline_second_wind",
             "elf_speed_deepfloor", "human_create",
+            "disarm_pick",       "intimidate_flee",   "poison_resist",
         },
         .run_migration = false,
     },

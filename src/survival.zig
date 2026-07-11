@@ -4,6 +4,32 @@ const entity = @import("entity.zig");
 const world = @import("world.zig");
 const conditions = @import("conditions.zig");
 const items = @import("items.zig");
+const character = @import("character.zig");
+
+/// Base poison DoT duration in clock ticks before CON resist is applied.
+pub const poison_base_duration: u16 = 10;
+/// Floor: CON resist never shortens poison below this many ticks.
+pub const poison_duration_floor: u16 = 1;
+
+/// Deterministic poison duration: `max(floor, base − CON mod)`. No RNG draw.
+/// High CON shortens the DoT; low CON lengthens it (mod can be negative).
+pub fn poisonDuration(ent: *const entity.Entity) u16 {
+    const con_mod = character.abilityModifier(character.statByAbbr(ent.char, "CON"));
+    const adjusted: i32 = @as(i32, @intCast(poison_base_duration)) - con_mod;
+    return @intCast(@max(@as(i32, @intCast(poison_duration_floor)), adjusted));
+}
+
+/// Apply the poisoned condition and set CON-scaled duration ticks.
+pub fn applyPoison(ent: *entity.Entity) void {
+    conditions.apply(ent, .poisoned);
+    ent.poison_ticks_remaining = poisonDuration(ent);
+}
+
+/// Clear poison condition and remaining DoT ticks (antidote / expiry).
+pub fn clearPoison(ent: *entity.Entity) void {
+    conditions.remove(ent, .poisoned);
+    ent.poison_ticks_remaining = 0;
+}
 
 /// Peak hunger (starving). Zero means sated.
 pub const hunger_max: u16 = 100;
@@ -243,6 +269,22 @@ fn applyHpDot(w: *world.World, ent: *entity.Entity, amount: u32) void {
     if (ent.current_hp == 0) resolveDeath(w, ent);
 }
 
+/// One poison DoT tick: damage, then decrement duration; clear when spent.
+/// Lazy-inits remaining from CON when condition is present but ticks are 0
+/// (save/load restores the condition bit but not the transient counter).
+fn tickPoisonDot(w: *world.World, ent: *entity.Entity) void {
+    if (!conditions.has(ent, .poisoned)) return;
+    if (ent.poison_ticks_remaining == 0) {
+        ent.poison_ticks_remaining = poisonDuration(ent);
+    }
+    applyHpDot(w, ent, 1);
+    if (conditions.isDead(ent)) return;
+    ent.poison_ticks_remaining -|= 1;
+    if (ent.poison_ticks_remaining == 0) {
+        clearPoison(ent);
+    }
+}
+
 pub fn onTick(w: *world.World, ent: *entity.Entity) void {
     if (conditions.isDead(ent)) return;
 
@@ -252,7 +294,7 @@ pub fn onTick(w: *world.World, ent: *entity.Entity) void {
     // combat kill path drops corpses) and untargetable. Poison DoT still
     // applies, so a trap-poisoned monster bleeds out as before.
     if (ent.is_monster) {
-        if (conditions.has(ent, .poisoned)) applyHpDot(w, ent, 1);
+        tickPoisonDot(w, ent);
         return;
     }
 
@@ -265,7 +307,7 @@ pub fn onTick(w: *world.World, ent: *entity.Entity) void {
 
     _ = syncStarving(ent);
 
-    if (conditions.has(ent, .poisoned)) applyHpDot(w, ent, 1);
+    tickPoisonDot(w, ent);
     if (conditions.has(ent, .starving)) {
         // v1.6 balance: out of combat, starving drains 1 HP every other clock
         // tick (even ticks), doubling the window to reach food or stairs on
@@ -690,4 +732,42 @@ test "ticks increase hunger" {
     w.combat = null;
     onTick(&w, &ent);
     try std.testing.expectEqual(@as(u16, 1), ent.hunger);
+}
+
+test "poisonDuration shortens with high CON and floors at 1" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    const id = try w.spawnTestPlayer(@import("loc.zig").Loc.init(49, 49));
+    const ent = w.store.get(id).?;
+    for (ent.char.attributes.items) |*attr| {
+        if (std.mem.eql(u8, attr.abbr, "CON")) attr.stat = 18; // +4
+    }
+    try std.testing.expectEqual(@as(u16, 6), poisonDuration(ent)); // 10 - 4
+    for (ent.char.attributes.items) |*attr| {
+        if (std.mem.eql(u8, attr.abbr, "CON")) attr.stat = 30; // +10 → floor
+    }
+    try std.testing.expectEqual(poison_duration_floor, poisonDuration(ent));
+    for (ent.char.attributes.items) |*attr| {
+        if (std.mem.eql(u8, attr.abbr, "CON")) attr.stat = 8; // -1 → lengthen
+    }
+    try std.testing.expectEqual(@as(u16, 11), poisonDuration(ent));
+}
+
+test "poison DoT expires after CON-scaled duration" {
+    const allocator = std.testing.allocator;
+    var w = try world.World.init(allocator, 42);
+    defer w.deinit();
+    const id = try w.spawnTestPlayer(@import("loc.zig").Loc.init(49, 49));
+    const ent = w.store.get(id).?;
+    for (ent.char.attributes.items) |*attr| {
+        if (std.mem.eql(u8, attr.abbr, "CON")) attr.stat = 18; // duration 6
+    }
+    applyPoison(ent);
+    try std.testing.expectEqual(@as(u16, 6), ent.poison_ticks_remaining);
+    var i: u16 = 0;
+    while (i < 6) : (i += 1) w.tick();
+    try std.testing.expect(!conditions.has(ent, .poisoned));
+    try std.testing.expectEqual(@as(u16, 0), ent.poison_ticks_remaining);
+    try std.testing.expectEqual(ent.max_hp - 6, ent.current_hp);
 }

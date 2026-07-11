@@ -78,6 +78,14 @@ pub const Command = union(enum) {
     sleep,
     open_dir: movement.Direction,
     close_dir: movement.Direction,
+    /// INT skill: disarm an adjacent WIS-spotted trap.
+    disarm,
+    /// INT skill: pick an adjacent locked door (optional direction).
+    pick,
+    pick_dir: movement.Direction,
+    /// CHA morale: intimidate a combat target into `frightened`.
+    intimidate_target: []const u8,
+    intimidate_usage,
     use_item: []const u8,
     wound,
     unknown: []const u8,
@@ -209,6 +217,19 @@ pub fn parseLine(line: []const u8) Command {
     if (std.mem.startsWith(u8, trimmed, "close ")) {
         const arg = std.mem.trim(u8, trimmed[6..], " \t");
         if (movement.Direction.parse(arg)) |dir| return .{ .close_dir = dir };
+    }
+    if (std.mem.eql(u8, trimmed, "disarm")) return .disarm;
+    if (std.mem.eql(u8, trimmed, "pick")) return .pick;
+    if (std.mem.startsWith(u8, trimmed, "pick ")) {
+        const arg = std.mem.trim(u8, trimmed[5..], " \t");
+        if (movement.Direction.parse(arg)) |dir| return .{ .pick_dir = dir };
+        return .pick;
+    }
+    if (std.mem.eql(u8, trimmed, "intimidate")) return .intimidate_usage;
+    if (std.mem.startsWith(u8, trimmed, "intimidate ")) {
+        const arg = std.mem.trim(u8, trimmed[11..], " \t");
+        if (arg.len > 0) return .{ .intimidate_target = arg };
+        return .intimidate_usage;
     }
     if (std.mem.startsWith(u8, trimmed, "use ")) {
         const arg = std.mem.trim(u8, trimmed[4..], " \t");
@@ -903,7 +924,7 @@ fn cmdUse(ctx: *Context, name: []const u8, writer: anytype) !Result {
             return .continue_repl;
         }
         _ = ent.inventory.remove(id, 1);
-        conditions.remove(ent, .poisoned);
+        survival.clearPoison(ent);
         try writer.print("used antidote; poison cleared\n", .{});
         try tickPlayerAction(ctx, 1, writer);
         try finishExploreAction(ctx, writer);
@@ -1172,6 +1193,108 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
             }
             try tickPlayerAction(ctx, 1, writer);
             try finishExploreAction(ctx, writer);
+        },
+        .disarm => {
+            if (ctx.w.store.get(ctx.player_id) == null) {
+                try writer.print("no player spawned\n", .{});
+                return .continue_repl;
+            }
+            if (combat.isInCombat(ctx.w)) {
+                try writer.print("cannot disarm during combat\n", .{});
+                return .continue_repl;
+            }
+            if (explore.tryDisarm(ctx.w, ctx.player_id)) |outcome| {
+                switch (outcome) {
+                    .success => try writer.print("disarmed trap\n", .{}),
+                    .failed => try writer.print("disarm failed; trap triggered: poisoned\n", .{}),
+                }
+            } else |err| switch (err) {
+                error.NoSpottedTrap => try writer.print("no spotted trap adjacent (look first)\n", .{}),
+                else => |e| return e,
+            }
+            try tickPlayerAction(ctx, 1, writer);
+            try finishExploreAction(ctx, writer);
+        },
+        .pick => {
+            if (ctx.w.store.get(ctx.player_id) == null) {
+                try writer.print("no player spawned\n", .{});
+                return .continue_repl;
+            }
+            if (combat.isInCombat(ctx.w)) {
+                try writer.print("cannot pick locks during combat\n", .{});
+                return .continue_repl;
+            }
+            if (explore.tryPickLock(ctx.w, ctx.player_id, null)) |outcome| {
+                switch (outcome) {
+                    .success => try writer.print("picked lock; door open\n", .{}),
+                    .failed => try writer.print("pick failed\n", .{}),
+                }
+            } else |err| switch (err) {
+                error.NoLockedDoor => try writer.print("no locked door adjacent\n", .{}),
+                error.NotADoor => try writer.print("no door there\n", .{}),
+                error.AlreadyOpen => try writer.print("door already open\n", .{}),
+                error.NotLocked => try writer.print("door is not locked\n", .{}),
+                else => |e| return e,
+            }
+            try tickPlayerAction(ctx, 1, writer);
+            try finishExploreAction(ctx, writer);
+        },
+        .pick_dir => |dir| {
+            if (ctx.w.store.get(ctx.player_id) == null) {
+                try writer.print("no player spawned\n", .{});
+                return .continue_repl;
+            }
+            if (combat.isInCombat(ctx.w)) {
+                try writer.print("cannot pick locks during combat\n", .{});
+                return .continue_repl;
+            }
+            if (explore.tryPickLock(ctx.w, ctx.player_id, dir)) |outcome| {
+                switch (outcome) {
+                    .success => try writer.print("picked lock to the {s}; door open\n", .{movement.Direction.token(dir)}),
+                    .failed => try writer.print("pick failed\n", .{}),
+                }
+            } else |err| switch (err) {
+                error.NoLockedDoor => try writer.print("no locked door adjacent\n", .{}),
+                error.NotADoor => try writer.print("no door there\n", .{}),
+                error.AlreadyOpen => try writer.print("door already open\n", .{}),
+                error.NotLocked => try writer.print("door is not locked\n", .{}),
+                error.Blocked => try writer.print("no door there\n", .{}),
+                else => |e| return e,
+            }
+            try tickPlayerAction(ctx, 1, writer);
+            try finishExploreAction(ctx, writer);
+        },
+        .intimidate_usage => {
+            try writer.print("usage: intimidate <target>\n", .{});
+        },
+        .intimidate_target => |target| {
+            if (!isSpawned(ctx)) {
+                try writer.print("no player spawned\n", .{});
+                return .continue_repl;
+            }
+            combat.intimidate(ctx.w, ctx.player_id, target, writer) catch |err| switch (err) {
+                error.NotInCombat => {
+                    try writer.print("not in combat\n", .{});
+                    return .continue_repl;
+                },
+                error.NotYourTurn => {
+                    try writer.print("not your turn\n", .{});
+                    return .continue_repl;
+                },
+                error.NoTarget => {
+                    try writer.print("no valid intimidate target: {s}\n", .{target});
+                    return .continue_repl;
+                },
+                error.NotAdjacent => {
+                    try writer.print("target not adjacent\n", .{});
+                    return .continue_repl;
+                },
+                error.CannotAct => {
+                    try writer.print("cannot intimidate while incapacitated\n", .{});
+                    return .continue_repl;
+                },
+                else => |e| return e,
+            };
         },
         .use_item => |name| return cmdUse(ctx, name, writer),
         .wound => return cmdWound(ctx, writer),
@@ -2016,7 +2139,7 @@ test "repl help via execute lists descend and gear" {
     defer w.deinit();
     var draft: session.CreationDraft = .{};
     var ctx = Context{ .allocator = allocator, .w = &w, .draft = &draft };
-    var buf: [768]u8 = undefined;
+    var buf: [1024]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
     _ = try execute(&ctx, .help, fbs.writer());
     const out = fbs.getWritten();
