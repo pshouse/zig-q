@@ -2,7 +2,7 @@
 
 A Zig prototype for deterministic **dungeon crawl** simulation: character creation, dungeon tiles, level-1 combat sheet (HP/AC), turn-based combat, and SQLite save/load.
 
-**Requires Zig 0.15+** (tested on 0.15.2). **Version:** `1.7.1` — Fair Danger patch: sleep no longer accrues fatigue mid-loop (fixes #55 tier-6 permadeath).
+**Requires Zig 0.15+** (tested on 0.15.2). **Version:** `1.8.0` — Character rework: class-routed attack (rogue DEX finesse), class specials, races+speed, INT/CHA commands, sneak/backstab.
 
 SQLite is bundled via the amalgamation in `deps/sqlite3/` (no system SQLite install required).
 
@@ -213,6 +213,7 @@ zig build run -- --help
 
 | Version | Theme |
 |---------|--------|
+| **1.8.0** | Character rework ("Three Axes"): rogue DEX finesse + leather; barbarian reckless / fighter guard+discipline+second wind; human +2 INT + elf speed on deep floors; INT `disarm`/`pick`, CHA `intimidate`→frightened flee; CON poison resist; sneak/hidden + rogue backstab. `reference_crawl` stays pinned at 1.1.0 |
 | **1.7.1** | Sleep does not accrue fatigue while asleep (#55): starting sleep at fatigue ≥71 no longer climbs into tier-6 collapse / permadeath; DST `sleep_high_fatigue` locks the boundary |
 | **1.7.0** | Fair Danger: exhaustion-5 sleep recovery, in-combat step-toward + lost-contact, loot/trap placement fairness, anti-recurrence gates, chase memory, load slot validation. Survival retune (#40) open pending fleet A/B |
 | **1.6.1** | Exhaustion tier 4 "HP max halved" is a recovery cap, not a drain: crossing fatigue 70 (e.g. mid-`sleep`) no longer permanently halves current HP; instead bandage healing stops at half max while the tier is active |
