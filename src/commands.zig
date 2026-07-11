@@ -1229,7 +1229,7 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
         .race => |pick| {
             if (try rejectCreationAfterSpawn(ctx, writer, "race")) return .continue_repl;
             session.draftChooseRace(ctx.draft, pick) catch {
-                try writer.print("invalid race pick (1-3)\n", .{});
+                try writer.print("invalid race pick (1-4)\n", .{});
                 return .continue_repl;
             };
             try writer.print("race chosen\n", .{});
@@ -1237,8 +1237,8 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
         .race_usage => {
             if (try rejectCreationAfterSpawn(ctx, writer, "race")) return .continue_repl;
             try writer.print(
-                \\usage: race <1-3>
-                \\       1=dragonborn (+2 STR)  2=dwarf (+2 CON)  3=elf (+2 DEX)
+                \\usage: race <1-4>
+                \\       1=dragonborn (+2 STR)  2=dwarf (+2 CON)  3=elf (+2 DEX)  4=human (+2 INT)
                 \\
             , .{});
         },

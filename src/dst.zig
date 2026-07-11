@@ -57,6 +57,8 @@ pub const Step = union(enum) {
     report_danger: []const u8,
     /// Food-vs-ticks audit of a generated floor (v1.6 survival-economy tuning).
     economy_report: u32,
+    /// Harness-only: set `floor_index` without regenerating terrain (Phase 2 speed tests).
+    set_floor_index: u32,
 };
 
 fn findEntityByName(w: *world.World, name: []const u8) ?*entity.Entity {
@@ -1151,6 +1153,52 @@ pub const discipline_second_wind_scenario = Scenario{
     },
 };
 
+/// Phase 2: elf (speed 35) on floor ≥ 4 accrues fewer move-ticks than a slow race.
+/// Uses floor-1 terrain + set_floor_index so walkable paths stay deterministic.
+/// Fatigue 25 → exhaustion tier 1: neutral would pay 2 ticks/move; elf suppresses
+/// to 1. Four moves → dst_end ticks=4 (would be 8 for human, 12 for dwarf).
+/// `stats` still prints movement: 30 (race.speed is never written to ent.movement).
+pub const elf_speed_deepfloor_scenario = Scenario{
+    .name = "elf_speed_deepfloor",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 3 }, // elf (+2 DEX, speed 35)
+        .{ .choose_class = 3 }, // rogue
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .set_floor_index = 4 },
+        .{ .set_fatigue = .{ .entity = "entity_0", .value = 25 } }, // exhaustion tier 1
+        .time,
+        .{ .command = "move east" },
+        .{ .command = "move west" },
+        .{ .command = "move east" },
+        .{ .command = "move west" },
+        .time,
+        .{ .command = "stats" },
+        .{ .command = "exit" },
+    },
+};
+
+/// Phase 2: human is race 4 (+2 INT, speed 30). INT skills land in Phase 3.
+pub const human_create_scenario = Scenario{
+    .name = "human_create",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 4 }, // human (+2 INT)
+        .{ .choose_class = 2 }, // fighter
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .command = "stats" },
+        .{ .command = "exit" },
+    },
+};
+
 pub const trap_trigger_scenario = Scenario{
     .name = "trap_trigger",
     .seed = 42,
@@ -1637,6 +1685,10 @@ pub const Harness = struct {
                     ent.max_hp,
                 });
             },
+            .set_floor_index => |floor_index| {
+                self.w.floor_index = floor_index;
+                try writer.print("step set_floor_index {}\n", .{floor_index});
+            },
             .economy_report => |floor_index| {
                 const econ = try dungeon.auditFloorEconomy(self.allocator, self.w.seed, floor_index);
                 const ration_ticks = @import("items.zig").def(.rations).food_restore;
@@ -1676,6 +1728,7 @@ pub const registered_scenario_names = [_][]const u8{
     "bare_loot_corpse",  "weaker_weapon",     "sleep_interrupt",   "survival_economy",
     "rogue_finesse",     "rogue_leather",     "reckless",          "guard",
     "discipline_second_wind",
+    "elf_speed_deepfloor", "human_create",
 };
 
 pub fn scenarioByName(name: []const u8, seed: u64) ?Scenario {
@@ -1789,6 +1842,10 @@ pub fn scenarioByName(name: []const u8, seed: u64) ?Scenario {
         return Scenario{ .name = "guard", .seed = seed, .steps = guard_scenario.steps };
     if (std.mem.eql(u8, name, "discipline_second_wind"))
         return Scenario{ .name = "discipline_second_wind", .seed = seed, .steps = discipline_second_wind_scenario.steps };
+    if (std.mem.eql(u8, name, "elf_speed_deepfloor"))
+        return Scenario{ .name = "elf_speed_deepfloor", .seed = seed, .steps = elf_speed_deepfloor_scenario.steps };
+    if (std.mem.eql(u8, name, "human_create"))
+        return Scenario{ .name = "human_create", .seed = seed, .steps = human_create_scenario.steps };
     return null;
 }
 

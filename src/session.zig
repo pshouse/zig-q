@@ -70,7 +70,9 @@ pub fn draftAssign(draft: *CreationDraft, picks: [6]usize) !void {
 }
 
 pub fn draftChooseRace(draft: *CreationDraft, pick: usize) !void {
-    if (pick < 1 or pick > 3) return error.InvalidPick;
+    // Races: 1=dragonborn 2=dwarf 3=elf 4=human. Build path indexes via
+    // w.races.items.len so adding races stays consistent with this guard.
+    if (pick < 1 or pick > 4) return error.InvalidPick;
     draft.race_pick = pick;
     draft.has_race = true;
 }

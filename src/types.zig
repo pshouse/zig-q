@@ -92,7 +92,14 @@ pub fn defaultRaces(allocator: std.mem.Allocator) !std.ArrayList(Race) {
 
     var elf_bonuses: std.ArrayList(Attribute) = .empty;
     try elf_bonuses.append(allocator, .{ .name = "dexterity_bonus", .abbr = "DEX", .stat = 2 });
-    try list.append(allocator, .{ .name = "elf", .speed = 30, .attr_bonuses = elf_bonuses });
+    // Phase 2: elf is the fast race (30 → 35). Deep-floor move ticks read race.speed
+    // directly — never copy into ent.movement (keeps reference_crawl movement: 30).
+    try list.append(allocator, .{ .name = "elf", .speed = 35, .attr_bonuses = elf_bonuses });
+
+    // Index 4 (1-based race 4). +2 INT is inert until Phase 3 INT skills land.
+    var hum_bonuses: std.ArrayList(Attribute) = .empty;
+    try hum_bonuses.append(allocator, .{ .name = "intelligence_bonus", .abbr = "INT", .stat = 2 });
+    try list.append(allocator, .{ .name = "human", .speed = 30, .attr_bonuses = hum_bonuses });
 
     return list;
 }
