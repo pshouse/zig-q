@@ -65,6 +65,7 @@ const templates = [_][]const u8{
     "race 1",
     "race 2",
     "race 3",
+    "race 4",
     "race 99",
     "class",
     "class 1",
@@ -474,6 +475,28 @@ pub fn assertInvariantsTracked(
             // Fighter discipline: a resolved damage face is never 1.
             if (std.mem.eql(u8, player.char.class.name, "fighter") and player.last_damage_face == 1)
                 return error.FighterDisciplineFumble;
+        }
+    }
+
+    // Phase 2 races + speed: every catalog race has speed ∈ {25, 30, 35};
+    // human is present and pickable at 1-based index 4; deep-floor speed
+    // adjustment never drives a move below 1 tick (extra is clamped ≥ 0).
+    {
+        var found_human = false;
+        for (w.races.items, 0..) |race, i| {
+            const s = race.speed;
+            if (s != 25 and s != 30 and s != 35) return error.RaceSpeedOutOfRange;
+            if (std.mem.eql(u8, race.name, "human")) {
+                found_human = true;
+                if (i != 3) return error.HumanRaceIndex; // 0-based 3 → race 4
+            }
+        }
+        if (w.races.items.len < 4 or !found_human) return error.HumanRaceMissing;
+        if (player_id != entity.invalid_id) {
+            if (w.store.get(player_id)) |player| {
+                const s = player.char.race.speed;
+                if (s != 25 and s != 30 and s != 35) return error.PlayerRaceSpeedOutOfRange;
+            }
         }
     }
 

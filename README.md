@@ -48,7 +48,7 @@ Use `--record` to save a transcript (default: `transcripts/session-<timestamp>-s
 
 The REPL loads **floor 1** dungeon tiles, rolls six stats on start, then accepts creation commands before spawning a player. After `spawn`, creation commands are disabled.
 
-**Creation commands:** `roll`, `assign <6 picks>`, `race <1-3>`, `class <1-3>`, `spawn`, `stats` (draft preview before spawn)
+**Creation commands:** `roll`, `assign <6 picks>`, `race <1-4>`, `class <1-3>`, `spawn`, `stats` (draft preview before spawn)
 
 **Exploration commands:** `look`, `time`, `move <north|south|east|west>`, `m <dir>`, `wait`, `food`, `rest`, `sleep`, `conditions`, `descend` (on stairs/door tile), `help`, `help gear`, `exit`
 
@@ -58,7 +58,7 @@ The REPL loads **floor 1** dungeon tiles, rolls six stats on start, then accepts
 
 **Persistence commands:** `save [slot]`, `load <slot>` (slots 1–9; default save slot 1; database file `zig-q.sqlite` in the working directory)
 
-Races: 1=dragonborn (+2 STR), 2=dwarf (+2 CON), 3=elf (+2 DEX). Classes: 1=barbarian, 2=fighter, 3=rogue.
+Races: 1=dragonborn (+2 STR), 2=dwarf (+2 CON), 3=elf (+2 DEX), 4=human (+2 INT). Classes: 1=barbarian, 2=fighter, 3=rogue.
 
 **Ability scores:** STR/DEX/CON/WIS drive combat, carry, AC, and perception. **INT and CHA are cosmetic** (rolled, assigned, shown, persisted) until a future mundane use lands — see `docs/INT_CHA_DECISION.md`.
 

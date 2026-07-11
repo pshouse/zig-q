@@ -50,6 +50,13 @@ pub fn step(from: loc.Loc, dir: Direction) ?loc.Loc {
 /// - tier ≥ 3: always an extra clock tick (promised movement −1, for real)
 /// - tiers 1–2: extra tick only on danger floors (floor ≥ 4), so frozen
 ///   floor 1–3 goldens (incl. `reference_crawl`) stay byte-identical
+///
+/// Race speed (Phase 2, floors ≥ 4 only — read `ent.char.race.speed`, never
+/// write `ent.movement` so `stats` still prints movement: 30):
+/// - speed < 30 (slow, dwarf): +1 extra tick per move
+/// - speed > 30 (fast, elf): suppress one deep-floor extra-tick
+/// - speed == 30 (neutral): unchanged
+/// Total move cost is never less than 1 tick.
 pub fn moveEntity(w: *world.World, id: entity.EntityId, dir: Direction) !loc.Loc {
     const ent = w.store.get(id) orelse return error.EntityNotFound;
     const old_loc = ent.loc;
@@ -65,12 +72,31 @@ pub fn moveEntity(w: *world.World, id: entity.EntityId, dir: Direction) !loc.Loc
     w.tile_map.remove(old_loc, id);
     try w.tile_map.place(new_loc, id);
     ent.loc = new_loc;
-    w.tick();
+
+    // Base move always costs 1 tick. Extras are clamped so cost stays ≥ 1.
+    var extra: i32 = 0;
     if (!ent.is_monster) {
         const ex = @import("conditions.zig").exhaustionLevel(ent);
-        const extra = ex >= 3 or (ex >= 1 and w.floor_index >= 4);
-        if (extra) w.tick();
+        if (ex >= 3) {
+            extra += 1;
+        } else if (ex >= 1 and w.floor_index >= 4) {
+            extra += 1;
+        }
+        // Deep-floor race speed: floors ≥ 4 only (floors 1–3 goldens untouched).
+        if (w.floor_index >= 4) {
+            const speed = ent.char.race.speed;
+            if (speed < 30) {
+                extra += 1;
+            } else if (speed > 30) {
+                extra -= 1;
+            }
+        }
     }
+    if (extra < 0) extra = 0;
+
+    w.tick();
+    var i: i32 = 0;
+    while (i < extra) : (i += 1) w.tick();
     return new_loc;
 }
 
@@ -139,6 +165,110 @@ test "moveEntity allows stepping onto skeleton corpse" {
 
     const new_loc = try moveEntity(&w, id, .south);
     try std.testing.expectEqual(loc.Loc.init(50, 49), new_loc);
+}
+
+// Phase 2: race.speed modulates extra ticks only on floors ≥ 4.
+test "deep-floor race speed: slow pays +1, fast suppresses one extra, cost never < 1" {
+    const allocator = std.testing.allocator;
+    const conditions = @import("conditions.zig");
+
+    // Floor 1: slow race still pays only the base tick (golden-safe floors 1–3).
+    {
+        var w = try world.World.init(allocator, 1);
+        defer w.deinit();
+        try w.loadFloor(1);
+        const id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+        w.store.get(id).?.char.race = w.races.items[1]; // dwarf speed 25
+        try std.testing.expectEqual(@as(u8, 25), w.store.get(id).?.char.race.speed);
+        _ = try moveEntity(&w, id, .east);
+        try std.testing.expectEqual(@as(u64, 1), w.game_clock.ticks);
+        // ent.movement is never written from race.speed
+        try std.testing.expectEqual(@as(u8, 30), w.store.get(id).?.movement);
+    }
+
+    // Floor 4, no exhaustion:
+    //   neutral (30) → 1 tick; slow (25) → 2; fast (35) → 1 (nothing to suppress)
+    {
+        var w = try world.World.init(allocator, 1);
+        defer w.deinit();
+        try w.loadFloor(1);
+        w.floor_index = 4; // deep-floor gate without regenerating terrain
+        const id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+
+        w.store.get(id).?.char.race = w.races.items[0]; // dragonborn 30
+        w.game_clock.ticks = 0;
+        _ = try moveEntity(&w, id, .east);
+        const neutral_ticks = w.game_clock.ticks;
+        try std.testing.expectEqual(@as(u64, 1), neutral_ticks);
+
+        w.store.get(id).?.char.race = w.races.items[1]; // dwarf 25
+        w.game_clock.ticks = 0;
+        _ = try moveEntity(&w, id, .west);
+        const slow_ticks = w.game_clock.ticks;
+        try std.testing.expectEqual(@as(u64, 2), slow_ticks);
+
+        w.store.get(id).?.char.race = w.races.items[2]; // elf 35
+        w.game_clock.ticks = 0;
+        _ = try moveEntity(&w, id, .east);
+        const fast_ticks = w.game_clock.ticks;
+        try std.testing.expectEqual(@as(u64, 1), fast_ticks);
+        try std.testing.expect(fast_ticks < slow_ticks);
+        try std.testing.expect(fast_ticks >= 1);
+    }
+
+    // Floor 4 + exhaustion tier 1 (fatigue 25 → tier 1; onTick resyncs from fatigue):
+    // neutral pays deep-floor exhaustion extra (2); fast suppresses that extra (1);
+    // slow pays both (3).
+    {
+        var w = try world.World.init(allocator, 1);
+        defer w.deinit();
+        try w.loadFloor(1);
+        w.floor_index = 4;
+        const id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+
+        // Pin fatigue in tier-1 band so syncExhaustion keeps level 1 across ticks.
+        w.store.get(id).?.fatigue = 25;
+        _ = @import("survival.zig").syncExhaustion(w.store.get(id).?);
+        try std.testing.expectEqual(@as(u3, 1), conditions.exhaustionLevel(w.store.get(id).?));
+
+        w.store.get(id).?.char.race = w.races.items[3]; // human 30
+        w.game_clock.ticks = 0;
+        _ = try moveEntity(&w, id, .east);
+        try std.testing.expectEqual(@as(u64, 2), w.game_clock.ticks);
+
+        w.store.get(id).?.fatigue = 25;
+        _ = @import("survival.zig").syncExhaustion(w.store.get(id).?);
+        w.store.get(id).?.char.race = w.races.items[2]; // elf 35
+        w.game_clock.ticks = 0;
+        _ = try moveEntity(&w, id, .west);
+        try std.testing.expectEqual(@as(u64, 1), w.game_clock.ticks);
+
+        w.store.get(id).?.fatigue = 25;
+        _ = @import("survival.zig").syncExhaustion(w.store.get(id).?);
+        w.store.get(id).?.char.race = w.races.items[1]; // dwarf 25
+        w.game_clock.ticks = 0;
+        _ = try moveEntity(&w, id, .east);
+        try std.testing.expectEqual(@as(u64, 3), w.game_clock.ticks);
+    }
+}
+
+test "defaultRaces: human at index 4, speed set is {25,30,35}" {
+    const allocator = std.testing.allocator;
+    const types = @import("types.zig");
+    var races = try types.defaultRaces(allocator);
+    defer types.deinitRaceList(allocator, &races);
+
+    try std.testing.expectEqual(@as(usize, 4), races.items.len);
+    try std.testing.expectEqualStrings("dragonborn", races.items[0].name);
+    try std.testing.expectEqualStrings("dwarf", races.items[1].name);
+    try std.testing.expectEqualStrings("elf", races.items[2].name);
+    try std.testing.expectEqualStrings("human", races.items[3].name);
+    try std.testing.expectEqual(@as(u8, 30), races.items[0].speed);
+    try std.testing.expectEqual(@as(u8, 25), races.items[1].speed);
+    try std.testing.expectEqual(@as(u8, 35), races.items[2].speed);
+    try std.testing.expectEqual(@as(u8, 30), races.items[3].speed);
+    try std.testing.expectEqual(@as(u64, 2), races.items[3].attr_bonuses.items[0].stat);
+    try std.testing.expectEqualStrings("INT", races.items[3].attr_bonuses.items[0].abbr);
 }
 
 test "moveEntity rejects large corpse on tile" {

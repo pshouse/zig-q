@@ -250,6 +250,8 @@ pub fn capture(allocator: std.mem.Allocator, w: *const world.World, player_id: e
     };
 }
 
+/// Reconstruct race from saved `race_name` (name-based; no schema bump).
+/// Phase 2: resolves `"human"` once `defaultRaces` includes it at index 4.
 fn findRace(w: *const world.World, name: []const u8) types.Race {
     for (w.races.items) |race| {
         if (std.mem.eql(u8, race.name, name)) return race;

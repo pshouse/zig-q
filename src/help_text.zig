@@ -8,9 +8,9 @@ pub const Profile = enum {
     dst_v08,
 };
 
-/// Byte-identical to v0.8 playthrough golden `help` output (no trailing newline).
+/// DST/playthrough `help` body (no trailing newline). Phase 2 widened race to 1-4.
 pub const dst_v08_golden =
-    \\creation: roll, assign <6 picks>, race <1-3>, class <1-3>, spawn, stats
+    \\creation: roll, assign <6 picks>, race <1-4>, class <1-3>, spawn, stats
     \\explore:  look (l), time, move <n|s|e|w|nw|...>, m <dir>, help, exit
     \\          chains: move w w   or   move w; move w
     \\combat:   attack [target], end turn
@@ -32,7 +32,7 @@ pub const gear_golden =
 ;
 
 pub const repl_v11_golden =
-    \\creation: roll, assign <6 picks>, race <1-3>, class <1-3>, spawn, stats
+    \\creation: roll, assign <6 picks>, race <1-4>, class <1-3>, spawn, stats
     \\explore:  look (l), time, move <n|s|e|w|nw|...>, m <dir>, wait, food, rest, sleep, conditions, descend, help, help gear, exit
     \\          chains: move w w   or   move w; move w
     \\gear:     get [item], get from corpse, loot (corpse first), drop <item>, inventory (inv), examine <item>, equip <item>, unequip <slot|item>, use <item>  (help gear)
