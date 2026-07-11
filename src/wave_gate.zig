@@ -146,6 +146,34 @@ pub const plans = [_]WavePlan{
         },
         .run_migration = false,
     },
+    .{
+        .wave = 18,
+        .prefix = "v18",
+        .evidence_step = "evidence-v18",
+        .new_scenarios = &.{
+            // Character rework phases 0–4 finalized as 1.8.0 (see docs/CHARACTER_REWORK.md Phase 5).
+            "rogue_finesse", "rogue_leather", "reckless", "guard", "discipline_second_wind",
+            "elf_speed_deepfloor", "human_create",
+            "disarm_pick", "intimidate_flee", "poison_resist",
+            "sneak_hidden", "rogue_backstab",
+            "reference_crawl",
+        },
+        .all_scenarios = &.{
+            "bootstrap",         "explore",         "create",            "crawl_start",      "playthrough",       "brawl",         "save_roundtrip",
+            "descend_crawl",     "reference_crawl", "save_v2_roundtrip", "conditions_brawl", "los_peek",          "ambush",        "permadeath",
+            "loot_roundtrip",    "geared_brawl",    "corpse_loot",       "encumbered",       "hunt",              "flee",          "trap_trigger",
+            "door_route",        "survive",         "starve",            "sleep_cycle",      "reference_survive", "heal_bandage",  "trap_floor",
+            "deep_floor",        "rest_floor",      "combat_flee",       "catch_breath",     "deadly_floor",      "elite_brawl",   "scarce_heals",
+            "save_v4_roundtrip", "sleep_interrupt", "unequip_cycle",     "drop_clears_slot", "bare_loot_corpse",  "weaker_weapon",
+            "starve_out",        "combat_reposition", "survival_economy",  "monster_endurance",
+            "exhausted_sleep",   "bleed_out",         "glyph_look",       "collapse_sleep",  "sleep_high_fatigue",
+            "rogue_finesse",     "rogue_leather",     "reckless",          "guard",            "discipline_second_wind",
+            "elf_speed_deepfloor", "human_create",
+            "disarm_pick",       "intimidate_flee",   "poison_resist",
+            "sneak_hidden",      "rogue_backstab",
+        },
+        .run_migration = false,
+    },
 };
 
 pub const Options = struct {
