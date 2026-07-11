@@ -437,6 +437,37 @@ fn opportunityAttack(
     }
 }
 
+fn manhattanDist(a: loc.Loc, b: loc.Loc) u64 {
+    const dx = @as(i64, @intCast(a.x)) - @as(i64, @intCast(b.x));
+    const dy = @as(i64, @intCast(a.y)) - @as(i64, @intCast(b.y));
+    const adx: u64 = @intCast(if (dx < 0) -dx else dx);
+    const ady: u64 = @intCast(if (dy < 0) -dy else dy);
+    return adx + ady;
+}
+
+/// Mundane fear (CHA intimidate): step to increase Manhattan distance from the
+/// player, or null if boxed in. Never approaches. No RNG.
+fn fleeStepAway(
+    w: *const world.World,
+    monster: *const entity.Entity,
+    player: *const entity.Entity,
+) ?movement.Direction {
+    const here = manhattanDist(monster.loc, player.loc);
+    var best: ?movement.Direction = null;
+    var best_dist: u64 = here;
+    for (pathfinding.cardinal_dirs) |dir| {
+        const next = movement.step(monster.loc, dir) orelse continue;
+        if (!pathfinding.isPassable(w, next, monster.id)) continue;
+        const dist = manhattanDist(next, player.loc);
+        if (dist <= here) continue;
+        if (dist > best_dist or (dist == best_dist and best == null)) {
+            best_dist = dist;
+            best = dir;
+        }
+    }
+    return best;
+}
+
 fn processMonsterTurns(w: *world.World, writer: anytype) !void {
     const combat = w.combat orelse return;
     while (true) {
@@ -449,6 +480,27 @@ fn processMonsterTurns(w: *world.World, writer: anytype) !void {
             continue;
         };
         if (!isAlive(ent)) {
+            advanceTurn(w);
+            continue;
+        }
+        // Mundane fear: a frightened monster never attacks — it flees or cowers.
+        // Only reachable via `intimidate` (no golden enters this state), so existing
+        // combat transcripts keep their exact draw order.
+        if (conditions.has(ent, .frightened)) {
+            if (!conditions.blocksMove(ent)) {
+                if (fleeStepAway(w, ent, player)) |dir| {
+                    if (movement.moveEntity(w, active, dir)) |new_loc| {
+                        ent.last_move_dir = dir;
+                        try writer.print("{s} flees to ({},{})\n", .{ ent.name, new_loc.x, new_loc.y });
+                    } else |_| {
+                        try writer.print("{s} cowers in fear\n", .{ent.name});
+                    }
+                } else {
+                    try writer.print("{s} cowers in fear\n", .{ent.name});
+                }
+            } else {
+                try writer.print("{s} cowers in fear\n", .{ent.name});
+            }
             advanceTurn(w);
             continue;
         }
@@ -477,6 +529,48 @@ fn processMonsterTurns(w: *world.World, writer: anytype) !void {
         if (livingParticipants(w) <= 1) return;
         advanceTurn(w);
     }
+}
+
+/// CHA morale DC: rises with HP fraction (0–10) and danger_tier×3. Base 8.
+/// Full-HP elite resists; a wounded goblin breaks. Deterministic — no draw.
+pub fn moraleDc(target: *const entity.Entity) i32 {
+    const max_hp = @max(target.max_hp, 1);
+    const hp_part: i32 = @intCast((target.current_hp * 10) / max_hp);
+    const tier_part: i32 = @as(i32, @intCast(target.danger_tier)) * 3;
+    return 8 + hp_part + tier_part;
+}
+
+/// Active-only CHA intimidate: d20 + CHA mod ≥ moraleDC → apply `frightened`.
+/// Costs the turn (passTurnToOpponents). Never auto-rolled.
+pub fn intimidate(
+    w: *world.World,
+    actor_id: entity.EntityId,
+    target_name: []const u8,
+    writer: anytype,
+) !void {
+    if (!isInCombat(w)) return error.NotInCombat;
+    const active = activeTurn(w) orelse return error.NoActiveTurn;
+    if (active != actor_id) return error.NotYourTurn;
+
+    const actor = w.store.get(actor_id) orelse return error.AttackerNotFound;
+    if (conditions.blocksAttack(actor)) return error.CannotAct;
+
+    const target = findTarget(w, actor_id, target_name) orelse return error.NoTarget;
+    if (!isAdjacent(actor.loc, target.loc)) return error.NotAdjacent;
+    if (!target.is_monster) return error.NoTarget;
+
+    const cha_mod = character.abilityModifier(character.statByAbbr(actor.char, "CHA"));
+    const roll: i32 = w.rng.rollDie(20);
+    const dc = moraleDc(target);
+    const total = roll + cha_mod;
+    try writer.print("intimidate roll={} mod={} total={} vs dc={}\n", .{ roll, cha_mod, total, dc });
+    if (total >= dc) {
+        conditions.apply(target, .frightened);
+        try writer.print("{s} is frightened\n", .{target.name});
+    } else {
+        try writer.print("{s} holds firm\n", .{target.name});
+    }
+    try passTurnToOpponents(w, writer);
 }
 
 /// Resolve monster opening turns after an ambush (monster seated first). Stops when

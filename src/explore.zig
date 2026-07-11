@@ -11,8 +11,12 @@ const pathfinding = @import("pathfinding.zig");
 const world_objects = @import("world_objects.zig");
 const doors = @import("doors.zig");
 const items = @import("items.zig");
+const survival = @import("survival.zig");
+const character = @import("character.zig");
 
 pub const chase_radius: u8 = 6;
+/// Base DC for INT `disarm` / `pick` skill checks. Rogue gets −2 (owns INT skills).
+pub const skill_dc_base: i32 = 15;
 /// Explore turns a monster keeps pathing to the last-seen player tile after
 /// LOS breaks (#35). Long enough to finish a chokepoint funnel; short enough
 /// that fully escaping still works.
@@ -104,14 +108,14 @@ fn chooseMonsterDirection(
 
 fn applyTrapCondition(ent: *entity.Entity, label: []const u8) void {
     if (std.mem.eql(u8, label, "poison_trap") or std.mem.indexOf(u8, label, "poison") != null) {
-        conditions.apply(ent, .poisoned);
+        survival.applyPoison(ent);
         return;
     }
     if (std.mem.eql(u8, label, "snare_trap") or std.mem.indexOf(u8, label, "snare") != null) {
         conditions.apply(ent, .restrained);
         return;
     }
-    conditions.apply(ent, .poisoned);
+    survival.applyPoison(ent);
 }
 
 pub fn checkStepTraps(w: *world.World, player_id: entity.EntityId) bool {
@@ -120,6 +124,84 @@ pub fn checkStepTraps(w: *world.World, player_id: entity.EntityId) bool {
     if (obj.kind != .trap) return false;
     applyTrapCondition(ent, obj.label);
     return true;
+}
+
+/// INT skill DC: base 15, Rogue −2. Deterministic — no draw.
+pub fn skillDc(ent: *const entity.Entity) i32 {
+    var dc: i32 = skill_dc_base;
+    if (std.mem.eql(u8, ent.char.class.name, "rogue")) dc -= 2;
+    return dc;
+}
+
+fn isAdjacentLoc(a: loc.Loc, b: loc.Loc) bool {
+    return manhattan(a, b) == 1;
+}
+
+/// INT `disarm`: adjacent + already WIS-spotted trap. One d20 + INT mod ≥ DC.
+/// Success removes the trap; failure triggers the normal trap effect (trap stays).
+pub fn tryDisarm(w: *world.World, player_id: entity.EntityId) !enum { success, failed } {
+    const player = w.store.get(player_id) orelse return error.EntityNotFound;
+    var trap_pos: ?loc.Loc = null;
+    for (w.floor_objects.objects.items) |obj| {
+        if (obj.kind != .trap) continue;
+        if (!obj.spotted) continue;
+        const pos = loc.Loc.init(obj.x, obj.y);
+        if (!isAdjacentLoc(player.loc, pos)) continue;
+        trap_pos = pos;
+        break;
+    }
+    const pos = trap_pos orelse return error.NoSpottedTrap;
+    const obj = w.floor_objects.at(pos) orelse return error.NoSpottedTrap;
+
+    const int_mod = character.abilityModifier(character.statByAbbr(player.char, "INT"));
+    const roll: i32 = w.rng.rollDie(20);
+    const dc = skillDc(player);
+    if (roll + int_mod >= dc) {
+        w.floor_objects.removeAt(w.allocator, pos);
+        return .success;
+    }
+    // Failed disarm springs the trap on the disarmer (normal effect).
+    applyTrapCondition(player, obj.label);
+    return .failed;
+}
+
+/// INT `pick`: open an adjacent `.locked` door. One d20 + INT mod ≥ DC → `.open`.
+pub fn tryPickLock(
+    w: *world.World,
+    player_id: entity.EntityId,
+    dir: ?movement.Direction,
+) !enum { success, failed } {
+    const player = w.store.get(player_id) orelse return error.EntityNotFound;
+
+    const target: loc.Loc = if (dir) |d|
+        movement.step(player.loc, d) orelse return error.Blocked
+    else blk: {
+        // Bare `pick`: first adjacent locked door in N/S/E/W order.
+        for (pathfinding.cardinal_dirs) |d| {
+            const next = movement.step(player.loc, d) orelse continue;
+            const tile = w.terrain.get(next) orelse continue;
+            if (tile != .door) continue;
+            const state = w.doors.resolve(&w.terrain, next) orelse .closed;
+            if (state == .locked) break :blk next;
+        }
+        return error.NoLockedDoor;
+    };
+
+    const tile = w.terrain.get(target) orelse return error.NotADoor;
+    if (tile != .door) return error.NotADoor;
+    const state = w.doors.resolve(&w.terrain, target) orelse .closed;
+    if (state != .locked) {
+        return if (state == .open) error.AlreadyOpen else error.NotLocked;
+    }
+
+    const int_mod = character.abilityModifier(character.statByAbbr(player.char, "INT"));
+    const roll: i32 = w.rng.rollDie(20);
+    const dc = skillDc(player);
+    if (roll + int_mod >= dc) {
+        try w.doors.set(target, .open);
+        return .success;
+    }
+    return .failed;
 }
 
 pub fn tryOpenDoor(

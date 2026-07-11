@@ -106,7 +106,7 @@ fn tileDistance(a: loc.Loc, b: loc.Loc) u64 {
 }
 
 pub fn formatVisibleFloorObjects(
-    w: *const world.World,
+    w: *world.World,
     viewer: *const entity.Entity,
     center: loc.Loc,
     radius: u8,
@@ -116,9 +116,11 @@ pub fn formatVisibleFloorObjects(
     // Trap spotting rolls a d20, but `look` must not perturb the shared world RNG
     // that combat draws from. Roll from a local copy so inspection stays free of
     // gameplay side effects (and is idempotent for a given world state).
+    // A successful check marks the trap spotted (prerequisite for INT `disarm`).
+    // Display rolls always run in list order so multi-trap look output stays stable.
     var spot_rng = w.rng;
     var listed = false;
-    for (w.floor_objects.objects.items) |obj| {
+    for (w.floor_objects.objects.items) |*obj| {
         const pos = loc.Loc.init(obj.x, obj.y);
         if (!inViewport(center, radius, pos)) continue;
         switch (obj.kind) {
@@ -126,7 +128,11 @@ pub fn formatVisibleFloorObjects(
                 if (w.has_dungeon and !perception.hasLineOfSight(&w.terrain, center, pos)) continue;
                 const distance = perception.manhattanDistance(center, pos);
                 const wis_mod = character.abilityModifier(character.statByAbbr(viewer.char, "WIS"));
-                if (!perception.spotTrapCheck(wis_mod, distance, &spot_rng)) continue;
+                const spotted_now = perception.spotTrapCheck(wis_mod, distance, &spot_rng);
+                if (spotted_now) obj.spotted = true;
+                // Show if this look's check succeeds, or the trap was already spotted
+                // (RNG may have advanced since the first spot; disarm still needs the flag).
+                if (!spotted_now and !obj.spotted) continue;
             },
             else => {},
         }
@@ -183,7 +189,7 @@ pub fn formatVisibleEntities(
 }
 
 pub fn renderLook(
-    w: *const world.World,
+    w: *world.World,
     player_id: entity.EntityId,
     list_nearby: bool,
     writer: anytype,

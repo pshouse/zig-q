@@ -15,6 +15,9 @@ pub const FloorObject = struct {
     y: u64,
     label: []const u8,
     item: ?items.Id = null,
+    /// Set when the player successfully WIS-spots this trap (look). Transient; not saved.
+    /// Prerequisite for the INT `disarm` skill — you cannot disarm an unspotted trap.
+    spotted: bool = false,
 };
 
 pub const Store = struct {
@@ -52,6 +55,7 @@ pub const Store = struct {
             .y = position.y,
             .label = try allocator.dupe(u8, label),
             .item = item,
+            .spotted = false,
         });
     }
 

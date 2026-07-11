@@ -33,11 +33,11 @@ pub const gear_golden =
 
 pub const repl_v11_golden =
     \\creation: roll, assign <6 picks>, race <1-4>, class <1-3>, spawn, stats
-    \\explore:  look (l), time, move <n|s|e|w|nw|...>, m <dir>, wait, food, rest, sleep, conditions, descend, help, help gear, exit
+    \\explore:  look (l), time, move <n|s|e|w|nw|...>, m <dir>, wait, food, rest, sleep, conditions, descend, disarm, pick [dir], help, help gear, exit
     \\          chains: move w w   or   move w; move w
     \\gear:     get [item], get from corpse, loot (corpse first), drop <item>, inventory (inv), examine <item>, equip <item>, unequip <slot|item>, use <item>  (help gear)
     \\ai:      monsters act on wait/move/get/drop/loot/use/open/close/wound when explore AI is on; ambush seats the monster first
-    \\combat:   attack [target], end turn, flee (disengage/retreat), catch breath, reckless, guard, second wind
+    \\combat:   attack [target], end turn, flee (disengage/retreat), catch breath, reckless, guard, second wind, intimidate <target>
     \\persist:  save [slot], load <slot>
     \\
     \\example: assign 6 5 4 3 2 1
@@ -68,7 +68,7 @@ test "dst_v08 help matches v0.8 golden substring" {
 }
 
 test "repl_v11 help lists wait and conditions" {
-    var buf: [768]u8 = undefined;
+    var buf: [1024]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
     try writeMainHelp(fbs.writer(), .repl_v11);
     const out = fbs.getWritten();
@@ -76,10 +76,12 @@ test "repl_v11 help lists wait and conditions" {
     try std.testing.expect(std.mem.indexOf(u8, out, "conditions") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "descend") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "get from corpse") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "disarm") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "intimidate") != null);
 }
 
 test "repl help redirects to live repl_v11 surface" {
-    var buf: [768]u8 = undefined;
+    var buf: [1024]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
     try writeMainHelp(fbs.writer(), .repl);
     const out = fbs.getWritten();

@@ -42,6 +42,8 @@ pub const Entity = struct {
     second_wind_used: bool = false,
     /// Last damage-die face after discipline clamp (0 = none). Fuzz/discipline probe only.
     last_damage_face: u8 = 0,
+    /// Remaining poison DoT ticks (0 = unset / cleared). CON shortens on apply; not persisted.
+    poison_ticks_remaining: u16 = 0,
 };
 
 pub const EntityStore = struct {
