@@ -33,6 +33,15 @@ pub const Entity = struct {
     /// for `chase_memory_turns` explore turns after LOS breaks.
     chase_last_seen: ?loc.Loc = null,
     chase_memory_left: u8 = 0,
+    /// Barbarian `reckless` toggle: advantage on attack rolls, −4 AC until next turn.
+    /// Combat-transient; not persisted (cleared on combat end / next player turn).
+    reckless: bool = false,
+    /// Fighter `guard` stance: +2 AC for one round (skips the attack). Combat-transient.
+    guarding: bool = false,
+    /// Fighter `second wind` once-per-floor self-heal. Reset on descend; not persisted.
+    second_wind_used: bool = false,
+    /// Last damage-die face after discipline clamp (0 = none). Fuzz/discipline probe only.
+    last_damage_face: u8 = 0,
 };
 
 pub const EntityStore = struct {

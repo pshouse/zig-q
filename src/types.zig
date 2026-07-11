@@ -101,7 +101,7 @@ pub fn defaultClasses() [3]Class {
     return .{
         .{ .name = "barbarian", .hit_die = 12 },
         .{ .name = "fighter", .hit_die = 10 },
-        .{ .name = "bard", .hit_die = 8 },
+        .{ .name = "rogue", .hit_die = 8 },
     };
 }
 

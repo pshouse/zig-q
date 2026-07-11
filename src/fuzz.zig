@@ -12,6 +12,7 @@ const transcript = @import("transcript.zig");
 const save_state = @import("save_state.zig");
 const sqlite_store = @import("sqlite_store.zig");
 const dungeon = @import("dungeon.zig");
+const character = @import("character.zig");
 
 pub const Config = struct {
     seed: u64 = 0,
@@ -117,6 +118,13 @@ const templates = [_][]const u8{
     "unequip armour",
     "unequip short sword",
     "take off armour",
+    "reckless",
+    "guard",
+    "second wind",
+    "assign 6 5 4 3 2 1; race 3; class 3; spawn",
+    "equip greatsword",
+    "equip leather_armour",
+    "equip wooden_shield",
 };
 
 pub fn run(allocator: std.mem.Allocator, cfg: Config) !Report {
@@ -442,6 +450,31 @@ pub fn assertInvariantsTracked(
             if (plan.spawns[i].item == .rations) rations += 1;
         }
         if (rations == 0) return error.DangerFloorWithoutFood;
+    }
+
+    // Phase 1 class specials: reckless/guard are combat-transient.
+    if (player_id != entity.invalid_id) {
+        if (w.store.get(player_id)) |player| {
+            if (!combat.isInCombat(w)) {
+                if (player.reckless) return error.RecklessOutsideCombat;
+                if (player.guarding) return error.GuardOutsideCombat;
+            }
+            // Rogue + heavy weapon reverts to STR (no finesse).
+            if (std.mem.eql(u8, player.char.class.name, "rogue")) {
+                if (character.wieldingHeavy(player)) {
+                    if (!std.mem.eql(u8, character.attackAbbr(player), "STR"))
+                        return error.RogueHeavyNotStr;
+                    if (!std.mem.eql(u8, character.damageAbbr(player), "STR"))
+                        return error.RogueHeavyDamageNotStr;
+                } else {
+                    if (!std.mem.eql(u8, character.attackAbbr(player), "DEX"))
+                        return error.RogueLightNotDex;
+                }
+            }
+            // Fighter discipline: a resolved damage face is never 1.
+            if (std.mem.eql(u8, player.char.class.name, "fighter") and player.last_damage_face == 1)
+                return error.FighterDisciplineFumble;
+        }
     }
 
     if (tracker) |t| try trackMonsterPositions(w, t);

@@ -169,6 +169,8 @@ pub const World = struct {
 
         try self.loadFloor(next_floor);
         try self.relocatePlayer(player_id, self.floor_spawn);
+        // Second wind is once-per-floor (fighter class special).
+        if (self.store.get(player_id)) |p| p.second_wind_used = false;
         try self.placeFloorMonsters();
         try self.placeFloorLoot();
         try self.placeFloorTraps();

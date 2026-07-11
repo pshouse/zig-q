@@ -4,7 +4,6 @@ const entity = @import("entity.zig");
 const loc = @import("loc.zig");
 const character = @import("character.zig");
 const monsters = @import("monsters.zig");
-const dice = @import("dice.zig");
 const types = @import("types.zig");
 const conditions = @import("conditions.zig");
 const inventory = @import("inventory.zig");
@@ -82,6 +81,12 @@ pub fn attackRoll(w: *world.World, attacker: *const entity.Entity) u8 {
         const b = w.rng.rollDie(20);
         return @min(a, b);
     }
+    // Reckless (barbarian): advantage = 2d20 take higher. Extra draw only on this branch.
+    if (attacker.reckless) {
+        const a = w.rng.rollDie(20);
+        const b = w.rng.rollDie(20);
+        return @max(a, b);
+    }
     return w.rng.rollDie(20);
 }
 
@@ -98,15 +103,17 @@ fn weaponDamageBonus(attacker: *const entity.Entity) i32 {
     return 0;
 }
 
-fn rollDamage(w: *world.World, attacker: *const entity.Entity) i32 {
-    var buf: [1]u8 = undefined;
+fn rollDamage(w: *world.World, attacker: *entity.Entity) i32 {
     var mod = character.abilityModifier(character.statByAbbr(attacker.char, character.damageAbbr(attacker)));
     mod += @as(i32, @intCast(attacker.danger_tier));
     mod += weaponDamageBonus(attacker);
     const die = inventory.State.weaponDamageDie(&attacker.inventory, attacker);
-    const result = dice.roll(&w.rng, .{ .n = 1, .sides = die, .modifier = mod }, &buf);
-    var dmg = @max(result.sum, 0);
-    // Danger-tier hits always cost â‰¥ 1 HP (floors 1â€“3 unchanged).
+    const raw = w.rng.rollDie(die);
+    // Fighter discipline: natural 1 → 2 (no-fumble clamp; zero extra draws).
+    const face = character.disciplineFace(attacker.char.class.name, raw);
+    attacker.last_damage_face = face;
+    var dmg = @max(@as(i32, face) + mod, 0);
+    // Danger-tier hits always cost ≥ 1 HP (floors 1–3 unchanged).
     if (attacker.danger_tier > 0) dmg = @max(dmg, 1);
     return dmg;
 }
@@ -309,6 +316,9 @@ pub fn endCombat(w: *world.World) void {
         for (combat.participants.items) |id| {
             if (w.store.get(id)) |ent| {
                 if (isAlive(ent)) ent.char.status = .exploring;
+                // Transient class-special flags do not outlive combat.
+                ent.reckless = false;
+                ent.guarding = false;
             }
         }
         combat.deinit(w.allocator);
@@ -399,7 +409,7 @@ pub fn performAttack(
 /// action, so it does not advance the survival clock or initiative.
 fn opportunityAttack(
     w: *world.World,
-    attacker: *const entity.Entity,
+    attacker: *entity.Entity,
     target_id: entity.EntityId,
     writer: anytype,
 ) !void {
@@ -551,12 +561,34 @@ fn passTurnToOpponents(w: *world.World, writer: anytype) !void {
     if (isInCombat(w)) {
         if (activeTurn(w)) |next| {
             if (w.store.get(next)) |ent| {
+                // Reckless/guard last until the start of the player's next turn.
+                if (w.combat) |c| {
+                    if (next == c.player_id) {
+                        ent.reckless = false;
+                        ent.guarding = false;
+                    }
+                }
                 try writer.print("turn: {s}\n", .{ent.name});
             }
         }
     } else {
         try writer.print("combat ended\n", .{});
     }
+}
+
+/// Fighter guard stance: skip the attack, gain +2 AC for one round, then hand off.
+pub fn guard(w: *world.World, actor_id: entity.EntityId, writer: anytype) !void {
+    if (!isInCombat(w)) return error.NotInCombat;
+    const active = activeTurn(w) orelse return error.NoActiveTurn;
+    if (active != actor_id) return error.NotYourTurn;
+
+    const player = w.store.get(actor_id) orelse return error.AttackerNotFound;
+    if (conditions.blocksAttack(player)) return error.CannotAct;
+    if (!std.mem.eql(u8, player.char.class.name, "fighter")) return error.WrongClass;
+
+    player.guarding = true;
+    try writer.print("{s} raises guard (+2 AC)\n", .{player.name});
+    try passTurnToOpponents(w, writer);
 }
 
 /// Player disengages from combat. Each adjacent living hostile gets one opportunity attack

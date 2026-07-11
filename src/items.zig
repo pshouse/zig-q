@@ -39,6 +39,9 @@ pub const Def = struct {
     damage_bonus: i32 = 0,
     ac_bonus: u8 = 0,
     trait: Trait = .none,
+    /// Large/two-handed weapons. Compile-time only (not persisted). Rogue finesse
+    /// (and later backstab) apply only with light/unarmed weapons; heavy reverts to STR.
+    heavy: bool = false,
     is_food: bool = false,
     food_restore: u16 = 0,
     /// Empty means all classes proficient.
@@ -62,6 +65,7 @@ pub fn def(id: Id) Def {
             .category = .weapon,
             .damage_die = 10,
             .damage_bonus = 1, // fine quality
+            .heavy = true,
         },
         .greatsword => .{
             .id = id,
@@ -70,6 +74,7 @@ pub fn def(id: Id) Def {
             .category = .weapon,
             .damage_die = 12,
             .damage_bonus = 1, // fine quality
+            .heavy = true,
         },
         .leather_armour => .{
             .id = id,
@@ -77,7 +82,7 @@ pub fn def(id: Id) Def {
             .weight = 10,
             .category = .armour,
             .ac_bonus = 11,
-            .proficient_classes = &.{ "fighter", "barbarian" },
+            .proficient_classes = &.{ "fighter", "barbarian", "rogue" },
         },
         .wooden_shield => .{
             .id = id,
@@ -85,6 +90,8 @@ pub fn def(id: Id) Def {
             .weight = 6,
             .category = .shield,
             .ac_bonus = 2,
+            // Fighter exclusive shield proficiency (character rework Phase 1).
+            .proficient_classes = &.{"fighter"},
         },
         .antidote => .{
             .id = id,

@@ -121,6 +121,8 @@ pub const plans = [_]WavePlan{
         .evidence_step = "evidence-v17",
         .new_scenarios = &.{
             "collapse_sleep", "combat_reposition", "sleep_high_fatigue", "reference_crawl",
+            // Phase 1 class rework (additive at 1.7.1; wave finalizes 1.8.0 later).
+            "rogue_finesse", "rogue_leather", "reckless", "guard", "discipline_second_wind",
         },
         .all_scenarios = &.{
             "bootstrap",         "explore",         "create",            "crawl_start",      "playthrough",       "brawl",         "save_roundtrip",
@@ -131,6 +133,7 @@ pub const plans = [_]WavePlan{
             "save_v4_roundtrip", "sleep_interrupt", "unequip_cycle",     "drop_clears_slot", "bare_loot_corpse",  "weaker_weapon",
             "starve_out",        "combat_reposition", "survival_economy",  "monster_endurance",
             "exhausted_sleep",   "bleed_out",         "glyph_look",       "collapse_sleep",  "sleep_high_fatigue",
+            "rogue_finesse",     "rogue_leather",     "reckless",          "guard",            "discipline_second_wind",
         },
         .run_migration = false,
     },

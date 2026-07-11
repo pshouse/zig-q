@@ -189,8 +189,16 @@ pub const State = struct {
                 ac +%= @intCast(@max(dex_mod, 0));
             }
         }
+        // Shield AC only with class proficiency (fighter exclusive from Phase 1).
         if (self.shield) |sid| {
-            ac +%= items.def(sid).ac_bonus;
+            if (classProficient(ent, sid)) {
+                ac +%= items.def(sid).ac_bonus;
+            }
+        }
+        // Class specials (combat-transient): guard +2, reckless −4.
+        if (ent.guarding) ac +%= 2;
+        if (ent.reckless) {
+            if (ac > 4) ac -= 4 else ac = 0;
         }
         return ac;
     }
