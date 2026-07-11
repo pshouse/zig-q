@@ -51,6 +51,9 @@ pub const Command = union(enum) {
     end_turn,
     flee,
     catch_breath,
+    reckless,
+    guard,
+    second_wind,
     descend,
     save,
     save_slot: u32,
@@ -118,6 +121,9 @@ pub fn parseLine(line: []const u8) Command {
     if (std.mem.eql(u8, trimmed, "retreat")) return .flee;
     if (std.mem.eql(u8, trimmed, "catch breath")) return .catch_breath;
     if (std.mem.eql(u8, trimmed, "recover")) return .catch_breath;
+    if (std.mem.eql(u8, trimmed, "reckless")) return .reckless;
+    if (std.mem.eql(u8, trimmed, "guard")) return .guard;
+    if (std.mem.eql(u8, trimmed, "second wind")) return .second_wind;
     if (std.mem.eql(u8, trimmed, "descend")) return .descend;
     if (std.mem.eql(u8, trimmed, "wait")) return .wait;
     if (std.mem.eql(u8, trimmed, "food")) return .food;
@@ -563,7 +569,15 @@ fn cmdEquip(ctx: *Context, name: []const u8, writer: anytype) !Result {
             }
             ent.inventory.armour = id;
         },
-        .shield => ent.inventory.shield = id,
+        .shield => {
+            if (!inventory.State.classProficient(ent, id)) {
+                try writer.print("not proficient with {s}", .{d.name});
+                try items.printProficiencyHint(d, ent.char.class.name, writer);
+                try writer.print("\n", .{});
+                return .continue_repl;
+            }
+            ent.inventory.shield = id;
+        },
         .consumable => {
             try writer.print("cannot equip consumable\n", .{});
             return .continue_repl;
@@ -1240,7 +1254,7 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
             if (try rejectCreationAfterSpawn(ctx, writer, "class")) return .continue_repl;
             try writer.print(
                 \\usage: class <1-3>
-                \\       1=barbarian  2=fighter  3=bard
+                \\       1=barbarian  2=fighter  3=rogue
                 \\
             , .{});
         },
@@ -1442,6 +1456,111 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                 },
                 else => |e| return e,
             };
+        },
+        .reckless => {
+            if (!isSpawned(ctx)) {
+                try writer.print("no player spawned\n", .{});
+                return .continue_repl;
+            }
+            const ent = ctx.w.store.get(ctx.player_id) orelse {
+                try writer.print("no player spawned\n", .{});
+                return .continue_repl;
+            };
+            if (!std.mem.eql(u8, ent.char.class.name, "barbarian")) {
+                try writer.print("only barbarians can fight recklessly\n", .{});
+                return .continue_repl;
+            }
+            if (!combat.isInCombat(ctx.w)) {
+                try writer.print("not in combat\n", .{});
+                return .continue_repl;
+            }
+            const active = combat.activeTurn(ctx.w) orelse {
+                try writer.print("not in combat\n", .{});
+                return .continue_repl;
+            };
+            if (active != ctx.player_id) {
+                try writer.print("not your turn\n", .{});
+                return .continue_repl;
+            }
+            // Free toggle: advantage on attacks and −4 AC until the player's next turn.
+            ent.reckless = !ent.reckless;
+            if (ent.reckless) {
+                try writer.print("reckless on (advantage on attacks, -4 AC)\n", .{});
+            } else {
+                try writer.print("reckless off\n", .{});
+            }
+        },
+        .guard => {
+            if (!isSpawned(ctx)) {
+                try writer.print("no player spawned\n", .{});
+                return .continue_repl;
+            }
+            combat.guard(ctx.w, ctx.player_id, writer) catch |err| switch (err) {
+                error.NotInCombat => {
+                    try writer.print("not in combat\n", .{});
+                    return .continue_repl;
+                },
+                error.NotYourTurn => {
+                    try writer.print("not your turn\n", .{});
+                    return .continue_repl;
+                },
+                error.CannotAct => {
+                    try writer.print("cannot guard while incapacitated\n", .{});
+                    return .continue_repl;
+                },
+                error.WrongClass => {
+                    try writer.print("only fighters can guard\n", .{});
+                    return .continue_repl;
+                },
+                else => |e| return e,
+            };
+        },
+        .second_wind => {
+            if (!isSpawned(ctx)) {
+                try writer.print("no player spawned\n", .{});
+                return .continue_repl;
+            }
+            const ent = ctx.w.store.get(ctx.player_id) orelse {
+                try writer.print("no player spawned\n", .{});
+                return .continue_repl;
+            };
+            if (!std.mem.eql(u8, ent.char.class.name, "fighter")) {
+                try writer.print("only fighters have second wind\n", .{});
+                return .continue_repl;
+            }
+            if (ent.second_wind_used) {
+                try writer.print("second wind already used this floor\n", .{});
+                return .continue_repl;
+            }
+            if (ent.current_hp >= ent.max_hp) {
+                try writer.print("you are not wounded\n", .{});
+                return .continue_repl;
+            }
+            if (combat.isInCombat(ctx.w)) {
+                const active = combat.activeTurn(ctx.w) orelse {
+                    try writer.print("not your turn\n", .{});
+                    return .continue_repl;
+                };
+                if (active != ctx.player_id) {
+                    try writer.print("not your turn\n", .{});
+                    return .continue_repl;
+                }
+            }
+            // Once-per-floor mundane self-heal: 5 + CON mod (min 1).
+            const con_mod = character.abilityModifier(character.statByAbbr(ent.char, "CON"));
+            const heal_i: i32 = @max(1, 5 + con_mod);
+            const heal: u32 = @intCast(heal_i);
+            const room = ent.max_hp - ent.current_hp;
+            const applied = @min(heal, room);
+            ent.current_hp += applied;
+            ent.second_wind_used = true;
+            try writer.print("second wind: healed {} hp\n", .{applied});
+            if (combat.isInCombat(ctx.w)) {
+                try combat.endTurn(ctx.w, ctx.player_id, writer);
+            } else {
+                try tickPlayerAction(ctx, 1, writer);
+                try finishExploreAction(ctx, writer);
+            }
         },
         .save => {
             if (!isSpawned(ctx)) {

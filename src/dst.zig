@@ -1036,6 +1036,121 @@ pub const weaker_weapon_scenario = Scenario{
     },
 };
 
+/// Phase 1: rogue finesse — light weapon uses DEX mod; heavy reverts to STR.
+/// STR=10 (mod 0), DEX=18 (mod +4): short sword → mod=4; greatsword → mod=0.
+pub const rogue_finesse_scenario = Scenario{
+    .name = "rogue_finesse",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 3 }, // elf
+        .{ .choose_class = 3 }, // rogue
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .set_attribute = .{ .entity = "entity_0", .abbr = "STR", .value = 10 } },
+        .{ .set_attribute = .{ .entity = "entity_0", .abbr = "DEX", .value = 18 } },
+        .{ .give_item = .{ .entity = "entity_0", .item = .short_sword, .count = 1 } },
+        .{ .give_item = .{ .entity = "entity_0", .item = .greatsword, .count = 1 } },
+        .{ .command = "equip short_sword" },
+        .{ .spawn_monster = .{ .kind = .goblin, .name = "goblin_0", .x = 50, .y = 49 } },
+        .{ .command = "attack goblin_0" }, // DEX mod=4
+        .{ .command = "equip greatsword" },
+        .{ .command = "attack goblin_0" }, // STR mod=0
+        .{ .command = "exit" },
+    },
+};
+
+/// Phase 1: rogue is leather-proficient (AC no longer collapses to 10).
+pub const rogue_leather_scenario = Scenario{
+    .name = "rogue_leather",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 3 }, // elf (+2 DEX)
+        .{ .choose_class = 3 }, // rogue
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .set_attribute = .{ .entity = "entity_0", .abbr = "DEX", .value = 14 } },
+        .{ .give_item = .{ .entity = "entity_0", .item = .leather_armour, .count = 1 } },
+        .{ .command = "equip leather_armour" },
+        .{ .command = "stats" }, // AC = 11 (leather) + 2 (DEX) = 13
+        .{ .command = "exit" },
+    },
+};
+
+/// Phase 1: barbarian reckless — advantage toggle + −4 AC until next turn.
+/// Pad the goblin's HP so combat lasts through two monster counters.
+pub const reckless_scenario = Scenario{
+    .name = "reckless",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 1 }, // dragonborn
+        .{ .choose_class = 1 }, // barbarian
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .set_attribute = .{ .entity = "entity_0", .abbr = "DEX", .value = 10 } }, // base AC 10
+        .{ .spawn_monster = .{ .kind = .goblin, .name = "goblin_0", .x = 50, .y = 49 } },
+        .{ .set_hp = .{ .entity = "goblin_0", .current = 40 } },
+        .{ .command = "attack goblin_0" },
+        .{ .command = "reckless" },
+        .{ .command = "attack goblin_0" }, // advantage draw while reckless
+        .{ .command = "end turn" }, // goblin swings at AC 6 (−4); then reckless clears
+        .{ .command = "end turn" }, // goblin swings at AC 10 (cleared)
+        .{ .command = "exit" },
+    },
+};
+
+/// Phase 1: fighter guard — skip attack, +2 AC for one round.
+pub const guard_scenario = Scenario{
+    .name = "guard",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 }, // dwarf
+        .{ .choose_class = 2 }, // fighter
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .set_attribute = .{ .entity = "entity_0", .abbr = "DEX", .value = 10 } }, // base AC 10
+        .{ .spawn_monster = .{ .kind = .goblin, .name = "goblin_0", .x = 50, .y = 49 } },
+        .{ .command = "attack goblin_0" },
+        .{ .command = "guard" }, // +2 AC → 12 for the goblin's counter
+        .{ .command = "exit" },
+    },
+};
+
+/// Phase 1: fighter discipline (damage-face clamp) + second wind self-heal.
+pub const discipline_second_wind_scenario = Scenario{
+    .name = "discipline_second_wind",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 }, // dwarf
+        .{ .choose_class = 2 }, // fighter
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .set_attribute = .{ .entity = "entity_0", .abbr = "CON", .value = 14 } }, // +2 → heal 7
+        .{ .set_hp = .{ .entity = "entity_0", .current = 5 } },
+        .{ .command = "second wind" },
+        .{ .spawn_monster = .{ .kind = .goblin, .name = "goblin_0", .x = 50, .y = 49 } },
+        .{ .set_attribute = .{ .entity = "entity_0", .abbr = "STR", .value = 14 } },
+        .{ .command = "attack goblin_0" },
+        .{ .command = "attack goblin_0" },
+        .{ .command = "attack goblin_0" },
+        .{ .command = "exit" },
+    },
+};
+
 pub const trap_trigger_scenario = Scenario{
     .name = "trap_trigger",
     .seed = 42,
@@ -1559,6 +1674,8 @@ pub const registered_scenario_names = [_][]const u8{
     "combat_reposition", "glyph_look",        "deadly_floor",      "elite_brawl",
     "scarce_heals",      "save_v4_roundtrip", "unequip_cycle",     "drop_clears_slot",
     "bare_loot_corpse",  "weaker_weapon",     "sleep_interrupt",   "survival_economy",
+    "rogue_finesse",     "rogue_leather",     "reckless",          "guard",
+    "discipline_second_wind",
 };
 
 pub fn scenarioByName(name: []const u8, seed: u64) ?Scenario {
@@ -1662,6 +1779,16 @@ pub fn scenarioByName(name: []const u8, seed: u64) ?Scenario {
         return Scenario{ .name = "sleep_interrupt", .seed = seed, .steps = sleep_interrupt_scenario.steps };
     if (std.mem.eql(u8, name, "survival_economy"))
         return Scenario{ .name = "survival_economy", .seed = seed, .steps = survival_economy_scenario.steps };
+    if (std.mem.eql(u8, name, "rogue_finesse"))
+        return Scenario{ .name = "rogue_finesse", .seed = seed, .steps = rogue_finesse_scenario.steps };
+    if (std.mem.eql(u8, name, "rogue_leather"))
+        return Scenario{ .name = "rogue_leather", .seed = seed, .steps = rogue_leather_scenario.steps };
+    if (std.mem.eql(u8, name, "reckless"))
+        return Scenario{ .name = "reckless", .seed = seed, .steps = reckless_scenario.steps };
+    if (std.mem.eql(u8, name, "guard"))
+        return Scenario{ .name = "guard", .seed = seed, .steps = guard_scenario.steps };
+    if (std.mem.eql(u8, name, "discipline_second_wind"))
+        return Scenario{ .name = "discipline_second_wind", .seed = seed, .steps = discipline_second_wind_scenario.steps };
     return null;
 }
 
@@ -2308,6 +2435,53 @@ test "dst weaker_weapon scenario is byte-identical across runs" {
     const out = try expectScenarioDeterministic(allocator, "weaker_weapon", 65536);
     defer allocator.free(out);
     try std.testing.expect(std.mem.indexOf(u8, out, "you keep your innate d12") != null);
+}
+
+test "dst rogue_finesse scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "rogue_finesse", 65536);
+    defer allocator.free(out);
+    // Light weapon: DEX +4. Heavy: STR +0. Class rename visible on sheet via race/class path.
+    try std.testing.expect(std.mem.indexOf(u8, out, "mod=4") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "mod=0") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "equipped short sword") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "equipped greatsword") != null);
+}
+
+test "dst rogue_leather scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "rogue_leather", 65536);
+    defer allocator.free(out);
+    try std.testing.expect(std.mem.indexOf(u8, out, "class=rogue") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "equipped leather armour") != null);
+    // Leather 11 + DEX +2 = 13 (not collapsed to 10).
+    try std.testing.expect(std.mem.indexOf(u8, out, "AC: 13") != null);
+}
+
+test "dst reckless scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "reckless", 65536);
+    defer allocator.free(out);
+    try std.testing.expect(std.mem.indexOf(u8, out, "reckless on") != null);
+    // While reckless: monster hits vs AC 6. After clear: vs AC 10.
+    try std.testing.expect(std.mem.indexOf(u8, out, "vs AC 6") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "vs AC 10") != null);
+}
+
+test "dst guard scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "guard", 65536);
+    defer allocator.free(out);
+    try std.testing.expect(std.mem.indexOf(u8, out, "raises guard (+2 AC)") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "vs AC 12") != null);
+}
+
+test "dst discipline_second_wind scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "discipline_second_wind", 65536);
+    defer allocator.free(out);
+    try std.testing.expect(std.mem.indexOf(u8, out, "second wind: healed") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "attack entity_0->goblin_0") != null);
 }
 
 test "dst survival_economy scenario is byte-identical across runs" {

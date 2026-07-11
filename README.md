@@ -58,7 +58,7 @@ The REPL loads **floor 1** dungeon tiles, rolls six stats on start, then accepts
 
 **Persistence commands:** `save [slot]`, `load <slot>` (slots 1–9; default save slot 1; database file `zig-q.sqlite` in the working directory)
 
-Races: 1=dragonborn (+2 STR), 2=dwarf (+2 CON), 3=elf (+2 DEX). Classes: 1=barbarian, 2=fighter, 3=bard.
+Races: 1=dragonborn (+2 STR), 2=dwarf (+2 CON), 3=elf (+2 DEX). Classes: 1=barbarian, 2=fighter, 3=rogue.
 
 **Ability scores:** STR/DEX/CON/WIS drive combat, carry, AC, and perception. **INT and CHA are cosmetic** (rolled, assigned, shown, persisted) until a future mundane use lands — see `docs/INT_CHA_DECISION.md`.
 

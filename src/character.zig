@@ -3,28 +3,37 @@ const types = @import("types.zig");
 const session = @import("session.zig");
 const world = @import("world.zig");
 const entity = @import("entity.zig");
+const items = @import("items.zig");
 
-/// Ability abbreviation used for TO-HIT. Class-routed seam for Phase 0 of the
-/// character rework (see docs/CHARACTER_REWORK.md / PR #58). All current classes
-/// and monsters resolve to STR; a future `"rogue" => "DEX"` branch is a one-liner.
+/// True when the entity wields a heavy weapon (war axe, greatsword). Unarmed is light.
+pub fn wieldingHeavy(ent: *const entity.Entity) bool {
+    if (ent.inventory.weapon) |wid| return items.def(wid).heavy;
+    return false;
+}
+
+/// Ability abbreviation used for TO-HIT. Class-routed seam (docs/CHARACTER_REWORK.md).
+/// Rogue with a light/unarmed weapon routes through DEX (finesse); all others STR.
+/// No RNG draws — only which modifier is read.
 pub fn attackAbbr(ent: *const entity.Entity) []const u8 {
-    return attackStatAbbr(ent.char.class.name);
+    return attackStatAbbr(ent);
 }
 
-/// Ability abbreviation used for DAMAGE modifier. Same routing as attackAbbr
-/// today (both STR); kept separate so future phases can diverge if needed.
+/// Ability abbreviation used for DAMAGE modifier. Same routing as attackAbbr.
 pub fn damageAbbr(ent: *const entity.Entity) []const u8 {
-    return attackStatAbbr(ent.char.class.name);
+    return attackStatAbbr(ent);
 }
 
-fn attackStatAbbr(class_name: []const u8) []const u8 {
-    // Explicit cases document the current roster; default covers monsters and
-    // any future class that stays STR-based until a dedicated branch is added.
-    if (std.mem.eql(u8, class_name, "barbarian")) return "STR";
-    if (std.mem.eql(u8, class_name, "fighter")) return "STR";
-    if (std.mem.eql(u8, class_name, "bard")) return "STR";
-    // Future: if (std.mem.eql(u8, class_name, "rogue")) return "DEX";
+fn attackStatAbbr(ent: *const entity.Entity) []const u8 {
+    // Rogue finesse: DEX with light/unarmed only; heavy weapons revert to STR.
+    if (std.mem.eql(u8, ent.char.class.name, "rogue") and !wieldingHeavy(ent)) return "DEX";
+    // barbarian, fighter, monster, and any future STR class.
     return "STR";
+}
+
+/// Fighter discipline: damage-die natural 1 clamps to 2 (no-fumble). Pure; no draws.
+pub fn disciplineFace(class_name: []const u8, face: u8) u8 {
+    if (std.mem.eql(u8, class_name, "fighter") and face == 1) return 2;
+    return face;
 }
 
 pub fn assignStatPool(
@@ -158,9 +167,9 @@ test "abilityModifier floors toward negative infinity" {
     try std.testing.expectEqual(@as(i32, 2), abilityModifier(14));
 }
 
-test "attackAbbr and damageAbbr return STR for current classes and monsters" {
+test "attackAbbr and damageAbbr return STR for non-finesse classes and monsters" {
     const allocator = std.testing.allocator;
-    const classes = [_][]const u8{ "barbarian", "fighter", "bard", "monster" };
+    const classes = [_][]const u8{ "barbarian", "fighter", "monster" };
     for (classes) |class_name| {
         var attrs = try types.defaultAttributes(allocator);
         defer attrs.deinit(allocator);
@@ -180,6 +189,45 @@ test "attackAbbr and damageAbbr return STR for current classes and monsters" {
         try std.testing.expectEqualStrings("STR", attackAbbr(&ent));
         try std.testing.expectEqualStrings("STR", damageAbbr(&ent));
     }
+}
+
+test "rogue finesse uses DEX unarmed/light and STR with heavy weapon" {
+    const allocator = std.testing.allocator;
+    var attrs = try types.defaultAttributes(allocator);
+    defer attrs.deinit(allocator);
+    var char = types.Character{
+        .name = "t",
+        .attributes = attrs,
+        .race = .{ .name = "elf", .speed = 30, .attr_bonuses = .empty },
+        .class = .{ .name = "rogue", .hit_die = 8 },
+    };
+    var ent = entity.Entity{
+        .id = 0,
+        .name = undefined,
+        .loc = .{ .x = 0, .y = 0 },
+        .char = &char,
+        .conditions = types.ConditionSet.initEmpty(),
+    };
+    // Unarmed: light → DEX.
+    try std.testing.expect(!wieldingHeavy(&ent));
+    try std.testing.expectEqualStrings("DEX", attackAbbr(&ent));
+    try std.testing.expectEqualStrings("DEX", damageAbbr(&ent));
+    // Short sword: light → DEX.
+    ent.inventory.weapon = .short_sword;
+    try std.testing.expect(!wieldingHeavy(&ent));
+    try std.testing.expectEqualStrings("DEX", attackAbbr(&ent));
+    // Greatsword: heavy → STR.
+    ent.inventory.weapon = .greatsword;
+    try std.testing.expect(wieldingHeavy(&ent));
+    try std.testing.expectEqualStrings("STR", attackAbbr(&ent));
+    try std.testing.expectEqualStrings("STR", damageAbbr(&ent));
+}
+
+test "discipline clamps fighter damage face 1 to 2" {
+    try std.testing.expectEqual(@as(u8, 2), disciplineFace("fighter", 1));
+    try std.testing.expectEqual(@as(u8, 3), disciplineFace("fighter", 3));
+    try std.testing.expectEqual(@as(u8, 1), disciplineFace("barbarian", 1));
+    try std.testing.expectEqual(@as(u8, 1), disciplineFace("rogue", 1));
 }
 
 test "maxHpLevel1 with low con uses floor modifier" {

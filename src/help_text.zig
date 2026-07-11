@@ -37,7 +37,7 @@ pub const repl_v11_golden =
     \\          chains: move w w   or   move w; move w
     \\gear:     get [item], get from corpse, loot (corpse first), drop <item>, inventory (inv), examine <item>, equip <item>, unequip <slot|item>, use <item>  (help gear)
     \\ai:      monsters act on wait/move/get/drop/loot/use/open/close/wound when explore AI is on; ambush seats the monster first
-    \\combat:   attack [target], end turn, flee (disengage/retreat), catch breath
+    \\combat:   attack [target], end turn, flee (disengage/retreat), catch breath, reckless, guard, second wind
     \\persist:  save [slot], load <slot>
     \\
     \\example: assign 6 5 4 3 2 1
