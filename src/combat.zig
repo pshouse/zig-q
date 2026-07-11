@@ -11,6 +11,7 @@ const items = @import("items.zig");
 const survival = @import("survival.zig");
 const movement = @import("movement.zig");
 const pathfinding = @import("pathfinding.zig");
+const perception = @import("perception.zig");
 
 /// Consecutive passTurn cycles with no adjacent living hostile before combat
 /// auto-ends (lost contact). Covers the #42 soft-lock where a monster cannot
@@ -103,7 +104,28 @@ fn weaponDamageBonus(attacker: *const entity.Entity) i32 {
     return 0;
 }
 
-fn rollDamage(w: *world.World, attacker: *entity.Entity) i32 {
+/// Backstab qualifies when: Rogue + light/unarmed + (hidden | first-strike-unaware | frightened).
+/// `was_unaware` must be snapshotted before `enterCombat` flips status to `.fighting`.
+pub fn backstabQualifies(
+    attacker: *const entity.Entity,
+    target: *const entity.Entity,
+    was_unaware: bool,
+    was_hidden: bool,
+) bool {
+    if (!character.canBackstabWeapon(attacker)) return false;
+    if (was_hidden) return true;
+    if (was_unaware) return true;
+    if (conditions.has(target, .frightened)) return true;
+    return false;
+}
+
+fn rollDamage(
+    w: *world.World,
+    attacker: *entity.Entity,
+    target: *const entity.Entity,
+    was_unaware: bool,
+    was_hidden: bool,
+) i32 {
     var mod = character.abilityModifier(character.statByAbbr(attacker.char, character.damageAbbr(attacker)));
     mod += @as(i32, @intCast(attacker.danger_tier));
     mod += weaponDamageBonus(attacker);
@@ -113,6 +135,14 @@ fn rollDamage(w: *world.World, attacker: *entity.Entity) i32 {
     const face = character.disciplineFace(attacker.char.class.name, raw);
     attacker.last_damage_face = face;
     var dmg = @max(@as(i32, face) + mod, 0);
+    // Rogue backstab: +1 extra weapon/innate die after the primary face, qualifying branch only.
+    // No golden selects a rogue, so this draw never appears in frozen transcripts.
+    attacker.last_backstab_extra = 0;
+    if (backstabQualifies(attacker, target, was_unaware, was_hidden)) {
+        const extra = w.rng.rollDie(die);
+        attacker.last_backstab_extra = extra;
+        dmg += extra;
+    }
     // Danger-tier hits always cost ≥ 1 HP (floors 1–3 unchanged).
     if (attacker.danger_tier > 0) dmg = @max(dmg, 1);
     return dmg;
@@ -327,6 +357,11 @@ pub fn endCombat(w: *world.World) void {
     }
 }
 
+/// Clear explore-transient stealth (not a schema field; also safe after save/load).
+pub fn clearHidden(ent: *entity.Entity) void {
+    ent.hidden = false;
+}
+
 fn advanceTurn(w: *world.World) void {
     const combat = w.combat orelse return;
     if (combat.participants.items.len == 0) return;
@@ -346,12 +381,28 @@ pub fn performAttack(
     target_id: entity.EntityId,
     writer: anytype,
 ) !void {
+    // Default: no first-strike snapshot (monster counters, opportunity attacks).
+    try performAttackEx(w, attacker_id, target_id, false, false, writer);
+}
+
+/// Like `performAttack`, with pre-`enterCombat` snapshots for rogue backstab.
+pub fn performAttackEx(
+    w: *world.World,
+    attacker_id: entity.EntityId,
+    target_id: entity.EntityId,
+    was_unaware: bool,
+    was_hidden: bool,
+    writer: anytype,
+) !void {
     const attacker = w.store.get(attacker_id) orelse return error.AttackerNotFound;
     const target = w.store.get(target_id) orelse return error.TargetNotFound;
 
     if (!isAlive(attacker)) return error.AttackerDead;
     if (!isAlive(target)) return error.TargetDead;
     if (!isAdjacent(attacker.loc, target.loc)) return error.NotAdjacent;
+
+    // Attacking always breaks stealth (after snapshot for this swing).
+    attacker.hidden = false;
 
     const roll = attackRoll(w, attacker);
     const mod = attackModifier(attacker, target);
@@ -363,9 +414,15 @@ pub fn performAttack(
     });
 
     if (hit) {
-        const dmg = rollDamage(w, attacker);
+        const dmg = rollDamage(w, attacker, target, was_unaware, was_hidden);
         applyDamage(target, @intCast(dmg));
-        try writer.print("hit damage={} hp={}/{}\n", .{ dmg, target.current_hp, target.max_hp });
+        if (attacker.last_backstab_extra > 0) {
+            try writer.print("hit damage={} (backstab +{}) hp={}/{}\n", .{
+                dmg, attacker.last_backstab_extra, target.current_hp, target.max_hp,
+            });
+        } else {
+            try writer.print("hit damage={} hp={}/{}\n", .{ dmg, target.current_hp, target.max_hp });
+        }
         if (roll == 20 and weaponTrait(attacker) == .trip) {
             conditions.apply(target, .prone);
             try writer.print("{s} is knocked prone\n", .{target.name});
@@ -428,7 +485,8 @@ fn opportunityAttack(
         return;
     }
 
-    const dmg = rollDamage(w, attacker);
+    // Opportunity attacks never backstab (was_unaware/was_hidden = false).
+    const dmg = rollDamage(w, attacker, target, false, false);
     applyDamage(target, @intCast(dmg));
     try writer.print("hit damage={} hp={}/{}\n", .{ dmg, target.current_hp, target.max_hp });
     if (!isAlive(target)) {
@@ -483,6 +541,9 @@ fn processMonsterTurns(w: *world.World, writer: anytype) !void {
             advanceTurn(w);
             continue;
         }
+        // Stealth spot-check: ONLY when player.hidden (no golden reaches this state).
+        // Draw order of non-hidden combat is unchanged.
+        _ = try trySpotHiddenPlayer(w, ent, player, writer);
         // Mundane fear: a frightened monster never attacks — it flees or cowers.
         // Only reachable via `intimidate` (no golden enters this state), so existing
         // combat transcripts keep their exact draw order.
@@ -604,15 +665,108 @@ pub fn attack(
     if (conditions.blocksAttack(attacker)) return error.CannotAct;
     const target = findTarget(w, attacker_id, target_name) orelse return error.NoTarget;
     if (!isAdjacent(attacker.loc, target.loc)) return error.NotAdjacent;
+
+    // Snapshot BEFORE enterCombat flips `.exploring` → `.fighting` (backstab first-strike).
+    const was_unaware = target.char.status == .exploring;
+    const was_hidden = attacker.hidden;
+
     // Player-initiated: player acts first.
     if (!isInCombat(w)) try enterCombat(w, attacker_id, target.id, attacker_id);
-    try performAttack(w, attacker_id, target.id, writer);
+    try performAttackEx(w, attacker_id, target.id, was_unaware, was_hidden, writer);
 
-    // D1: on danger floors, monsters counter after every player attack (floors 1â€“3
-    // keep legacy alternation â€” no passTurn, no new RNG on those paths).
+    // D1: on danger floors, monsters counter after every player attack (floors 1–3
+    // keep legacy alternation — no passTurn, no new RNG on those paths).
     if (isInCombat(w) and combatHasDangerTier(w)) {
         try passTurnToOpponents(w, writer);
     }
+}
+
+/// Base DC for monster spot-check of a hidden player at distance 0; +1 per Manhattan tile.
+/// Mirrors `perception.trap_spot_dc_base` style. Closer = easier to spot.
+pub const spot_hidden_dc_base: i32 = 10;
+
+/// Sneak DC from the nearest living monster. Harder when a monster is close or has LOS.
+/// No monster → DC 8 (empty hall). Pure — no draws.
+pub fn sneakDc(w: *const world.World, player: *const entity.Entity) i32 {
+    var best_dist: ?u64 = null;
+    var best_los = false;
+    for (w.store.entities.items) |*ent| {
+        if (!ent.is_monster) continue;
+        if (!isAlive(ent)) continue;
+        const dist = manhattanDist(player.loc, ent.loc);
+        const los = if (w.has_dungeon)
+            perception.hasLineOfSight(&w.terrain, player.loc, ent.loc)
+        else
+            true;
+        if (best_dist == null or dist < best_dist.? or (dist == best_dist.? and los and !best_los)) {
+            best_dist = dist;
+            best_los = los;
+        }
+    }
+    const dist = best_dist orelse return 8;
+    // Closer / LOS = harder. Cap stays modest so a DEX-focused build can pass adjacent.
+    // dist 1 + LOS → 14; dist 3 + LOS → 12; far / no LOS → 10.
+    var dc: i32 = 10;
+    if (dist == 1) dc += 2 else if (dist <= 3) dc += 1;
+    if (best_los) dc += 2;
+    return dc;
+}
+
+/// Explore-phase `sneak`: d20 + DEX mod ≥ DC → set transient `hidden`. One draw.
+/// Out of combat only. New command path — never issued by frozen goldens.
+pub fn sneak(w: *world.World, actor_id: entity.EntityId, writer: anytype) !void {
+    if (isInCombat(w)) return error.InCombat;
+    const actor = w.store.get(actor_id) orelse return error.AttackerNotFound;
+    if (conditions.blocksMove(actor) or conditions.blocksAttack(actor)) return error.CannotAct;
+
+    const dex_mod = character.abilityModifier(character.statByAbbr(actor.char, "DEX"));
+    const roll: i32 = w.rng.rollDie(20);
+    const dc = sneakDc(w, actor);
+    const total = roll + dex_mod;
+    try writer.print("sneak roll={} mod={} total={} vs dc={}\n", .{ roll, dex_mod, total, dc });
+    if (total >= dc) {
+        actor.hidden = true;
+        try writer.print("you are hidden\n", .{});
+    } else {
+        actor.hidden = false;
+        try writer.print("still visible\n", .{});
+    }
+}
+
+/// Monster spot-check against a hidden player. **Only draws when `player.hidden`.**
+/// d20 + monster WIS mod ≥ base + distance (mirrors trap-spot). LOS required to attempt.
+/// Returns true if the player was spotted (and `hidden` cleared).
+pub fn trySpotHiddenPlayer(
+    w: *world.World,
+    monster: *entity.Entity,
+    player: *entity.Entity,
+    writer: anytype,
+) !bool {
+    // Golden-safe gate: no shipped scenario sets player.hidden, so this never draws
+    // on existing combat/explore transcripts.
+    if (!player.hidden) return false;
+    if (!isAlive(monster) or !isAlive(player)) return false;
+
+    const has_los = if (w.has_dungeon)
+        perception.hasLineOfSight(&w.terrain, monster.loc, player.loc)
+    else
+        true;
+    if (!has_los) return false;
+
+    const dist = manhattanDist(monster.loc, player.loc);
+    const wis_mod = character.abilityModifier(character.statByAbbr(monster.char, "WIS"));
+    const roll: i32 = w.rng.rollDie(20);
+    const dc = spot_hidden_dc_base + @as(i32, @intCast(dist));
+    const total = roll + wis_mod;
+    try writer.print("spot {s}->{s} roll={} mod={} total={} vs dc={}\n", .{
+        monster.name, player.name, roll, wis_mod, total, dc,
+    });
+    if (total >= dc) {
+        player.hidden = false;
+        try writer.print("{s} spots you\n", .{monster.name});
+        return true;
+    }
+    return false;
 }
 
 pub fn endTurn(w: *world.World, actor_id: entity.EntityId, writer: anytype) !void {
@@ -830,7 +984,7 @@ test "looting a weaker weapon never cuts a melee class's damage die" {
     var min_dmg: i32 = std.math.maxInt(i32);
     var i: usize = 0;
     while (i < 200) : (i += 1) {
-        const dmg = rollDamage(&w, player);
+        const dmg = rollDamage(&w, player, player, false, false);
         max_dmg = @max(max_dmg, dmg);
         min_dmg = @min(min_dmg, dmg);
     }

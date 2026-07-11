@@ -129,6 +129,7 @@ const templates = [_][]const u8{
     "pick north",
     "intimidate goblin_0",
     "intimidate skeleton_0",
+    "sneak",
     "assign 6 5 4 3 2 1; race 4; class 3; spawn",
     "assign 6 5 4 3 2 1; race 3; class 3; spawn",
     "equip greatsword",
@@ -136,6 +137,10 @@ const templates = [_][]const u8{
     "equip wooden_shield",
     // Phase 3: combat intimidate after spawn so the walk can reach frightened flee.
     "assign 6 5 4 3 2 1; race 2; class 1; spawn; attack goblin_0; intimidate goblin_0",
+    // Phase 4: sneak → hidden → attack (clears hidden; backstab if rogue light).
+    "assign 6 5 4 3 2 1; race 3; class 3; spawn; sneak; attack goblin_0",
+    "assign 6 5 4 3 2 1; race 3; class 3; spawn; equip short sword; sneak; attack goblin_0",
+    "assign 6 5 4 3 2 1; race 3; class 3; spawn; equip greatsword; attack goblin_0",
 };
 
 pub fn run(allocator: std.mem.Allocator, cfg: Config) !Report {
@@ -553,6 +558,29 @@ pub fn assertInvariantsTracked(
                 // the flee-only branch is enforced in processMonsterTurns. Sanity:
                 // frightened does not imply dead.
                 if (conditions.isDead(ent)) return error.FrightenedDeadInconsistency;
+            }
+        }
+    }
+
+    // Phase 4: stealth + backstab invariants.
+    {
+        if (player_id != entity.invalid_id) {
+            if (w.store.get(player_id)) |player| {
+                // Backstab extra die only for rogue + light/unarmed (qualifiers are
+                // snapshotted at attack time; weapon/class still hold afterward).
+                if (player.last_backstab_extra > 0) {
+                    if (!std.mem.eql(u8, player.char.class.name, "rogue"))
+                        return error.BackstabNonRogue;
+                    if (character.wieldingHeavy(player))
+                        return error.BackstabHeavyWeapon;
+                    // A successful backstab swing clears hidden before damage resolves.
+                    if (player.hidden) return error.HiddenSurvivedBackstab;
+                }
+                // Hidden is explore-only while out of combat: entering combat via
+                // player attack clears it; ambush can leave it until the player acts.
+                // Structural: never hidden while the player is the mid-swing source of
+                // last_backstab_extra (covered above). Spot-check draws only when
+                // player.hidden — enforced in trySpotHiddenPlayer (no golden path).
             }
         }
     }
