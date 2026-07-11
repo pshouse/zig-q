@@ -40,8 +40,13 @@ pub const Entity = struct {
     guarding: bool = false,
     /// Fighter `second wind` once-per-floor self-heal. Reset on descend; not persisted.
     second_wind_used: bool = false,
+    /// Explore/combat-transient stealth: set by successful `sneak`, cleared on attack or
+    /// being spotted. Not persisted (like reckless/frightened).
+    hidden: bool = false,
     /// Last damage-die face after discipline clamp (0 = none). Fuzz/discipline probe only.
     last_damage_face: u8 = 0,
+    /// Last backstab extra-die face (0 = no backstab this hit). Fuzz probe only.
+    last_backstab_extra: u8 = 0,
     /// Remaining poison DoT ticks (0 = unset / cleared). CON shortens on apply; not persisted.
     poison_ticks_remaining: u16 = 0,
 };

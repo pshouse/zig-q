@@ -1287,6 +1287,80 @@ pub const poison_resist_scenario = Scenario{
     },
 };
 
+/// Phase 4: sneak sets transient `hidden`; adjacent monster spot-check clears it.
+/// Spot-check draws ONLY when player.hidden (this scenario is the only one that enters it).
+pub const sneak_hidden_scenario = Scenario{
+    .name = "sneak_hidden",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 3 }, // elf
+        .{ .choose_class = 3 }, // rogue
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .set_attribute = .{ .entity = "entity_0", .abbr = "DEX", .value = 40 } }, // mod +15; always pass sneak DC
+        .{ .spawn_monster = .{ .kind = .goblin, .name = "goblin_0", .x = 50, .y = 49 } },
+        .{ .set_attribute = .{ .entity = "goblin_0", .abbr = "WIS", .value = 40 } }, // always spot when hidden
+        .{ .command = "sneak" }, // sets hidden, then finishExploreAction → monster spots
+        .{ .command = "conditions" }, // no stealth: hidden after spot
+        .{ .command = "exit" },
+    },
+};
+
+/// Phase 4: rogue backstab — extra die when (hidden|first-strike-unaware|frightened) + light.
+/// Heavy weapon or non-qualifying target does not append the die.
+pub const rogue_backstab_scenario = Scenario{
+    .name = "rogue_backstab",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 3 }, // elf
+        .{ .choose_class = 3 }, // rogue
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .set_attribute = .{ .entity = "entity_0", .abbr = "STR", .value = 10 } },
+        .{ .set_attribute = .{ .entity = "entity_0", .abbr = "DEX", .value = 40 } }, // hit reliably + sneak
+        .{ .set_attribute = .{ .entity = "entity_0", .abbr = "CHA", .value = 40 } }, // intimidate
+        .{ .give_item = .{ .entity = "entity_0", .item = .short_sword, .count = 1 } },
+        .{ .give_item = .{ .entity = "entity_0", .item = .greatsword, .count = 1 } },
+        .{ .command = "equip short_sword" },
+        // (1) First-strike-unaware + light → backstab.
+        .{ .spawn_monster = .{ .kind = .goblin, .name = "goblin_0", .x = 50, .y = 49 } },
+        .{ .set_hp = .{ .entity = "goblin_0", .current = 80 } },
+        .{ .command = "attack goblin_0" },
+        // (2) Same fight, not hidden / not frightened / not unaware → no backstab.
+        .{ .command = "attack goblin_0" },
+        // (3) Heavy weapon + first-strike-unaware → no backstab.
+        .{ .command = "flee" },
+        .{ .command = "equip greatsword" },
+        .{ .spawn_monster = .{ .kind = .goblin, .name = "goblin_1", .x = 50, .y = 49 } },
+        .{ .set_hp = .{ .entity = "goblin_1", .current = 80 } },
+        .{ .command = "attack goblin_1" },
+        // (4) Light + frightened → backstab (even mid-fight after first swing).
+        .{ .command = "flee" },
+        .{ .command = "equip short_sword" },
+        .{ .spawn_monster = .{ .kind = .goblin, .name = "goblin_2", .x = 50, .y = 49 } },
+        .{ .set_hp = .{ .entity = "goblin_2", .current = 80 } },
+        .{ .command = "attack goblin_2" }, // opens combat (may backstab as unaware — ok)
+        .{ .set_hp = .{ .entity = "goblin_2", .current = 1 } },
+        .{ .command = "intimidate goblin_2" },
+        .{ .set_hp = .{ .entity = "goblin_2", .current = 80 } }, // survive next hit
+        // If intimidate fled them out of reach, re-open; else attack while frightened.
+        .{ .command = "attack goblin_2" },
+        // (5) Hidden + light: sneak with no adjacent hostile, then place goblin and strike.
+        .{ .command = "flee" },
+        .{ .command = "sneak" }, // empty hall DC, hidden
+        .{ .spawn_monster = .{ .kind = .goblin, .name = "goblin_3", .x = 50, .y = 49 } },
+        .{ .set_hp = .{ .entity = "goblin_3", .current = 80 } },
+        .{ .command = "attack goblin_3" }, // was_hidden + was_unaware
+        .{ .command = "exit" },
+    },
+};
+
 pub const trap_trigger_scenario = Scenario{
     .name = "trap_trigger",
     .seed = 42,
@@ -1837,6 +1911,7 @@ pub const registered_scenario_names = [_][]const u8{
     "discipline_second_wind",
     "elf_speed_deepfloor", "human_create",
     "disarm_pick",       "intimidate_flee",   "poison_resist",
+    "sneak_hidden",      "rogue_backstab",
 };
 
 pub fn scenarioByName(name: []const u8, seed: u64) ?Scenario {
@@ -1960,6 +2035,10 @@ pub fn scenarioByName(name: []const u8, seed: u64) ?Scenario {
         return Scenario{ .name = "intimidate_flee", .seed = seed, .steps = intimidate_flee_scenario.steps };
     if (std.mem.eql(u8, name, "poison_resist"))
         return Scenario{ .name = "poison_resist", .seed = seed, .steps = poison_resist_scenario.steps };
+    if (std.mem.eql(u8, name, "sneak_hidden"))
+        return Scenario{ .name = "sneak_hidden", .seed = seed, .steps = sneak_hidden_scenario.steps };
+    if (std.mem.eql(u8, name, "rogue_backstab"))
+        return Scenario{ .name = "rogue_backstab", .seed = seed, .steps = rogue_backstab_scenario.steps };
     return null;
 }
 
@@ -2693,6 +2772,33 @@ test "dst poison_resist scenario is byte-identical across runs" {
     // After high-CON duration expires: conditions: none. After low-CON partial: still poisoned.
     try std.testing.expect(std.mem.indexOf(u8, out, "conditions: none") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "conditions: poisoned") != null);
+}
+
+test "dst sneak_hidden scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "sneak_hidden", 65536);
+    defer allocator.free(out);
+    try std.testing.expect(std.mem.indexOf(u8, out, "you are hidden") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "spots you") != null);
+    // After spot-clear, conditions should not report stealth: hidden.
+    const spots = std.mem.indexOf(u8, out, "spots you").?;
+    try std.testing.expect(std.mem.indexOf(u8, out[spots..], "stealth: hidden") == null);
+}
+
+test "dst rogue_backstab scenario is byte-identical across runs" {
+    const allocator = std.testing.allocator;
+    const out = try expectScenarioDeterministic(allocator, "rogue_backstab", 65536);
+    defer allocator.free(out);
+    try std.testing.expect(std.mem.indexOf(u8, out, "backstab +") != null);
+    // Heavy-weapon attack line (greatsword) must not carry a backstab tag.
+    // Find the greatsword equip, then the next attack on goblin_1.
+    const heavy = std.mem.indexOf(u8, out, "equipped greatsword") orelse return error.NoGreatswordEquip;
+    const g1 = std.mem.indexOf(u8, out[heavy..], "attack entity_0->goblin_1") orelse return error.NoGoblin1Attack;
+    const g1_line_start = heavy + g1;
+    // The attack line ends at newline; backstab must not appear on that line.
+    const nl = std.mem.indexOf(u8, out[g1_line_start..], "\n") orelse out.len - g1_line_start;
+    const g1_line = out[g1_line_start .. g1_line_start + nl];
+    try std.testing.expect(std.mem.indexOf(u8, g1_line, "backstab") == null);
 }
 
 test "provisioned player on a direct stairs route reaches floor 5 alive on all tested seeds" {

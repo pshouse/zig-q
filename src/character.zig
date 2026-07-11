@@ -36,6 +36,11 @@ pub fn disciplineFace(class_name: []const u8, face: u8) u8 {
     return face;
 }
 
+/// Rogue backstab gate: light/unarmed only. Pure — no draws.
+pub fn canBackstabWeapon(ent: *const entity.Entity) bool {
+    return std.mem.eql(u8, ent.char.class.name, "rogue") and !wieldingHeavy(ent);
+}
+
 pub fn assignStatPool(
     attributes: *std.ArrayList(types.Attribute),
     pool: session.StatPool,

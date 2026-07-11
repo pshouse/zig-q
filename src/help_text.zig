@@ -33,7 +33,7 @@ pub const gear_golden =
 
 pub const repl_v11_golden =
     \\creation: roll, assign <6 picks>, race <1-4>, class <1-3>, spawn, stats
-    \\explore:  look (l), time, move <n|s|e|w|nw|...>, m <dir>, wait, food, rest, sleep, conditions, descend, disarm, pick [dir], help, help gear, exit
+    \\explore:  look (l), time, move <n|s|e|w|nw|...>, m <dir>, wait, food, rest, sleep, conditions, descend, disarm, pick [dir], sneak, help, help gear, exit
     \\          chains: move w w   or   move w; move w
     \\gear:     get [item], get from corpse, loot (corpse first), drop <item>, inventory (inv), examine <item>, equip <item>, unequip <slot|item>, use <item>  (help gear)
     \\ai:      monsters act on wait/move/get/drop/loot/use/open/close/wound when explore AI is on; ambush seats the monster first
@@ -78,6 +78,7 @@ test "repl_v11 help lists wait and conditions" {
     try std.testing.expect(std.mem.indexOf(u8, out, "get from corpse") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "disarm") != null);
     try std.testing.expect(std.mem.indexOf(u8, out, "intimidate") != null);
+    try std.testing.expect(std.mem.indexOf(u8, out, "sneak") != null);
 }
 
 test "repl help redirects to live repl_v11 surface" {

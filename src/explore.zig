@@ -266,6 +266,15 @@ pub fn runExploreMonsterTurns(w: *world.World, player_id: entity.EntityId, write
     var i: usize = 0;
     while (i < n) : (i += 1) {
         const mid = ids[i];
+        // Spot-check a hidden player before the monster moves. Gated on player.hidden
+        // so existing explore transcripts keep their exact draw order.
+        if (w.store.get(player_id)) |p| {
+            if (p.hidden) {
+                if (w.store.get(mid)) |m| {
+                    _ = try combat.trySpotHiddenPlayer(w, m, p, writer);
+                }
+            }
+        }
         const monster = w.store.get(mid) orelse continue;
         const dir = chooseMonsterDirection(w, monster, player) orelse continue;
         const before = monster.loc;

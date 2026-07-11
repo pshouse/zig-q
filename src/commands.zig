@@ -86,6 +86,8 @@ pub const Command = union(enum) {
     /// CHA morale: intimidate a combat target into `frightened`.
     intimidate_target: []const u8,
     intimidate_usage,
+    /// Explore-phase stealth: DEX check → transient `hidden`.
+    sneak,
     use_item: []const u8,
     wound,
     unknown: []const u8,
@@ -231,6 +233,7 @@ pub fn parseLine(line: []const u8) Command {
         if (arg.len > 0) return .{ .intimidate_target = arg };
         return .intimidate_usage;
     }
+    if (std.mem.eql(u8, trimmed, "sneak")) return .sneak;
     if (std.mem.startsWith(u8, trimmed, "use ")) {
         const arg = std.mem.trim(u8, trimmed[4..], " \t");
         if (arg.len > 0) return .{ .use_item = arg };
@@ -1296,6 +1299,26 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                 else => |e| return e,
             };
         },
+        .sneak => {
+            if (!isSpawned(ctx)) {
+                try writer.print("no player spawned\n", .{});
+                return .continue_repl;
+            }
+            combat.sneak(ctx.w, ctx.player_id, writer) catch |err| switch (err) {
+                error.InCombat => {
+                    try writer.print("cannot sneak during combat\n", .{});
+                    return .continue_repl;
+                },
+                error.CannotAct => {
+                    try writer.print("cannot sneak while incapacitated\n", .{});
+                    return .continue_repl;
+                },
+                else => |e| return e,
+            };
+            // Sneak costs a moment of the explore clock and may draw monster AI.
+            try tickPlayerAction(ctx, 1, writer);
+            try finishExploreAction(ctx, writer);
+        },
         .use_item => |name| return cmdUse(ctx, name, writer),
         .wound => return cmdWound(ctx, writer),
         .conditions_cmd => {
@@ -1306,6 +1329,7 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
             try writer.writeAll("conditions: ");
             try conditions.formatList(ent, writer);
             try writer.writeAll("\n");
+            if (ent.hidden) try writer.writeAll("stealth: hidden\n");
         },
         .inventory_cmd => return cmdInventory(ctx, writer),
         .get_item => |target| return cmdGet(ctx, target, writer),
