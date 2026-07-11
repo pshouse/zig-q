@@ -8,3 +8,4 @@ terminals/
 deps/sqlite3/sqlite-amalgamation.zip
 deps/sqlite3/extracted/
 .fleet/
+.gate-scratch/
