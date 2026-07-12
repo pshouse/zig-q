@@ -55,6 +55,7 @@ pub const evidence_v15 = @import("evidence_v15.zig");
 pub const evidence_v16 = @import("evidence_v16.zig");
 pub const evidence_v17 = @import("evidence_v17.zig");
 pub const evidence_v18 = @import("evidence_v18.zig");
+pub const evidence_v19 = @import("evidence_v19.zig");
 pub const wave_gate = @import("wave_gate.zig");
 pub const help_text = @import("help_text.zig");
 pub const evidence_format = @import("evidence_format.zig");

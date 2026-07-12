@@ -347,7 +347,9 @@ test "harvested george2 ironman transcript is deterministic and permadeath-locke
     try std.testing.expect(std.mem.indexOf(u8, out_a, "descended to floor 4") != null);
     try std.testing.expect(std.mem.indexOf(u8, out_a, "equipped greatsword") != null);
     try std.testing.expect(std.mem.indexOf(u8, out_a, "starvation deals") != null);
-    try std.testing.expect(std.mem.indexOf(u8, out_a, "you are dead (permadeath)") != null);
+    // v1.9.0 clock easing + descend HP growth: the original killer on this route
+    // was the deep-floor clock, so permadeath within 177 cmds is no longer
+    // guaranteed. Pin starvation DoT + floor-4 + gear; byte-identity is mandatory.
     try std.testing.expectEqualSlices(u8, out_a, out_b);
 }
 
