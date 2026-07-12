@@ -89,12 +89,14 @@ pub fn isStarving(hunger: u16) bool {
 }
 
 fn fatigueExhaustion(fatigue: u16) u3 {
+    // Tiers 0/1 frozen at 20/40 so reference_crawl's fatigue=26 → tier 1 is unchanged.
+    // Penalty onset pushed up (v1.9.0): 55/70/85/95 → 62/78/90/97.
     if (fatigue < 20) return 0;
     if (fatigue < 40) return 1;
-    if (fatigue < 55) return 2;
-    if (fatigue < 70) return 3;
-    if (fatigue < 85) return 4;
-    if (fatigue < 95) return 5;
+    if (fatigue < 62) return 2;
+    if (fatigue < 78) return 3;
+    if (fatigue < 90) return 4;
+    if (fatigue < 97) return 5;
     return 6;
 }
 
@@ -527,6 +529,31 @@ test "food reduces hunger" {
     try std.testing.expectEqual(@as(u16, 10), hunger);
 }
 
+test "fatigueExhaustion v1.9.0 boundaries 62/78/90/97" {
+    // Tiers 0/1 frozen.
+    try std.testing.expectEqual(@as(u3, 0), fatigueExhaustion(0));
+    try std.testing.expectEqual(@as(u3, 0), fatigueExhaustion(19));
+    try std.testing.expectEqual(@as(u3, 1), fatigueExhaustion(20));
+    try std.testing.expectEqual(@as(u3, 1), fatigueExhaustion(39));
+    try std.testing.expectEqual(@as(u3, 2), fatigueExhaustion(40));
+    try std.testing.expectEqual(@as(u3, 2), fatigueExhaustion(61));
+    // New penalty onset.
+    try std.testing.expectEqual(@as(u3, 3), fatigueExhaustion(62));
+    try std.testing.expectEqual(@as(u3, 3), fatigueExhaustion(77));
+    try std.testing.expectEqual(@as(u3, 4), fatigueExhaustion(78));
+    try std.testing.expectEqual(@as(u3, 4), fatigueExhaustion(89));
+    try std.testing.expectEqual(@as(u3, 5), fatigueExhaustion(90));
+    try std.testing.expectEqual(@as(u3, 5), fatigueExhaustion(96));
+    try std.testing.expectEqual(@as(u3, 6), fatigueExhaustion(97));
+    try std.testing.expectEqual(@as(u3, 6), fatigueExhaustion(100));
+    // Mid-band points that used to be higher tiers under the old 55/70/85/95 table.
+    try std.testing.expectEqual(@as(u3, 2), fatigueExhaustion(55));
+    try std.testing.expectEqual(@as(u3, 2), fatigueExhaustion(60));
+    try std.testing.expectEqual(@as(u3, 3), fatigueExhaustion(70));
+    try std.testing.expectEqual(@as(u3, 3), fatigueExhaustion(75));
+    try std.testing.expectEqual(@as(u3, 4), fatigueExhaustion(85));
+}
+
 test "exhaustion notice on level increase" {
     var buf: [128]u8 = undefined;
     var fbs = std.io.fixedBufferStream(&buf);
@@ -660,10 +687,10 @@ test "only sleep resets fatigue to zero and clears exhaustion" {
 
 test "crossing exhaustion tier 4 halves the recovery cap but drains no hp" {
     var ent = testEntity();
-    ent.fatigue = 69; // one tick below tier 4
+    ent.fatigue = 77; // one tick below tier 4 (v1.9.0 onset 78)
     var w: world.World = undefined;
     w.combat = null;
-    onTick(&w, &ent); // fatigue 70 -> exhaustion 4
+    onTick(&w, &ent); // fatigue 78 -> exhaustion 4
     try std.testing.expectEqual(@as(u3, 4), conditions.exhaustionLevel(&ent));
     try std.testing.expectEqual(@as(u32, 5), effectiveMaxHp(&ent)); // cap halved (10 -> 5)...
     try std.testing.expectEqual(@as(u32, 10), ent.current_hp); // ...but current hp intact

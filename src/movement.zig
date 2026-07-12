@@ -79,7 +79,9 @@ pub fn moveEntity(w: *world.World, id: entity.EntityId, dir: Direction) !loc.Loc
         const ex = @import("conditions.zig").exhaustionLevel(ent);
         if (ex >= 3) {
             extra += 1;
-        } else if (ex >= 1 and w.floor_index >= 4) {
+        } else if (ex >= 2 and w.floor_index >= 4) {
+            // Gate at tier 2+: rest floors fatigue at 20 = tier 1, so an
+            // ex>=1 gate made the deep-floor surcharge permanently on.
             extra += 1;
         }
         // Deep-floor race speed: floors ≥ 4 only (floors 1–3 goldens untouched).
@@ -92,6 +94,9 @@ pub fn moveEntity(w: *world.World, id: entity.EntityId, dir: Direction) !loc.Loc
             }
         }
     }
+    // Cap the deep-floor stack so a slow race cannot pay +3/+4 (race surcharge
+    // is ungated by exhaustion). Dwarf → flat 2 ticks/move; elf/human → 1.
+    if (w.floor_index >= 4 and extra > 1) extra = 1;
     if (extra < 0) extra = 0;
 
     w.tick();
@@ -216,9 +221,8 @@ test "deep-floor race speed: slow pays +1, fast suppresses one extra, cost never
         try std.testing.expect(fast_ticks >= 1);
     }
 
-    // Floor 4 + exhaustion tier 1 (fatigue 25 → tier 1; onTick resyncs from fatigue):
-    // neutral pays deep-floor exhaustion extra (2); fast suppresses that extra (1);
-    // slow pays both (3).
+    // Floor 4 + exhaustion tier 1 (v1.9.0): deep-floor surcharge gates at ex>=2,
+    // so tier 1 only pays the race term. Human/elf → 1; dwarf → 2 (clamped stack).
     {
         var w = try world.World.init(allocator, 1);
         defer w.deinit();
@@ -234,7 +238,7 @@ test "deep-floor race speed: slow pays +1, fast suppresses one extra, cost never
         w.store.get(id).?.char.race = w.races.items[3]; // human 30
         w.game_clock.ticks = 0;
         _ = try moveEntity(&w, id, .east);
-        try std.testing.expectEqual(@as(u64, 2), w.game_clock.ticks);
+        try std.testing.expectEqual(@as(u64, 1), w.game_clock.ticks);
 
         w.store.get(id).?.fatigue = 25;
         _ = @import("survival.zig").syncExhaustion(w.store.get(id).?);
@@ -248,7 +252,24 @@ test "deep-floor race speed: slow pays +1, fast suppresses one extra, cost never
         w.store.get(id).?.char.race = w.races.items[1]; // dwarf 25
         w.game_clock.ticks = 0;
         _ = try moveEntity(&w, id, .east);
-        try std.testing.expectEqual(@as(u64, 3), w.game_clock.ticks);
+        try std.testing.expectEqual(@as(u64, 2), w.game_clock.ticks);
+    }
+
+    // Floor 4 + exhaustion tier 2: surcharge is on, but deep-floor stack clamps to +1.
+    // Dwarf would otherwise pay race+ex = 2 extras → 3 ticks; clamp keeps it at 2.
+    {
+        var w = try world.World.init(allocator, 1);
+        defer w.deinit();
+        try w.loadFloor(1);
+        w.floor_index = 4;
+        const id = try w.spawnTestPlayer(loc.Loc.init(49, 49));
+        w.store.get(id).?.fatigue = 45; // tier 2 (< 62)
+        _ = @import("survival.zig").syncExhaustion(w.store.get(id).?);
+        try std.testing.expectEqual(@as(u3, 2), conditions.exhaustionLevel(w.store.get(id).?));
+        w.store.get(id).?.char.race = w.races.items[1]; // dwarf 25
+        w.game_clock.ticks = 0;
+        _ = try moveEntity(&w, id, .east);
+        try std.testing.expectEqual(@as(u64, 2), w.game_clock.ticks);
     }
 }
 

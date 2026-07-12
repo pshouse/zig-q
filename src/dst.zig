@@ -522,11 +522,12 @@ pub const sleep_cycle_scenario = Scenario{
         .{ .choose_class = 1 },
         .{ .creation_finish = "George" },
         .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        // v1.9.0: tier-3 onset is 62 (was 55). 65 still lands in penalty tier 3.
         .{ .set_fatigue = .{ .entity = "entity_0", .value = 65 } },
         .{ .command = "time" },
         .{ .command = "sleep" },
         .{ .command = "time" },
-        .{ .set_fatigue = .{ .entity = "entity_0", .value = 60 } },
+        .{ .set_fatigue = .{ .entity = "entity_0", .value = 65 } },
         .{ .command = "rest" },
         .{ .command = "time" },
         .{ .command = "exit" },
@@ -548,7 +549,8 @@ pub const rest_floor_scenario = Scenario{
         .{ .choose_class = 1 },
         .{ .creation_finish = "George" },
         .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
-        .{ .set_fatigue = .{ .entity = "entity_0", .value = 60 } },
+        // v1.9.0: tier 3 is [62,78); 65 pins the penalty-tier rest floor.
+        .{ .set_fatigue = .{ .entity = "entity_0", .value = 65 } },
         .{ .command = "conditions" }, // exhaustion=3 (penalty tier)
         .{ .command = "rest" },
         .{ .command = "rest" },
@@ -576,11 +578,12 @@ pub const exhausted_sleep_scenario = Scenario{
         .{ .choose_class = 1 },
         .{ .creation_finish = "George" },
         .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
-        .{ .set_fatigue = .{ .entity = "entity_0", .value = 60 } },
+        .{ .set_fatigue = .{ .entity = "entity_0", .value = 65 } },
         .{ .command = "stats" }, // HP: 13 before sleeping
         .{ .command = "sleep" }, // fatigue frozen while asleep; applySleep → 0
         .{ .command = "stats" }, // HP: 13 — sleeping cost nothing
-        .{ .set_fatigue = .{ .entity = "entity_0", .value = 75 } }, // tier 4 while awake
+        // v1.9.0: tier 4 is [78,90); 80 pins the halved-cap bandage path.
+        .{ .set_fatigue = .{ .entity = "entity_0", .value = 80 } },
         .{ .set_hp = .{ .entity = "entity_0", .current = 3 } },
         .{ .give_item = .{ .entity = "entity_0", .item = .bandage, .count = 1 } },
         .{ .command = "use bandage" }, // heals 3, stopping at the halved cap (6)
@@ -592,7 +595,7 @@ pub const exhausted_sleep_scenario = Scenario{
     },
 };
 
-/// #26 / SD2: exhaustion-5 soft-lock recovery. Fatigue 85 applies `.unconscious`
+/// #26 / SD2: exhaustion-5 soft-lock recovery. Fatigue ≥90 applies `.unconscious`
 /// and used to brick rest/sleep/eat; sleep is the carved-out recovery path.
 /// Crosses the threshold via set_fatigue and asserts sleep succeeds.
 pub const collapse_sleep_scenario = Scenario{
@@ -606,8 +609,8 @@ pub const collapse_sleep_scenario = Scenario{
         .{ .choose_class = 1 },
         .{ .creation_finish = "George" },
         .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
-        // Fatigue 84 = tier 4; one more would hit 85 = tier 5. Jump straight to 85.
-        .{ .set_fatigue = .{ .entity = "entity_0", .value = 85 } },
+        // v1.9.0: tier 5 onset is 90 (was 85).
+        .{ .set_fatigue = .{ .entity = "entity_0", .value = 90 } },
         .{ .command = "conditions" }, // exhaustion=5, unconscious
         .{ .command = "rest" }, // still blocked while incapacitated
         .{ .command = "sleep" }, // recovery path: collapses into sleep and wakes clear
@@ -1204,6 +1207,60 @@ pub const human_create_scenario = Scenario{
     },
 };
 
+/// v1.9.0 witness: floor-4 dwarf pays exactly 2 ticks/move; ~30 moves stay under
+/// exhaustion tier 4 (clock easing: deep surcharge gates at ex≥2 + stack clamp).
+/// Uses floor-1 terrain + set_floor_index for a walkable east/west corridor.
+pub const dwarf_deepfloor_clock_scenario = Scenario{
+    .name = "dwarf_deepfloor_clock",
+    .seed = 42,
+    .steps = &.{
+        .{ .load_floor = 1 },
+        .creation_roll,
+        .{ .assign_stats = .{ 6, 5, 4, 3, 2, 1 } },
+        .{ .choose_race = 2 }, // dwarf speed 25
+        .{ .choose_class = 1 },
+        .{ .creation_finish = "George" },
+        .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
+        .{ .set_floor_index = 4 },
+        .time, // ticks=0
+        // 30 moves × 2 ticks = 60 ticks; fatigue 0→60 stays tier 2 (<78).
+        .{ .command = "move east" },
+        .{ .command = "move west" },
+        .{ .command = "move east" },
+        .{ .command = "move west" },
+        .{ .command = "move east" },
+        .{ .command = "move west" },
+        .{ .command = "move east" },
+        .{ .command = "move west" },
+        .{ .command = "move east" },
+        .{ .command = "move west" },
+        .{ .command = "move east" },
+        .{ .command = "move west" },
+        .{ .command = "move east" },
+        .{ .command = "move west" },
+        .{ .command = "move east" },
+        .{ .command = "move west" },
+        .{ .command = "move east" },
+        .{ .command = "move west" },
+        .{ .command = "move east" },
+        .{ .command = "move west" },
+        .{ .command = "move east" },
+        .{ .command = "move west" },
+        .{ .command = "move east" },
+        .{ .command = "move west" },
+        .{ .command = "move east" },
+        .{ .command = "move west" },
+        .{ .command = "move east" },
+        .{ .command = "move west" },
+        .{ .command = "move east" },
+        .{ .command = "move west" },
+        .time, // ticks=60
+        .{ .command = "conditions" }, // exhaustion=2 (not tier 4+)
+        .{ .command = "stats" },
+        .{ .command = "exit" },
+    },
+};
+
 /// Phase 3: INT skills — spot→disarm trap; pick locked door; failed disarm triggers.
 pub const disarm_pick_scenario = Scenario{
     .name = "disarm_pick",
@@ -1463,7 +1520,7 @@ pub const crawl_start_scenario = Scenario{
     },
 };
 
-/// Exhausted (fatigue 60 → level 3, attacks at disadvantage), the player attacks once and
+/// Exhausted (fatigue 65 → level 3, attacks at disadvantage), the player attacks once and
 /// then `flee`s: an adjacent goblin gets one opportunity attack and combat ends, giving the
 /// escape hatch a tired player otherwise lacks.
 pub const combat_flee_scenario = Scenario{
@@ -1478,7 +1535,8 @@ pub const combat_flee_scenario = Scenario{
         .{ .creation_finish = "George" },
         .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
         .{ .spawn_monster = .{ .kind = .goblin, .name = "goblin_0", .x = 50, .y = 49 } },
-        .{ .set_fatigue = .{ .entity = "entity_0", .value = 60 } },
+        // v1.9.0: tier 3 onset 62; 65 keeps disadvantage path.
+        .{ .set_fatigue = .{ .entity = "entity_0", .value = 65 } },
         .{ .command = "time" },
         .{ .command = "attack goblin_0" },
         .{ .command = "flee" },
@@ -1488,7 +1546,7 @@ pub const combat_flee_scenario = Scenario{
     },
 };
 
-/// The `catch breath` recovery action: exhausted at fatigue 60 (level 3), the player trades
+/// The `catch breath` recovery action: exhausted at fatigue 65 (level 3), the player trades
 /// two combat turns to shed fatigue and ease exhaustion back down while the goblin counters.
 pub const catch_breath_scenario = Scenario{
     .name = "catch_breath",
@@ -1502,7 +1560,8 @@ pub const catch_breath_scenario = Scenario{
         .{ .creation_finish = "George" },
         .{ .spawn = .{ .name = "entity_0", .x = 49, .y = 49 } },
         .{ .spawn_monster = .{ .kind = .goblin, .name = "goblin_0", .x = 50, .y = 49 } },
-        .{ .set_fatigue = .{ .entity = "entity_0", .value = 60 } },
+        // v1.9.0: tier 3 onset 62; 65 keeps the catch-breath ease path.
+        .{ .set_fatigue = .{ .entity = "entity_0", .value = 65 } },
         .{ .command = "time" },
         .{ .command = "attack goblin_0" },
         .{ .command = "catch breath" },
@@ -1912,6 +1971,7 @@ pub const registered_scenario_names = [_][]const u8{
     "elf_speed_deepfloor", "human_create",
     "disarm_pick",       "intimidate_flee",   "poison_resist",
     "sneak_hidden",      "rogue_backstab",
+    "dwarf_deepfloor_clock",
 };
 
 pub fn scenarioByName(name: []const u8, seed: u64) ?Scenario {
@@ -2039,6 +2099,8 @@ pub fn scenarioByName(name: []const u8, seed: u64) ?Scenario {
         return Scenario{ .name = "sneak_hidden", .seed = seed, .steps = sneak_hidden_scenario.steps };
     if (std.mem.eql(u8, name, "rogue_backstab"))
         return Scenario{ .name = "rogue_backstab", .seed = seed, .steps = rogue_backstab_scenario.steps };
+    if (std.mem.eql(u8, name, "dwarf_deepfloor_clock"))
+        return Scenario{ .name = "dwarf_deepfloor_clock", .seed = seed, .steps = dwarf_deepfloor_clock_scenario.steps };
     return null;
 }
 

@@ -183,6 +183,14 @@ pub fn run(allocator: std.mem.Allocator, cfg: Config) !Report {
             const line = try generateLine(a, &fuzz_rng);
             try script_lines.append(allocator, try allocator.dupe(u8, line));
 
+            // Snapshot player max_hp before the step so a successful descend cannot
+            // shrink it (v1.9.0 descend-milestone growth is monotonic non-decreasing).
+            const max_hp_before: ?u32 = blk: {
+                if (ctx.player_id == entity.invalid_id) break :blk null;
+                const p = w.store.get(ctx.player_id) orelse break :blk null;
+                break :blk p.max_hp;
+            };
+
             // Discard output with a real sink. A bounded buffer here used to fail
             // every line at its first print (error.NoSpaceLeft), which aborted the
             // line, skipped the monster respawn below, and silently kept the fuzzer
@@ -204,6 +212,16 @@ pub fn run(allocator: std.mem.Allocator, cfg: Config) !Report {
                 };
                 continue;
             };
+
+            if (max_hp_before) |before| {
+                if (std.mem.eql(u8, line, "descend") or std.mem.startsWith(u8, line, "descend ")) {
+                    if (w.store.get(ctx.player_id)) |p| {
+                        if (p.max_hp < before) {
+                            return failureReport(allocator, cfg.iterations, iteration, step, error.MaxHpDecreasedOnDescend, &script_lines);
+                        }
+                    }
+                }
+            }
 
             if (ctx.player_id != entity.invalid_id and countLiveMonsters(&w) == 0) {
                 _ = w.spawnMonster(.goblin, loc.Loc.init(50, 49), "goblin_0") catch {};

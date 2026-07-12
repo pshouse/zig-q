@@ -171,6 +171,16 @@ pub const World = struct {
         try self.relocatePlayer(player_id, self.floor_spawn);
         // Second wind is once-per-floor (fighter class special).
         if (self.store.get(player_id)) |p| p.second_wind_used = false;
+        // Descend-milestone HP growth (v1.9.0): floor_index is monotonic and there
+        // is no ascend, so every descend is a new deepest floor — pure +=.
+        // No schema bump: max_hp/current_hp already persist. Print lives in
+        // commands.zig (World has no writer).
+        if (self.store.get(player_id)) |p| {
+            const g = character.descendHpGrowth(p.char);
+            p.max_hp += g;
+            // Heal by growth amount, clamped to tier-4 effective max (no overheal).
+            p.current_hp = @min(p.current_hp + g, survival.effectiveMaxHp(p));
+        }
         try self.placeFloorMonsters();
         try self.placeFloorLoot();
         try self.placeFloorTraps();
@@ -432,4 +442,71 @@ test "descend refuses past max_floor_depth" {
     const player_id = try w.spawnTestPlayer(stairs);
     try std.testing.expectError(error.MaxDepthReached, w.descend(player_id));
     try std.testing.expectEqual(max_floor_depth, w.floor_index);
+}
+
+test "descend HP growth is monotonic and caps at +16 over max depth" {
+    // Four descends (1→2→3→4→5); CON 14 → +4 each → +16 total.
+    const allocator = std.testing.allocator;
+    var w = try World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+
+    var draft = @import("session.zig").CreationDraft{};
+    _ = @import("session.zig").draftRoll(&w, &draft);
+    // Put highest rolls into CON (pick 5 for CON = roll index 5) so CON ends high.
+    // seed-42 rolls: 13,5,12,10,14,12 — pick 5 → CON 14, then no race CON bonus (human).
+    try @import("session.zig").draftAssign(&draft, .{ 1, 2, 5, 3, 4, 6 });
+    try @import("session.zig").draftChooseRace(&draft, 4); // human
+    try @import("session.zig").draftChooseClass(&draft, 1);
+    const char = try @import("session.zig").draftBuildCharacter(allocator, &w, &draft, "George");
+    w.stageCharacter(char);
+    const player_id = try w.spawnStagedPlayer(dungeon.floor1_spawn, "entity_0");
+    const base = w.store.get(player_id).?.max_hp;
+    try std.testing.expectEqual(@as(u32, 4), character.descendHpGrowth(w.store.get(player_id).?.char));
+
+    var prev = base;
+    var floor: u32 = 1;
+    while (floor < max_floor_depth) : (floor += 1) {
+        var scratch = terrain.TerrainMap.init(allocator);
+        defer scratch.deinit();
+        const gen = try dungeon.generateFloor(&scratch, 42, floor);
+        const stairs = gen.stairs_down orelse return error.TestUnexpectedResult;
+        // Floor 1 uses handcrafted stairs; relocate works for all floors.
+        if (floor == 1) {
+            try dungeon.walkSpawnToFloor1Stairs(&w, player_id);
+        } else {
+            try w.relocatePlayer(player_id, stairs);
+        }
+        try w.descend(player_id);
+        const now = w.store.get(player_id).?.max_hp;
+        try std.testing.expect(now > prev);
+        prev = now;
+    }
+    try std.testing.expectEqual(base + 16, prev);
+    try std.testing.expectEqual(max_floor_depth, w.floor_index);
+}
+
+test "descend growth heal clamps at tier-4 effectiveMaxHp" {
+    const allocator = std.testing.allocator;
+    var w = try World.init(allocator, 42);
+    defer w.deinit();
+    try w.loadFloor(1);
+    const player_id = try w.spawnTestPlayer(dungeon.floor1_stairs_v09);
+    const p = w.store.get(player_id).?;
+    // Force tier-4 exhaustion so effectiveMaxHp is half of max.
+    p.fatigue = 80;
+    _ = survival.syncExhaustion(p);
+    try std.testing.expectEqual(@as(u3, 4), conditions.exhaustionLevel(p));
+    // Start at full HP so current+g exceeds the halved cap and must clamp.
+    p.current_hp = p.max_hp;
+    const max_before = p.max_hp;
+    const g = character.descendHpGrowth(p.char);
+    const uncapped = p.current_hp + g;
+    try w.descend(player_id);
+    const after = w.store.get(player_id).?;
+    try std.testing.expectEqual(max_before + g, after.max_hp);
+    const cap = survival.effectiveMaxHp(after);
+    try std.testing.expect(uncapped > cap); // clamp is actually binding
+    try std.testing.expectEqual(cap, after.current_hp);
+    try std.testing.expect(after.current_hp < after.max_hp);
 }

@@ -17,6 +17,7 @@ step command move east
 moved to (50,51)
 step command descend
 descended to floor 2
+descend growth: max_hp +3 (16)
 step command move south
 moved to (48,49)
 step command move south
@@ -26,7 +27,7 @@ moved to (50,49)
 step command attack goblin_0
 attack entity_0->goblin_0 roll=5 mod=1 vs AC 15 miss
 step command end turn
-attack goblin_0->entity_0 roll=16 mod=-1 vs AC 12 hit damage=1 hp=12/13
+attack goblin_0->entity_0 roll=16 mod=-1 vs AC 12 hit damage=1 hp=15/16
 turn: entity_0
 step command attack goblin_0
 attack entity_0->goblin_0 roll=13 mod=1 vs AC 15 miss
@@ -58,6 +59,7 @@ step command move east
 moved to (52,50)
 step command descend
 descended to floor 3
+descend growth: max_hp +3 (19)
 step command move south
 moved to (53,42)
 step command move south
@@ -102,7 +104,7 @@ CON: 12
 INT: 12
 WIS: 5
 CHA: 13
-HP: 12
+HP: 18
 AC: 12
 movement: 30
 encumbrance: 3 of 60

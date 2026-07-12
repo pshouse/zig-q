@@ -303,6 +303,23 @@ pub fn build(b: *std.Build) void {
     const evidence_v18_step = b.step("evidence-v18", "Emit v1.8 character-rework verification transcript");
     evidence_v18_step.dependOn(&evidence_v18_run.step);
 
+    const evidence_v19_exe = b.addExecutable(.{
+        .name = "zig-q-evidence-v19",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/evidence_v19_main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "zig_q", .module = zig_q_mod },
+            },
+        }),
+    });
+    b.installArtifact(evidence_v19_exe);
+
+    const evidence_v19_run = b.addRunArtifact(evidence_v19_exe);
+    const evidence_v19_step = b.step("evidence-v19", "Emit v1.9 clock-easing + descend-HP verification transcript");
+    evidence_v19_step.dependOn(&evidence_v19_run.step);
+
     const wave_gate_exe = b.addExecutable(.{
         .name = "zig-q-wave-gate",
         .root_module = b.createModule(.{
@@ -320,7 +337,7 @@ pub fn build(b: *std.Build) void {
     // Same env var wave_gate.zig honors so build-log paths and gate captures share a root.
     const gate_scratch = b.graph.env_map.get("ZIG_Q_SCRATCH") orelse ".gate-scratch";
 
-    inline for (.{ 11, 12, 13, 14, 15, 16, 17, 18 }) |wave| {
+    inline for (.{ 11, 12, 13, 14, 15, 16, 17, 18, 19 }) |wave| {
         const prefix = b.fmt("v{d}", .{wave});
         const build_log = b.fmt("{s}\\{s}_build.log", .{ gate_scratch, prefix });
 

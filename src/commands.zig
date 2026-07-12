@@ -1544,6 +1544,11 @@ pub fn execute(ctx: *Context, cmd: Command, writer: anytype) !Result {
                 else => |e| return e,
             };
             try writer.print("descended to floor {}\n", .{ctx.w.floor_index});
+            // v1.9.0: growth already applied in World.descend; recompute pure amount for notice.
+            if (ctx.w.store.get(ctx.player_id)) |p| {
+                const g = character.descendHpGrowth(p.char);
+                try writer.print("descend growth: max_hp +{d} ({d})\n", .{ g, p.max_hp });
+            }
         },
         .end_turn => {
             if (!isSpawned(ctx)) {
@@ -2234,7 +2239,7 @@ test "applyBandageHeal stops at the exhaustion recovery cap" {
 
     const ctx = try descendTestCtx(allocator, &w);
     const ent = w.store.get(ctx.player_id).?;
-    ent.fatigue = 75; // exhaustion tier 4: cap = max_hp / 2
+    ent.fatigue = 80; // exhaustion tier 4 (v1.9.0 onset 78): cap = max_hp / 2
     _ = survival.syncExhaustion(ent);
     const cap = survival.effectiveMaxHp(ent);
     try std.testing.expectEqual(ent.max_hp / 2, cap);
@@ -2256,7 +2261,7 @@ test "use bandage at the exhaustion cap is refused and not consumed" {
     var ctx = try descendTestCtx(allocator, &w);
     const ent = w.store.get(ctx.player_id).?;
     try std.testing.expect(ent.inventory.findStack(.bandage).?.count == 1);
-    ent.fatigue = 75; // exhaustion tier 4
+    ent.fatigue = 80; // exhaustion tier 4 (v1.9.0 onset 78)
     _ = survival.syncExhaustion(ent);
     ent.current_hp = survival.effectiveMaxHp(ent); // wounded, but at the halved cap
 

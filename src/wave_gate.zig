@@ -174,6 +174,34 @@ pub const plans = [_]WavePlan{
         },
         .run_migration = false,
     },
+    .{
+        .wave = 19,
+        .prefix = "v19",
+        .evidence_step = "evidence-v19",
+        .new_scenarios = &.{
+            // Survival-clock easing + descend-milestone HP growth (docs/CLOCK_PROGRESSION.md).
+            "dwarf_deepfloor_clock",
+            // Deliberate reference_crawl re-bless: HP lines + descend growth notices only.
+            "reference_crawl",
+            "descend_crawl",
+        },
+        .all_scenarios = &.{
+            "bootstrap",         "explore",         "create",            "crawl_start",      "playthrough",       "brawl",         "save_roundtrip",
+            "descend_crawl",     "reference_crawl", "save_v2_roundtrip", "conditions_brawl", "los_peek",          "ambush",        "permadeath",
+            "loot_roundtrip",    "geared_brawl",    "corpse_loot",       "encumbered",       "hunt",              "flee",          "trap_trigger",
+            "door_route",        "survive",         "starve",            "sleep_cycle",      "reference_survive", "heal_bandage",  "trap_floor",
+            "deep_floor",        "rest_floor",      "combat_flee",       "catch_breath",     "deadly_floor",      "elite_brawl",   "scarce_heals",
+            "save_v4_roundtrip", "sleep_interrupt", "unequip_cycle",     "drop_clears_slot", "bare_loot_corpse",  "weaker_weapon",
+            "starve_out",        "combat_reposition", "survival_economy",  "monster_endurance",
+            "exhausted_sleep",   "bleed_out",         "glyph_look",       "collapse_sleep",  "sleep_high_fatigue",
+            "rogue_finesse",     "rogue_leather",     "reckless",          "guard",            "discipline_second_wind",
+            "elf_speed_deepfloor", "human_create",
+            "disarm_pick",       "intimidate_flee",   "poison_resist",
+            "sneak_hidden",      "rogue_backstab",
+            "dwarf_deepfloor_clock",
+        },
+        .run_migration = false,
+    },
 };
 
 pub const Options = struct {

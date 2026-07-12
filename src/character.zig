@@ -80,6 +80,14 @@ pub fn maxHpLevel1(char: *const types.Character) u32 {
     return @intCast(@max(hp, 1));
 }
 
+/// HP gained on each descend to a new deepest floor (v1.9.0). Pure; no RNG.
+/// CON≤11 → +2, CON 12–13 → +3, CON 14+ → +4. Cap over max depth 5 is +16.
+pub fn descendHpGrowth(char: *const types.Character) u32 {
+    const con_mod = abilityModifier(statByAbbr(char, "CON"));
+    const capped: i32 = @min(con_mod, 2);
+    return @intCast(@max(2 + capped, 1));
+}
+
 pub fn armorClass(char: *const types.Character) u32 {
     const dex_mod = abilityModifier(statByAbbr(char, "DEX"));
     return @intCast(10 + dex_mod);
@@ -170,6 +178,88 @@ test "abilityModifier floors toward negative infinity" {
     try std.testing.expectEqual(@as(i32, -1), abilityModifier(9));
     try std.testing.expectEqual(@as(i32, -2), abilityModifier(7));
     try std.testing.expectEqual(@as(i32, 2), abilityModifier(14));
+}
+
+test "descendHpGrowth scales by CON with cap" {
+    const allocator = std.testing.allocator;
+
+    // CON 10 → mod 0 → +2
+    {
+        var attrs = try types.defaultAttributes(allocator);
+        defer attrs.deinit(allocator);
+        for (attrs.items) |*a| a.stat = 10;
+        const char = types.Character{
+            .name = "t",
+            .attributes = attrs,
+            .race = .{ .name = "human", .speed = 30, .attr_bonuses = .empty },
+            .class = types.defaultClasses()[0],
+        };
+        try std.testing.expectEqual(@as(u32, 2), descendHpGrowth(&char));
+    }
+    // CON 12 (dwarf-like +1 mod) → +3
+    {
+        var attrs = try types.defaultAttributes(allocator);
+        defer attrs.deinit(allocator);
+        for (attrs.items) |*a| a.stat = 10;
+        for (attrs.items) |*a| {
+            if (std.mem.eql(u8, a.abbr, "CON")) a.stat = 12;
+        }
+        const char = types.Character{
+            .name = "t",
+            .attributes = attrs,
+            .race = .{ .name = "dwarf", .speed = 25, .attr_bonuses = .empty },
+            .class = types.defaultClasses()[0],
+        };
+        try std.testing.expectEqual(@as(u32, 3), descendHpGrowth(&char));
+    }
+    // CON 14 → mod 2 → +4
+    {
+        var attrs = try types.defaultAttributes(allocator);
+        defer attrs.deinit(allocator);
+        for (attrs.items) |*a| a.stat = 10;
+        for (attrs.items) |*a| {
+            if (std.mem.eql(u8, a.abbr, "CON")) a.stat = 14;
+        }
+        const char = types.Character{
+            .name = "t",
+            .attributes = attrs,
+            .race = .{ .name = "human", .speed = 30, .attr_bonuses = .empty },
+            .class = types.defaultClasses()[0],
+        };
+        try std.testing.expectEqual(@as(u32, 4), descendHpGrowth(&char));
+    }
+    // CON 18 → mod 4, capped → +4
+    {
+        var attrs = try types.defaultAttributes(allocator);
+        defer attrs.deinit(allocator);
+        for (attrs.items) |*a| a.stat = 10;
+        for (attrs.items) |*a| {
+            if (std.mem.eql(u8, a.abbr, "CON")) a.stat = 18;
+        }
+        const char = types.Character{
+            .name = "t",
+            .attributes = attrs,
+            .race = .{ .name = "human", .speed = 30, .attr_bonuses = .empty },
+            .class = types.defaultClasses()[0],
+        };
+        try std.testing.expectEqual(@as(u32, 4), descendHpGrowth(&char));
+    }
+    // CON 8 → mod -1 → floor 1
+    {
+        var attrs = try types.defaultAttributes(allocator);
+        defer attrs.deinit(allocator);
+        for (attrs.items) |*a| a.stat = 10;
+        for (attrs.items) |*a| {
+            if (std.mem.eql(u8, a.abbr, "CON")) a.stat = 8;
+        }
+        const char = types.Character{
+            .name = "t",
+            .attributes = attrs,
+            .race = .{ .name = "human", .speed = 30, .attr_bonuses = .empty },
+            .class = types.defaultClasses()[0],
+        };
+        try std.testing.expectEqual(@as(u32, 1), descendHpGrowth(&char));
+    }
 }
 
 test "attackAbbr and damageAbbr return STR for non-finesse classes and monsters" {

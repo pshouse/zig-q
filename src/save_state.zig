@@ -7,6 +7,7 @@ const combat = @import("combat.zig");
 const monsters = @import("monsters.zig");
 const character = @import("character.zig");
 const dungeon = @import("dungeon.zig");
+const terrain = @import("terrain.zig");
 const conditions = @import("conditions.zig");
 const world_objects = @import("world_objects.zig");
 const inventory = @import("inventory.zig");
@@ -619,21 +620,49 @@ test "capture apply roundtrip preserves multi-floor state" {
     var draft = @import("session.zig").CreationDraft{};
     _ = @import("session.zig").draftRoll(&w, &draft);
     try @import("session.zig").draftAssign(&draft, .{ 6, 5, 4, 3, 2, 1 });
-    try @import("session.zig").draftChooseRace(&draft, 2);
-    try @import("session.zig").draftChooseClass(&draft, 1);
+    try @import("session.zig").draftChooseRace(&draft, 2); // dwarf CON+2
+    try @import("session.zig").draftChooseClass(&draft, 1); // barbarian hit_die 12
     const char = try @import("session.zig").draftBuildCharacter(allocator, &w, &draft, "George");
     w.stageCharacter(char);
     const player_id = try w.spawnStagedPlayer(dungeon.floor1_spawn, "entity_0");
+    // Seed-42 dwarf barbarian: base max_hp 13 (12 + CON mod 1).
+    try std.testing.expectEqual(@as(u32, 13), w.store.get(player_id).?.max_hp);
     try dungeon.walkSpawnToFloor1Stairs(&w, player_id);
     try w.descend(player_id);
+    // +3 per descend (CON 12 → mod +1) → 16 on floor 2.
+    try std.testing.expectEqual(@as(u32, 2), w.floor_index);
+    try std.testing.expectEqual(@as(u32, 16), w.store.get(player_id).?.max_hp);
+
+    // Second descend to floor 3: grow to 19, then assert grown max_hp survives save.
+    {
+        var scratch = terrain.TerrainMap.init(allocator);
+        defer scratch.deinit();
+        const gen = try dungeon.generateFloor(&scratch, 42, 2);
+        const stairs = gen.stairs_down orelse return error.TestUnexpectedResult;
+        try w.relocatePlayer(player_id, stairs);
+        try w.descend(player_id);
+    }
+    try std.testing.expectEqual(@as(u32, 3), w.floor_index);
+    try std.testing.expectEqual(@as(u32, 19), w.store.get(player_id).?.max_hp);
 
     var before = try capture(allocator, &w, player_id);
     defer before.deinit(allocator);
-    try std.testing.expectEqual(@as(u32, 2), before.floor_index);
+    try std.testing.expectEqual(@as(u32, 3), before.floor_index);
+    // Grown max_hp is what must round-trip (schema stays v4).
+    var found_player = false;
+    for (before.entities) |es| {
+        if (es.id == player_id) {
+            try std.testing.expectEqual(@as(u32, 19), es.max_hp);
+            found_player = true;
+        }
+    }
+    try std.testing.expect(found_player);
+    try std.testing.expectEqual(schema_version_v4, before.schema_version);
 
     var restored = try apply(allocator, &before);
     defer restored.deinit();
-    try std.testing.expectEqual(@as(u32, 2), restored.floor_index);
+    try std.testing.expectEqual(@as(u32, 3), restored.floor_index);
+    try std.testing.expectEqual(@as(u32, 19), restored.store.get(player_id).?.max_hp);
 
     var after = try capture(allocator, &restored, player_id);
     defer after.deinit(allocator);
